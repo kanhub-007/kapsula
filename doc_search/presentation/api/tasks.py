@@ -492,6 +492,9 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
             "message": f"Processing failed: {str(e)}"
         }
 
+    finally:
+        db.close()
+
 
 def process_document_with_subdocuments(job_id: str, markdown_content: str, max_tokens: int, db: Session):
     """
@@ -789,6 +792,9 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
             "stage": "failed",
             "message": f"Russian Doll processing failed: {str(e)}"
         }
+
+    finally:
+        db.close()
 
 
 def update_collection_library_card(document_id: int, db: Session):
