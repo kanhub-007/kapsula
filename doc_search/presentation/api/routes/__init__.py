@@ -1,0 +1,20 @@
+"""API routes initialization."""
+
+from fastapi import APIRouter
+from .documents import router as documents_router
+from .collections import router as collections_router
+from .accounts import router as accounts_router
+from .health import router as health_router
+from .search import router as search_router
+
+# Create main API router
+api_router = APIRouter()
+
+# Include sub-routers
+api_router.include_router(health_router, tags=["Health"])
+api_router.include_router(accounts_router, prefix="/accounts", tags=["Accounts"])
+api_router.include_router(collections_router, prefix="/collections", tags=["Collections"])
+api_router.include_router(documents_router, prefix="/documents", tags=["Documents"])
+api_router.include_router(search_router, prefix="/search", tags=["Search"])
+
+__all__ = ["api_router"]

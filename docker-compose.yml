@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  doc-search-api:
+    build: .
+    container_name: doc-search-api
+    networks:
+      - doc-search-network
+    expose:
+      - "8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - hq_data:/app/data
+      - ./.env:/app/.env:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  doc-search-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    container_name: doc-search-mcp
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HF_TOKEN=${HF_TOKEN}
+      - DOCSEARCH_TRANSPORT=${DOCSEARCH_TRANSPORT:-stdio}
+      - DOCSEARCH_PORT=8002
+    volumes:
+      - mcp_data:/app/data
+      - ./.env:/app/.env:ro
+    stdin_open: true   # Keep stdin open for stdio transport
+    tty: false         # No TTY needed for stdio
+    # Uncomment for HTTP mode:
+    # ports:
+    #   - "8002:8002"
+
+networks:
+  doc-search-network:
+    driver: bridge
+
+volumes:
+  hq_data:
+  mcp_data:

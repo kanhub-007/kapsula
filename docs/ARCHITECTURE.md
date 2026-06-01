@@ -1,0 +1,242 @@
+# Architecture
+
+Doc-Search follows **Clean Architecture** with a clear separation between domain logic, application use cases, infrastructure, and presentation.
+
+---
+
+## Layer Map
+
+```
+┌──────────────────────────────────────────────────┐
+│  presentation/   FastAPI routes, MCP tools        │  ← HTTP, stdio
+├──────────────────────────────────────────────────┤
+│  startup/        Composition root, DI wiring      │  ← app factories
+├──────────────────────────────────────────────────┤
+│  core/application/   Use cases, DTOs, planning    │  ← orchestration
+├──────────────────────────────────────────────────┤
+│  core/domain/        Entities, interfaces, fusion │  ← pure logic
+├──────────────────────────────────────────────────┤
+│  infrastructure/     FAISS, BM25, embeddings, SQL │  ← I/O
+└──────────────────────────────────────────────────┘
+```
+
+### `core/domain/` — Pure Business Logic
+
+No framework dependencies. Defines:
+- **Entities** — `Account`, `Collection`, `Document`, `SubDocument`, `SubDocumentPage`, `Chunk`, `LibraryCard`, `DocumentStructure`
+- **Interfaces (Protocols)** — `Embedder`, `Reranker`, `Retriever`, `Fusion`, `Chunker`, `ElementHandler`, `ChatClient`, `SearchDataAccess`
+- **Fusion algorithms** — `WeightedFusion`, `RRFFusion`
+- **Quality filter** — `passes_quality_filter()`
+- **Text processing** — `tokenize()`, `simple_stem()`, `is_meaningful_chunk()`
+
+### `core/application/` — Use Cases
+
+Orchestrates domain objects to fulfill use cases:
+- `HybridSearcher` — Dense + sparse retrieval → fusion → rerank
+- `MultiIndexSearcher` — Multi-document/multi-collection aggregation with LLM routing
+- `IntelligentSearcher` — Query planning → parallel sub-searches → answer synthesis
+- `QueryPlanner` — LLM-driven query decomposition
+- `CollectionSummaryGenerator` — LLM summary maintenance
+- `ContextExpansion` — Library Card-based chunk expansion
+- `ResultFilter` — Node-type filtering (text/table/code)
+- **Selectors** — `CollectionSelector`, `SubDocumentSelector` (LLM routing)
+- **DTOs** — `CollectionSearch`, `SubDocumentSearch`, `SingleIndexSearch`, `IndexPaths`
+
+### `infrastructure/` — Concrete Implementations
+
+- **`data/`** — SQLAlchemy ORM tables (`connection.py`, `tables/*.py`), `SqlSearchDataAccess`
+- **`repositories/retrieval/`** — `DenseRetriever` (FAISS), `SparseRetriever` (BM25Plus)
+- **`repositories/indexing/`** — `DocumentIndexBuilder` (FAISS `IndexFlatIP` + BM25Plus pickle)
+- **`repositories/embedding/`** — `HuggingFaceEmbedder` (Qwen3-Embedding-8B via InferenceClient)
+- **`repositories/reranking/`** — `LocalCrossEncoderReranker` (sentence-transformers), `HFEndpointReranker`
+- **`repositories/chunking/`** — Markdown parser, chunk pipeline, element handlers, breadcrumb parser
+- **`external/llm/`** — `HuggingFaceChatClient` (DeepSeek-V3.2-Exp via InferenceClient)
+
+### `presentation/` — Adapters
+
+- **`api/`** — FastAPI route handlers (`accounts`, `collections`, `documents`, `search`), Pydantic models, background tasks
+- **`mcp/`** — FastMCP server, tool registration, `get_db_session()` context manager
+
+### `startup/` — Composition Root
+
+Wires everything together:
+- `bootstrap()` — Database init + default account creation
+- `create_embedder()`, `create_chat_client()`, `create_reranker()` — Singleton factories
+- `create_multi_index_searcher()` — Wires retrievers, fusion, reranker, data access
+- `api.py` — FastAPI `create_app()` with lifespan handler
+- `mcp.py` — FastMCP `create_server()` with tool registration
+
+---
+
+## Database Schema
+
+Eight SQLAlchemy models in a hierarchical relationship:
+
+```
+Account 1──N Collection 1──N Document 1──1 DocumentStructure
+                                     1──N SubDocument 1──N SubDocumentPage
+                                     1──N Chunk
+                                     1──N LibraryCard
+```
+
+### `accounts`
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | PK (int) | Auto-increment |
+| `account_id` | GUID (str) | Public identifier, unique index |
+| `name` | str | Human-readable |
+| `created_at` | datetime | Auto |
+| `ip_address` | str | Source tracking |
+
+### `collections`
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | PK (int) | |
+| `collection_id` | GUID (str) | Public identifier |
+| `account_id` | FK → accounts.id | |
+| `name` | str | |
+| `logo_filename` | str (nullable) | Collection branding |
+| `created_at` | datetime | |
+| `ip_address` | str | |
+
+### `documents`
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | PK (int) | |
+| `job_id` | GUID (str) | Unique, used for progress tracking |
+| `collection_id` | FK → collections.id | |
+| `filename` | str | |
+| `size` | int | File size in bytes |
+| `content` | str | Full markdown text |
+| `status` | str | `processing`, `completed`, `failed` |
+| `faiss_index_path` | str (nullable) | Path to `.index` file |
+| `bm25_index_path` | str (nullable) | Path to `.pkl` file |
+| `duration` | float (nullable) | Processing time in seconds |
+| `created_at` | datetime | |
+
+### `sub_documents`
+Created when markdown has breadcrumb-style H1s (e.g., `# domain / Docs / API`). Each gets independent FAISS/BM25 indexes.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | PK (int) | |
+| `document_id` | FK → documents.id | |
+| `breadcrumb_key` | str | The grouping key (e.g., "API") |
+| `breadcrumb_level` | int | Depth in breadcrumb path |
+| `faiss_index_path` | str | |
+| `bm25_index_path` | str | |
+| `page_count` | int | Number of pages grouped here |
+| `created_at` | datetime | |
+
+### `sub_document_pages`
+Individual pages within a sub-document.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | PK (int) | |
+| `sub_document_id` | FK → sub_documents.id | |
+| `page_title` | str | |
+| `breadcrumb_full` | str | Full breadcrumb path |
+| `content_hash` | str | SHA256 for dedup |
+| `created_at` | datetime | |
+
+### `chunks`
+Atomic search unit. One document has many chunks.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | PK (int) | |
+| `document_id` | FK → documents.id | |
+| `sub_document_id` | FK (nullable) | For multi-index docs |
+| `content` | str | Chunk text |
+| `chunk_index` | int | Position within document |
+| `token_count` | int | |
+| `chunk_metadata` | JSON str | Header breadcrumb, node_type, parents hash, citation data |
+| `created_at` | datetime | |
+
+### `library_cards`
+Context storage for Russian Doll expansion.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | PK (int) | |
+| `collection_id` | FK (nullable) | Collection summary |
+| `document_id` | FK (nullable) | Document overview |
+| `sub_document_id` | FK (nullable) | Sub-document summary |
+| `doc_id` | str (indexed) | SHA256 hash of section content |
+| `level` | str | `level_1` (H3), `level_2` (H2), `level_3` (H1), `subdocument`, `document`, `collection` |
+| `title` | str | Section heading |
+| `content` | str | Full section text |
+| `extra_metadata` | JSON str | Page titles, document summaries, counts |
+| `created_at` | datetime | |
+
+### `document_structures`
+1:1 with document. Skeleton of heading hierarchy.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | PK (int) | |
+| `document_id` | FK (unique) | |
+| `skeleton_structure` | str | Markdown heading tree |
+| `created_at` | datetime | |
+
+---
+
+## Document Processing Pipeline
+
+```
+POST /documents/upload
+  → Create Document record (status=processing)
+  → Queue background task
+     ├── Parse breadcrumbs → extract sub-documents
+     ├── For each sub-document:
+     │   ├── Extract parent sections (H1/H2/H3 with character spans)
+     │   ├── Chunk markdown (type-aware, 512 token default)
+     │   ├── Match chunks → parent sections (Library Cards)
+     │   ├── Build FAISS + BM25 indexes
+     │   └── Save chunks, library cards, sub-documents
+     ├── Create document-level LibraryCard
+     ├── Update collection LibraryCard (LLM summary)
+     └── Mark status=completed
+```
+
+Progress tracked in-memory via `processing_status` dict. Poll with `GET /documents/progress/{job_id}`.
+
+---
+
+## Search Flow
+
+```
+Query
+  → normalize
+  → parallel: FAISS.search(k=50) │ BM25Plus.get_scores(k=50)
+  → Fusion (RRF or weighted)
+  → Quality filter (4 gates)
+  → Node-type filter (optional: text/table/code)
+  → Cross-encoder rerank (optional)
+  → Context expansion via Library Cards (optional: narrow/deep)
+  → Deduplicate by parent hash
+  → Return top-k
+```
+
+For **intelligent search**: query planner decomposes into sub-questions → each runs hybrid search → LLM evaluates each → final synthesis.
+
+For **multi-index search**: LLM routes to relevant sub-documents/collections → parallel search across selected indexes → global rerank → context expansion → top-k cutoff.
+
+---
+
+## Data Storage
+
+```
+data/
+├── documents.db                    # SQLite database
+├── indexes/                        # FAISS + BM25 indexes
+│   └── {account_id}/
+│       └── {collection_id}/
+│           ├── {job_id}_faiss.index
+│           ├── {job_id}_bm25.pkl
+│           ├── {job_id}_subdoc_{id}_faiss.index
+│           └── {job_id}_subdoc_{id}_bm25.pkl
+├── logos/                          # Collection logo images
+└── logs/                           # Application logs
+```

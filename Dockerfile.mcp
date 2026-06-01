@@ -1,0 +1,23 @@
+# MCP Server Dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install system deps (FAISS needs g++ for compilation)
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python deps first (layer caching)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY doc_search/ doc_search/
+
+# Data directory (overridden by volume mount at runtime)
+RUN mkdir -p /app/data
+
+# Default: stdio transport (for Claude Desktop / Cursor)
+CMD ["python", "-m", "doc_search.presentation.mcp"]
