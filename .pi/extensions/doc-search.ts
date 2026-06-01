@@ -101,7 +101,7 @@ class McpStdioClient {
       const timeout = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`MCP request timeout: ${method}`));
-      }, 300000); // 5 minutes
+      }, 300000);
 
       this.pending.set(id, (res: JsonRpcResponse) => {
         clearTimeout(timeout);
