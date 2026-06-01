@@ -167,6 +167,13 @@ Markdown → Chunking → FAISS + BM25 Indexes → Hybrid Search → Rerank → 
 ```bash
 git clone <repo-url>
 cd doc-search
+
+# Create and activate a virtual environment
+#   Linux / macOS:
+python -m venv .venv && source .venv/bin/activate
+#   Windows:
+python -m venv .venv && .venv\Scripts\activate
+
 pip install -e .
 
 # Copy and configure environment
@@ -179,6 +186,10 @@ python -m doc_search.presentation.api
 # MCP server (stdio)
 python -m doc_search.presentation.mcp
 ```
+
+> **Pi extension note:** The `.pi/extensions/doc-search.ts` plugin spawns the MCP server from
+> `.venv/Scripts/python.exe` (Windows). If you are on Linux/macOS, update the path to
+> `.venv/bin/python` in the extension before using it with pi.
 
 API docs at `http://localhost:8001/docs`
 

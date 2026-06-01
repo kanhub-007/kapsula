@@ -2,9 +2,8 @@
 
 ## Prerequisites
 
-- **Python 3.12+**
+- **Python 3.12** — must be exactly 3.12 (3.13+ may lack pre-built wheels for some dependencies and will fall back to slow source builds)
 - **HuggingFace API token** — required for embeddings, LLM, and reranking
-- **C++ build tools** — needed for FAISS compilation (`gcc`/`g++`, Visual Studio Build Tools, or Xcode)
 
 ---
 
@@ -14,10 +13,22 @@
 git clone <repo-url>
 cd doc-search
 
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate    # Linux/macOS
-.venv\Scripts\activate       # Windows
+# Create virtual environment with Python 3.12
+#   Windows (use py launcher to select 3.12 explicitly):
+py -3.12 -m venv .venv
+#   Linux/macOS (if python3.12 is available):
+python3.12 -m venv .venv
+
+# Activate
+#   Windows CMD:
+.venv\Scripts\activate.bat
+#   Windows PowerShell:
+.venv\Scripts\Activate.ps1
+#   Linux/macOS / Git Bash:
+source .venv/bin/activate
+
+# Verify — should show Python 3.12.x
+python --version
 
 # Install
 pip install -e .
