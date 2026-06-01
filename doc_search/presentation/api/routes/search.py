@@ -125,12 +125,13 @@ async def search_across_collections(
     try:
         # Perform collection-level search
         searcher = create_multi_index_searcher(db)
+        # Reranker disabled — runs too slow locally
         results = await searcher.search_collections(
             CollectionSearch(
                 query=query,
                 account_id=account_id,
                 top_k=top_k,
-                rerank=rerank,
+                rerank=False,
                 context_mode=context_mode,
                 hf_api_token=os.getenv("HF_TOKEN")
             )
@@ -295,12 +296,13 @@ async def intelligent_search_across_collections(
 
         # Create search function that searches within the routed collection
         async def execute_search(search_query: str):
+            # Reranker disabled — runs too slow locally
             return await create_multi_index_searcher(db).search_collections(
                 CollectionSearch(
                     query=search_query,
                     account_id=account_id,
                     top_k=top_k,
-                    rerank=rerank,
+                    rerank=False,
                     context_mode=context_mode,
                     hf_api_token=os.getenv("HF_TOKEN")
                 )
@@ -607,12 +609,13 @@ async def intelligent_search_across_collections_streaming(
             intelligent_engine = create_intelligent_searcher()
 
             async def execute_search(search_query: str):
+                # Reranker disabled — runs too slow locally
                 return await create_multi_index_searcher(db).search_collections(
                     CollectionSearch(
                         query=search_query,
                         account_id=account_id,
                         top_k=top_k,
-                        rerank=rerank,
+                        rerank=False,
                         context_mode=context_mode,
                         hf_api_token=os.getenv("HF_TOKEN")
                     )
@@ -720,12 +723,13 @@ async def search_document(
             # Use new multi-index search with LLM routing
             logger.info(f"Using multi-index search for document {job_id} ({len(subdocs)} sub-documents)")
             searcher = create_multi_index_searcher(db)
+            # Reranker disabled — runs too slow locally
             results = await searcher.search_subdocuments(
                 SubDocumentSearch(
                     query=query,
                     document_id=document.id,
                     top_k=top_k,
-                    rerank=rerank,
+                    rerank=False,
                     context_mode=context_mode,
                     hf_api_token=os.getenv("HF_TOKEN")
                 )
@@ -742,6 +746,7 @@ async def search_document(
                     detail="Search indexes not available for this document"
                 )
 
+            # Reranker disabled — runs too slow locally
             results = await create_multi_index_searcher(db).search_single_index(
                 SingleIndexSearch(
                     query=query,
@@ -749,7 +754,7 @@ async def search_document(
                     bm25_path=document.bm25_index_path,
                     document_id=document.id,
                     top_k=top_k,
-                    rerank=rerank,
+                    rerank=False,
                     context_mode=context_mode,
                 )
             )
@@ -938,12 +943,13 @@ async def intelligent_search_document(
             if subdocs:
                 # Use new multi-index search with LLM routing
                 searcher = create_multi_index_searcher(db)
+                # Reranker disabled — runs too slow locally
                 return await searcher.search_subdocuments(
                     SubDocumentSearch(
                         query=search_query,
                         document_id=document.id,
                         top_k=top_k,
-                        rerank=rerank,
+                        rerank=False,
                         context_mode=context_mode,
                         hf_api_token=os.getenv("HF_TOKEN")
                     )
@@ -956,6 +962,7 @@ async def intelligent_search_document(
                         detail="Search indexes not available for this document"
                     )
 
+                # Reranker disabled — runs too slow locally
                 return await create_multi_index_searcher(db).search_single_index(
                     SingleIndexSearch(
                         query=search_query,
@@ -963,7 +970,7 @@ async def intelligent_search_document(
                         bm25_path=document.bm25_index_path,
                         document_id=document.id,
                         top_k=top_k,
-                        rerank=rerank,
+                        rerank=False,
                         context_mode=context_mode,
                     )
                 )

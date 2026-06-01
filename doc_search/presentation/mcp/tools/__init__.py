@@ -178,11 +178,12 @@ async def _run_intelligent_collection_search(
     # Now run the async search + evaluation (these are properly async)
     coll_searcher = _get_multi_index_searcher(db)
 
+    # Reranker disabled — runs too slow locally
     async def execute_search(q: str):
         return await coll_searcher.search_collections(
             CollectionSearch(
                 query=q, account_id=account_id or "",
-                top_k=min(top_k, 100), rerank=rerank,
+                top_k=min(top_k, 100), rerank=False,
                 context_mode=context_mode, hf_api_token=token,
             )
         )
@@ -561,10 +562,11 @@ def register_tools(mcp: FastMCP):
         db = _get_db()
         try:
             searcher = _get_multi_index_searcher(db)
+            # Reranker disabled — runs too slow locally
             results = await searcher.search_collections(
                 CollectionSearch(
                     query=query, account_id=account_id or "",
-                    top_k=min(top_k, 100), rerank=rerank,
+                    top_k=min(top_k, 100), rerank=False,
                     context_mode=context_mode, hf_api_token=_hf_token(),
                 )
             )
@@ -610,10 +612,11 @@ def register_tools(mcp: FastMCP):
 
             if subdocs:
                 searcher = _get_multi_index_searcher(db)
+                # Reranker disabled — runs too slow locally
                 results = await searcher.search_subdocuments(
                     SubDocumentSearch(
                         query=query, document_id=doc.id,
-                        top_k=min(top_k, 100), rerank=rerank,
+                        top_k=min(top_k, 100), rerank=False,
                         context_mode=context_mode, hf_api_token=_hf_token(),
                     )
                 )
@@ -621,6 +624,7 @@ def register_tools(mcp: FastMCP):
                 if not doc.faiss_index_path or not doc.bm25_index_path:
                     return "No search indexes available for this document."
                 searcher = _get_multi_index_searcher(db)
+                # Reranker disabled — runs too slow locally
                 results = await searcher.search_single_index(
                     SingleIndexSearch(
                         query=query,
@@ -628,7 +632,7 @@ def register_tools(mcp: FastMCP):
                         bm25_path=doc.bm25_index_path,
                         document_id=doc.id,
                         top_k=min(top_k, 100),
-                        rerank=rerank,
+                        rerank=False,
                         context_mode=context_mode,
                     )
                 )
@@ -739,20 +743,22 @@ def register_tools(mcp: FastMCP):
 
             async def execute_search(q: str):
                 if subdocs:
+                    # Reranker disabled — runs too slow locally
                     return await doc_searcher.search_subdocuments(
                         SubDocumentSearch(
                             query=q, document_id=doc.id,
-                            top_k=min(top_k, 100), rerank=rerank,
+                            top_k=min(top_k, 100), rerank=False,
                             context_mode=context_mode, hf_api_token=token,
                         )
                     )
                 if not doc.faiss_index_path or not doc.bm25_index_path:
                     return []
+                # Reranker disabled — runs too slow locally
                 return await doc_searcher.search_single_index(
                     SingleIndexSearch(
                         query=q, faiss_path=doc.faiss_index_path,
                         bm25_path=doc.bm25_index_path, document_id=doc.id,
-                        top_k=min(top_k, 100), rerank=rerank,
+                        top_k=min(top_k, 100), rerank=False,
                         context_mode=context_mode,
                     )
                 )
