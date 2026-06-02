@@ -12,3 +12,4 @@ class SingleIndexSearch:
     top_k: int = 10
     rerank: bool = False
     context_mode: str = "narrow"
+    node_type_filter: list[str] | None = None

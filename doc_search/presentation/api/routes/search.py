@@ -17,20 +17,32 @@ from doc_search.infrastructure.data.tables.document import Document
 from doc_search.infrastructure.data.tables.library_card import LibraryCard
 from doc_search.infrastructure.data.tables.sub_document import SubDocument
 from doc_search.infrastructure.logging_config import get_logger
-from doc_search.startup import create_multi_index_searcher, create_query_planner, create_intelligent_searcher, \
-    create_chat_client
+from doc_search.presentation.api.search_presenter import (
+    build_collection_search_response,
+)
+from doc_search.startup import (
+    create_multi_index_searcher,
+    create_query_planner,
+    create_intelligent_searcher,
+    create_chat_client,
+)
 from ..models import (
-    SearchResponse, SearchResult,
+    SearchResponse,
+    SearchResult,
     CollectionSearchResponse,
-    IntelligentSearchResponse, IntelligentCollectionSearchResponse,
-    SearchPlan, Citation
+    IntelligentSearchResponse,
+    IntelligentCollectionSearchResponse,
+    SearchPlan,
+    Citation,
 )
 
 logger = get_logger(__name__)
 router = APIRouter()
 
 
-def extract_citation_from_result(result: dict, db: Session, document_id: int = None) -> Optional[Citation]:
+def extract_citation_from_result(
+    result: dict, db: Session, document_id: int = None
+) -> Optional[Citation]:
     """
     Extract citation information from a search result.
 
@@ -43,7 +55,7 @@ def extract_citation_from_result(result: dict, db: Session, document_id: int = N
         Citation object or None if citation data not available
     """
     try:
-        chunk_index = result.get('index')
+        chunk_index = result.get("index")
         if chunk_index is None:
             return None
 
@@ -58,7 +70,7 @@ def extract_citation_from_result(result: dict, db: Session, document_id: int = N
             query = query.filter(Chunk.document_id == document_id)
 
         # Add sub_document_id filter if available in result
-        sub_document_id = result.get('sub_document_id')
+        sub_document_id = result.get("sub_document_id")
         if sub_document_id is not None:
             query = query.filter(Chunk.sub_document_id == sub_document_id)
 
@@ -69,17 +81,17 @@ def extract_citation_from_result(result: dict, db: Session, document_id: int = N
 
         # Parse metadata
         metadata = json.loads(chunk.chunk_metadata)
-        citation_data = metadata.get('citation')
+        citation_data = metadata.get("citation")
 
         if not citation_data:
             return None
 
         return Citation(
-            library_card_id=citation_data.get('library_card_id'),
-            start_char=citation_data.get('start_char', 0),
-            end_char=citation_data.get('end_char', 0),
-            section_title=citation_data.get('section_title', ''),
-            section_level=citation_data.get('section_level', '')
+            library_card_id=citation_data.get("library_card_id"),
+            start_char=citation_data.get("start_char", 0),
+            end_char=citation_data.get("end_char", 0),
+            section_title=citation_data.get("section_title", ""),
+            section_level=citation_data.get("section_level", ""),
         )
     except Exception as e:
         logger.warning(f"Failed to extract citation from result: {e}")
@@ -100,14 +112,32 @@ def collect_unique_citations(citations: list) -> list:
     return unique
 
 
+def parse_node_type_filter(node_type_filter: str | None) -> list[str] | None:
+    if not node_type_filter:
+        return None
+    parsed = [item.strip() for item in node_type_filter.split(",") if item.strip()]
+    return parsed or None
+
+
+@router.post("/collections", response_model=CollectionSearchResponse)
 @router.post("/search/collections", response_model=CollectionSearchResponse)
 async def search_across_collections(
     query: str = Query(..., description="Search query"),
-    account_id: Optional[str] = Query(None, description="Account ID to search within (optional)"),
+    account_id: Optional[str] = Query(
+        None, description="Account ID to search within (optional)"
+    ),
     top_k: int = Query(10, ge=1, le=100, description="Number of results to return"),
-    context_mode: str = Query("none", description="Context expansion mode: none, narrow (H3), deep (H2)"),
-    rerank: bool = Query(False, description="Enable LLM reranking for better relevance (default: False)"),
-    db: Session = Depends(get_db)
+    context_mode: str = Query(
+        "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
+    ),
+    rerank: bool = Query(
+        False, description="Enable LLM reranking for better relevance (default: False)"
+    ),
+    node_type_filter: Optional[str] = Query(
+        None, description="Comma-separated node types to filter (e.g., 'code,table')"
+    ),
+    routing_mode: str = Query("auto", description="Routing mode: auto, llm, or fast"),
+    db: Session = Depends(get_db),
 ):
     """
     Search across multiple collections using LLM routing.
@@ -120,76 +150,163 @@ async def search_across_collections(
 
     Returns search results with scores, content, and source information (collection, document).
     """
-    logger.info(f"Collection search request: '{query[:50]}...' (account_id={account_id})")
+    logger.info(
+        f"Collection search request: '{query[:50]}...' (account_id={account_id})"
+    )
 
     try:
-        # Perform collection-level search
         searcher = create_multi_index_searcher(db)
-        # Reranker disabled — runs too slow locally
         results = await searcher.search_collections(
             CollectionSearch(
                 query=query,
                 account_id=account_id,
                 top_k=top_k,
-                rerank=False,
+                rerank=rerank,
                 context_mode=context_mode,
-                hf_api_token=os.getenv("HF_TOKEN")
+                hf_api_token=os.getenv("HF_TOKEN"),
+                node_type_filter=parse_node_type_filter(node_type_filter),
+                routing_mode=routing_mode,
             )
         )
 
-        logger.info(f"Collection search completed: {len(results)} results (context={context_mode})")
-
-        # Convert to response format and extract citations
-        search_results = []
-        all_citations = []
-
-        for result in results:
-            citation = extract_citation_from_result(result, db)
-            search_results.append(
-                SearchResult(
-                    index=result['index'],
-                    content=result.get('expanded_content', result['content']),  # Use expanded if available
-                    score=result.get('score', 0.0),
-                    dense_score=result.get('dense_score', 0.0),
-                    sparse_score=result.get('sparse_score', 0.0),
-                    rerank_score=result.get('rerank_score'),  # Include rerank score if available
-                    sub_document_key=result.get('sub_document_key'),  # Include sub-document source
-                    contributing_chunks=result.get('contributing_chunks'),  # Include aggregated chunk info
-                    parent_hash=result.get('parent_hash'),  # Include parent hash for context expansion
-                    collection_name=result.get('collection_name'),  # Include collection name
-                    document_filename=result.get('document_filename'),  # Include document filename
-                    citation=citation  # Add citation to individual result
-                )
-            )
-            all_citations.append(citation)
-
-        # Collect unique citations
-        unique_citations = collect_unique_citations(all_citations)
-
-        return CollectionSearchResponse(
+        logger.info(
+            f"Collection search completed: {len(results)} results (context={context_mode})"
+        )
+        return build_collection_search_response(
             query=query,
             account_id=account_id,
-            total_results=len(search_results),
-            results=search_results,
+            collection_id=None,
+            results=results,
             context_mode=context_mode,
-            citations=unique_citations
+            db=db,
+            extract_citation=extract_citation_from_result,
         )
 
     except Exception as e:
         logger.error(f"Collection search failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Collection search failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Collection search failed: {str(e)}"
+        )
 
 
-@router.post("/intelligent_search/collections", response_model=IntelligentCollectionSearchResponse)
+@router.post("/collections/{collection_id}", response_model=CollectionSearchResponse)
+async def search_collection(
+    collection_id: str,
+    query: str = Query(..., description="Search query"),
+    top_k: int = Query(10, ge=1, le=100, description="Number of results to return"),
+    context_mode: str = Query(
+        "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
+    ),
+    rerank: bool = Query(
+        False, description="Enable LLM reranking for better relevance (default: False)"
+    ),
+    node_type_filter: Optional[str] = Query(
+        None, description="Comma-separated node types to filter (e.g., 'code,table')"
+    ),
+    routing_mode: str = Query("auto", description="Routing mode: auto, llm, or fast"),
+    db: Session = Depends(get_db),
+):
+    """
+    Search within a single collection by collection_id.
+
+    This is a middle-ground search scope: faster and less noisy than searching
+    all collections, but broader than requiring an exact document job_id.
+    """
+    logger.info(
+        f"Scoped collection search: collection_id={collection_id}, query='{query[:50]}...'"
+    )
+
+    col = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    if not col:
+        raise HTTPException(
+            status_code=404, detail=f"Collection not found: {collection_id}"
+        )
+
+    try:
+        searcher = create_multi_index_searcher(db)
+        results = await searcher.search_collections(
+            CollectionSearch(
+                query=query,
+                account_id=None,
+                collection_id=collection_id,
+                top_k=top_k,
+                rerank=rerank,
+                context_mode=context_mode,
+                hf_api_token=os.getenv("HF_TOKEN"),
+                node_type_filter=parse_node_type_filter(node_type_filter),
+                routing_mode=routing_mode,
+            )
+        )
+
+        return build_collection_search_response(
+            query=query,
+            account_id=col.account.account_id if col.account else None,
+            collection_id=collection_id,
+            results=results,
+            context_mode=context_mode,
+            db=db,
+            extract_citation=extract_citation_from_result,
+        )
+    except Exception as e:
+        logger.error(f"Scoped collection search failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Collection search failed: {str(e)}"
+        )
+
+
+@router.post("/collection", response_model=CollectionSearchResponse)
+async def search_collection_by_query_param(
+    collection_id: str = Query(..., description="Collection ID to search"),
+    query: str = Query(..., description="Search query"),
+    top_k: int = Query(10, ge=1, le=100, description="Number of results to return"),
+    context_mode: str = Query(
+        "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
+    ),
+    rerank: bool = Query(
+        False, description="Enable LLM reranking for better relevance (default: False)"
+    ),
+    node_type_filter: Optional[str] = Query(
+        None, description="Comma-separated node types to filter (e.g., 'code,table')"
+    ),
+    routing_mode: str = Query("auto", description="Routing mode: auto, llm, or fast"),
+    db: Session = Depends(get_db),
+):
+    """Query-param alias for collection-scoped search."""
+    return await search_collection(
+        collection_id=collection_id,
+        query=query,
+        top_k=top_k,
+        context_mode=context_mode,
+        rerank=rerank,
+        node_type_filter=node_type_filter,
+        routing_mode=routing_mode,
+        db=db,
+    )
+
+
+@router.post(
+    "/intelligent_search/collections",
+    response_model=IntelligentCollectionSearchResponse,
+)
 async def intelligent_search_across_collections(
     query: str = Query(..., description="Search query"),
-    account_id: Optional[str] = Query(None, description="Account ID to search within (optional)"),
+    account_id: Optional[str] = Query(
+        None, description="Account ID to search within (optional)"
+    ),
     top_k: int = Query(10, ge=1, le=100, description="Number of results to return"),
-    context_mode: str = Query("none", description="Context expansion mode: none, narrow (H3), deep (H2)"),
-    rerank: bool = Query(False, description="Enable LLM reranking for better relevance (default: False)"),
-    max_context_length: int = Query(8000, ge=1000, le=20000, description="Maximum context length for LLM evaluation"),
-    enable_planning: bool = Query(True, description="Enable query planning with LLM (default: True)"),
-    db: Session = Depends(get_db)
+    context_mode: str = Query(
+        "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
+    ),
+    rerank: bool = Query(
+        False, description="Enable LLM reranking for better relevance (default: False)"
+    ),
+    max_context_length: int = Query(
+        8000, ge=1000, le=20000, description="Maximum context length for LLM evaluation"
+    ),
+    enable_planning: bool = Query(
+        True, description="Enable query planning with LLM (default: True)"
+    ),
+    db: Session = Depends(get_db),
 ):
     """
     Intelligent search with proper flow:
@@ -209,11 +326,15 @@ async def intelligent_search_across_collections(
 
     Returns an LLM-generated answer based ONLY on the search results.
     """
-    logger.info(f"Intelligent collection search: '{query[:50]}...' (account_id={account_id}, planning={enable_planning})")
+    logger.info(
+        f"Intelligent collection search: '{query[:50]}...' (account_id={account_id}, planning={enable_planning})"
+    )
 
     try:
         # Import routing functionality
-        from doc_search.core.application.use_cases.selectors.collection_selector import CollectionSelector
+        from doc_search.core.application.use_cases.selectors.collection_selector import (
+            CollectionSelector,
+        )
 
         # Step 1: Route to the correct collection using existing routing
         collections_query = db.query(Collection)
@@ -231,65 +352,92 @@ async def intelligent_search_across_collections(
         router = CollectionSelector(create_chat_client())
         collection_metadata = []
         for coll in collections:
-            card = db.query(LibraryCard).filter(
-                LibraryCard.collection_id == coll.id,
-                LibraryCard.level == "collection"
-            ).first()
+            card = (
+                db.query(LibraryCard)
+                .filter(
+                    LibraryCard.collection_id == coll.id,
+                    LibraryCard.level == "collection",
+                )
+                .first()
+            )
 
-            collection_metadata.append({
-                'id': coll.id,
-                'name': coll.name,
-                'library_card_summary': card.content[:500] if card else f"Collection: {coll.name}",
-                'document_count': len(coll.documents)
-            })
+            collection_metadata.append(
+                {
+                    "id": coll.id,
+                    "name": coll.name,
+                    "library_card_summary": (
+                        card.content[:500] if card else f"Collection: {coll.name}"
+                    ),
+                    "document_count": len(coll.documents),
+                }
+            )
 
         routed_collection_ids = router.select(query, collection_metadata)
-        routed_collection_id = routed_collection_ids[0] if routed_collection_ids else collections[0].id
+        routed_collection_id = (
+            routed_collection_ids[0] if routed_collection_ids else collections[0].id
+        )
         logger.info(f"Routed to collection ID: {routed_collection_id}")
 
         # Step 2: Get library cards (document structure) from the routed collection
         document_structure = []
-        routed_collection = db.query(Collection).filter(Collection.id == routed_collection_id).first()
+        routed_collection = (
+            db.query(Collection).filter(Collection.id == routed_collection_id).first()
+        )
 
         if routed_collection:
             # Get all documents in this collection
-            documents = db.query(Document).filter(Document.collection_id == routed_collection_id).all()
+            documents = (
+                db.query(Document)
+                .filter(Document.collection_id == routed_collection_id)
+                .all()
+            )
 
             for doc in documents:
                 # Get subdocuments
-                subdocs = db.query(SubDocument).filter(SubDocument.document_id == doc.id).all()
+                subdocs = (
+                    db.query(SubDocument)
+                    .filter(SubDocument.document_id == doc.id)
+                    .all()
+                )
 
                 for subdoc in subdocs:
                     # Get hierarchical library cards for structure
-                    hierarchy_cards = db.query(LibraryCard).filter(
-                        LibraryCard.sub_document_id == subdoc.id,
-                        LibraryCard.level.in_(['level_1', 'level_2', 'level_3'])
-                    ).order_by(LibraryCard.level.desc()).limit(20).all()
+                    hierarchy_cards = (
+                        db.query(LibraryCard)
+                        .filter(
+                            LibraryCard.sub_document_id == subdoc.id,
+                            LibraryCard.level.in_(["level_1", "level_2", "level_3"]),
+                        )
+                        .order_by(LibraryCard.level.desc())
+                        .limit(20)
+                        .all()
+                    )
 
                     if hierarchy_cards:
                         subdoc_structure = {
-                            'subdocument_name': subdoc.breadcrumb_key,
-                            'sections': []
+                            "subdocument_name": subdoc.breadcrumb_key,
+                            "sections": [],
                         }
                         for card in hierarchy_cards:
-                            subdoc_structure['sections'].append({
-                                'level': card.level,
-                                'title': card.title
-                            })
+                            subdoc_structure["sections"].append(
+                                {"level": card.level, "title": card.title}
+                            )
                         document_structure.append(subdoc_structure)
 
         search_plan = None
 
         # Step 3: Create query plan using library cards (if enabled and structure available)
         if enable_planning and document_structure:
-            logger.info(f"Creating query plan using {len(document_structure)} sections from routed collection")
+            logger.info(
+                f"Creating query plan using {len(document_structure)} sections from routed collection"
+            )
             planner = create_query_planner()
             search_plan = planner.plan_document_search(
-                query,
-                document_library_card=None,
-                document_structure=document_structure
+                query, document_library_card=None, document_structure=document_structure
             )
-            logger.info(f"Query plan: {search_plan['strategy']} - {search_plan.get('reasoning', '')}")
+            logger.info(
+                f"Query plan: {search_plan['strategy']} - {search_plan.get('reasoning', '')}"
+            )
 
         # Step 4 & 5: Execute searches (routing per sub-question happens automatically) and aggregate
         intelligent_engine = create_intelligent_searcher()
@@ -304,7 +452,7 @@ async def intelligent_search_across_collections(
                     top_k=top_k,
                     rerank=False,
                     context_mode=context_mode,
-                    hf_api_token=os.getenv("HF_TOKEN")
+                    hf_api_token=os.getenv("HF_TOKEN"),
                 )
             )
 
@@ -312,7 +460,7 @@ async def intelligent_search_across_collections(
             query=query,
             search_function=execute_search,
             max_context_length=max_context_length,
-            plan=search_plan
+            plan=search_plan,
         )
 
         logger.info(
@@ -323,29 +471,33 @@ async def intelligent_search_across_collections(
 
         # Build response
         response_plan = None
-        if intelligent_result.get('plan'):
-            response_plan = SearchPlan(**intelligent_result['plan'])
+        if intelligent_result.get("plan"):
+            response_plan = SearchPlan(**intelligent_result["plan"])
 
         # Convert sub_answers to SubAnswer models
         response_sub_answers = None
-        if intelligent_result.get('sub_answers'):
+        if intelligent_result.get("sub_answers"):
             from ..models import SubAnswer
+
             response_sub_answers = [
-                SubAnswer(**sub_answer) for sub_answer in intelligent_result['sub_answers']
+                SubAnswer(**sub_answer)
+                for sub_answer in intelligent_result["sub_answers"]
             ]
 
         # Extract citations from relevant results
         # Note: relevant_results are indices into the search results array
         # The intelligent search engine returns the search results for us
         all_citations = []
-        search_results = intelligent_result.get('search_results', [])
+        search_results = intelligent_result.get("search_results", [])
 
         if search_results:
-            relevant_indices = intelligent_result.get('relevant_results', [])
+            relevant_indices = intelligent_result.get("relevant_results", [])
 
             # If relevant_results is empty (multi-query planning mode), extract citations from all results
             if not relevant_indices:
-                logger.info("No relevant_results indices (planning mode), extracting citations from all search results")
+                logger.info(
+                    "No relevant_results indices (planning mode), extracting citations from all search results"
+                )
                 for result in search_results:
                     citation = extract_citation_from_result(result, db)
                     if citation:
@@ -364,31 +516,43 @@ async def intelligent_search_across_collections(
         return IntelligentCollectionSearchResponse(
             query=query,
             account_id=account_id,
-            answer=intelligent_result['answer'],
-            has_answer=intelligent_result['has_answer'],
-            relevant_results=intelligent_result['relevant_results'],
-            total_evaluated=intelligent_result['total_evaluated'],
+            answer=intelligent_result["answer"],
+            has_answer=intelligent_result["has_answer"],
+            relevant_results=intelligent_result["relevant_results"],
+            total_evaluated=intelligent_result["total_evaluated"],
             context_mode=context_mode,
             plan=response_plan,
             sub_answers=response_sub_answers,
-            citations=unique_citations
+            citations=unique_citations,
         )
 
     except Exception as e:
         logger.error(f"Intelligent collection search failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Intelligent collection search failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Intelligent collection search failed: {str(e)}"
+        )
 
 
 @router.post("/intelligent_search/collections/stream")
 async def intelligent_search_across_collections_streaming(
     query: str = Query(..., description="Search query"),
-    account_id: Optional[str] = Query(None, description="Account ID to search within (optional)"),
+    account_id: Optional[str] = Query(
+        None, description="Account ID to search within (optional)"
+    ),
     top_k: int = Query(10, ge=1, le=100, description="Number of results to return"),
-    context_mode: str = Query("none", description="Context expansion mode: none, narrow (H3), deep (H2)"),
-    rerank: bool = Query(False, description="Enable LLM reranking for better relevance (default: False)"),
-    max_context_length: int = Query(8000, ge=1000, le=20000, description="Maximum context length for LLM evaluation"),
-    enable_planning: bool = Query(True, description="Enable query planning with LLM (default: True)"),
-    db: Session = Depends(get_db)
+    context_mode: str = Query(
+        "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
+    ),
+    rerank: bool = Query(
+        False, description="Enable LLM reranking for better relevance (default: False)"
+    ),
+    max_context_length: int = Query(
+        8000, ge=1000, le=20000, description="Maximum context length for LLM evaluation"
+    ),
+    enable_planning: bool = Query(
+        True, description="Enable query planning with LLM (default: True)"
+    ),
+    db: Session = Depends(get_db),
 ):
     """
     Streaming version of intelligent search across collections.
@@ -524,12 +688,16 @@ async def intelligent_search_across_collections_streaming(
     - **max_context_length**: Maximum context length for LLM (1000-20000)
     - **enable_planning**: Enable query planning to create subquestions (default: True)
     """
-    logger.info(f"Streaming intelligent collection search: '{query[:50]}...' (account_id={account_id}, planning={enable_planning})")
+    logger.info(
+        f"Streaming intelligent collection search: '{query[:50]}...' (account_id={account_id}, planning={enable_planning})"
+    )
 
     async def event_generator():
         try:
             # Import routing functionality
-            from doc_search.core.application.use_cases.selectors.collection_selector import CollectionSelector
+            from doc_search.core.application.use_cases.selectors.collection_selector import (
+                CollectionSelector,
+            )
 
             # Step 1: Route to the correct collection
             collections_query = db.query(Collection)
@@ -548,62 +716,95 @@ async def intelligent_search_across_collections_streaming(
             router = CollectionSelector(create_chat_client())
             collection_metadata = []
             for coll in collections:
-                card = db.query(LibraryCard).filter(
-                    LibraryCard.collection_id == coll.id,
-                    LibraryCard.level == "collection"
-                ).first()
+                card = (
+                    db.query(LibraryCard)
+                    .filter(
+                        LibraryCard.collection_id == coll.id,
+                        LibraryCard.level == "collection",
+                    )
+                    .first()
+                )
 
-                collection_metadata.append({
-                    'id': coll.id,
-                    'name': coll.name,
-                    'library_card_summary': card.content[:500] if card else f"Collection: {coll.name}",
-                    'document_count': len(coll.documents)
-                })
+                collection_metadata.append(
+                    {
+                        "id": coll.id,
+                        "name": coll.name,
+                        "library_card_summary": (
+                            card.content[:500] if card else f"Collection: {coll.name}"
+                        ),
+                        "document_count": len(coll.documents),
+                    }
+                )
 
             routed_collection_ids = router.select(query, collection_metadata)
-            routed_collection_id = routed_collection_ids[0] if routed_collection_ids else collections[0].id
+            routed_collection_id = (
+                routed_collection_ids[0] if routed_collection_ids else collections[0].id
+            )
             logger.info(f"Routed to collection ID: {routed_collection_id}")
 
             # Step 2: Get library cards from the routed collection
             document_structure = []
-            routed_collection = db.query(Collection).filter(Collection.id == routed_collection_id).first()
+            routed_collection = (
+                db.query(Collection)
+                .filter(Collection.id == routed_collection_id)
+                .first()
+            )
 
             if routed_collection:
-                documents = db.query(Document).filter(Document.collection_id == routed_collection_id).all()
+                documents = (
+                    db.query(Document)
+                    .filter(Document.collection_id == routed_collection_id)
+                    .all()
+                )
 
                 for doc in documents:
-                    subdocs = db.query(SubDocument).filter(SubDocument.document_id == doc.id).all()
+                    subdocs = (
+                        db.query(SubDocument)
+                        .filter(SubDocument.document_id == doc.id)
+                        .all()
+                    )
 
                     for subdoc in subdocs:
-                        hierarchy_cards = db.query(LibraryCard).filter(
-                            LibraryCard.sub_document_id == subdoc.id,
-                            LibraryCard.level.in_(['level_1', 'level_2', 'level_3'])
-                        ).order_by(LibraryCard.level.desc()).limit(20).all()
+                        hierarchy_cards = (
+                            db.query(LibraryCard)
+                            .filter(
+                                LibraryCard.sub_document_id == subdoc.id,
+                                LibraryCard.level.in_(
+                                    ["level_1", "level_2", "level_3"]
+                                ),
+                            )
+                            .order_by(LibraryCard.level.desc())
+                            .limit(20)
+                            .all()
+                        )
 
                         if hierarchy_cards:
                             subdoc_structure = {
-                                'subdocument_name': subdoc.breadcrumb_key,
-                                'sections': []
+                                "subdocument_name": subdoc.breadcrumb_key,
+                                "sections": [],
                             }
                             for card in hierarchy_cards:
-                                subdoc_structure['sections'].append({
-                                    'level': card.level,
-                                    'title': card.title
-                                })
+                                subdoc_structure["sections"].append(
+                                    {"level": card.level, "title": card.title}
+                                )
                             document_structure.append(subdoc_structure)
 
             search_plan = None
 
             # Step 3: Create query plan
             if enable_planning and document_structure:
-                logger.info(f"Creating query plan using {len(document_structure)} sections from routed collection")
+                logger.info(
+                    f"Creating query plan using {len(document_structure)} sections from routed collection"
+                )
                 planner = create_query_planner()
                 search_plan = planner.plan_document_search(
                     query,
                     document_library_card=None,
-                    document_structure=document_structure
+                    document_structure=document_structure,
                 )
-                logger.info(f"Query plan: {search_plan['strategy']} - {search_plan.get('reasoning', '')}")
+                logger.info(
+                    f"Query plan: {search_plan['strategy']} - {search_plan.get('reasoning', '')}"
+                )
 
             # Step 4 & 5: Execute searches with streaming
             intelligent_engine = create_intelligent_searcher()
@@ -617,24 +818,26 @@ async def intelligent_search_across_collections_streaming(
                         top_k=top_k,
                         rerank=False,
                         context_mode=context_mode,
-                        hf_api_token=os.getenv("HF_TOKEN")
+                        hf_api_token=os.getenv("HF_TOKEN"),
                     )
                 )
 
             # Stream events from intelligent search
-            async for event in intelligent_engine.evaluate_and_answer_with_planning_streaming(
+            async for (
+                event
+            ) in intelligent_engine.evaluate_and_answer_with_planning_streaming(
                 query=query,
                 search_function=execute_search,
                 max_context_length=max_context_length,
-                plan=search_plan
+                plan=search_plan,
             ):
                 # Send event as SSE
                 yield f"data: {json.dumps(event)}\n\n"
 
                 # If this is the final answer, extract citations
-                if event['event_type'] == 'final_answer':
+                if event["event_type"] == "final_answer":
                     all_citations = []
-                    search_results = event['data'].get('search_results', [])
+                    search_results = event["data"].get("search_results", [])
 
                     if search_results:
                         for result in search_results:
@@ -645,9 +848,9 @@ async def intelligent_search_across_collections_streaming(
                     unique_citations = collect_unique_citations(all_citations)
 
                     # Add citations to the final data
-                    event['data']['citations'] = [c.dict() for c in unique_citations]
-                    event['data']['account_id'] = account_id
-                    event['data']['context_mode'] = context_mode
+                    event["data"]["citations"] = [c.dict() for c in unique_citations]
+                    event["data"]["account_id"] = account_id
+                    event["data"]["context_mode"] = context_mode
 
                     # Send updated final answer with citations
                     yield f"data: {json.dumps(event)}\n\n"
@@ -655,7 +858,9 @@ async def intelligent_search_across_collections_streaming(
             logger.info("Streaming intelligent collection search completed")
 
         except Exception as e:
-            logger.error(f"Streaming intelligent collection search failed: {e}", exc_info=True)
+            logger.error(
+                f"Streaming intelligent collection search failed: {e}", exc_info=True
+            )
             yield f"data: {json.dumps({'event_type': 'error', 'data': {'message': str(e)}})}\n\n"
 
     return StreamingResponse(
@@ -664,7 +869,7 @@ async def intelligent_search_across_collections_streaming(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-        }
+        },
     )
 
 
@@ -673,10 +878,16 @@ async def search_document(
     job_id: str,
     query: str = Query(..., description="Search query"),
     top_k: int = Query(10, ge=1, le=100, description="Number of results to return"),
-    context_mode: str = Query("none", description="Context expansion mode: none, narrow (H3), deep (H2)"),
-    node_type_filter: Optional[str] = Query(None, description="Comma-separated node types to filter (e.g., 'code,table')"),
-    rerank: bool = Query(False, description="Enable LLM reranking for better relevance (default: False)"),
-    db: Session = Depends(get_db)
+    context_mode: str = Query(
+        "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
+    ),
+    node_type_filter: Optional[str] = Query(
+        None, description="Comma-separated node types to filter (e.g., 'code,table')"
+    ),
+    rerank: bool = Query(
+        False, description="Enable LLM reranking for better relevance (default: False)"
+    ),
+    db: Session = Depends(get_db),
 ):
     """
     Search within a specific document using hybrid search.
@@ -706,22 +917,24 @@ async def search_document(
 
     # Check if document is completed
     if document.status != "completed":
-        logger.warning(f"Document {job_id} not ready for search, status: {document.status}")
+        logger.warning(
+            f"Document {job_id} not ready for search, status: {document.status}"
+        )
         raise HTTPException(
             status_code=400,
-            detail=f"Document not ready for search. Status: {document.status}"
+            detail=f"Document not ready for search. Status: {document.status}",
         )
 
     # Check if document uses sub-document architecture
-    subdocs = db.query(SubDocument).filter(
-        SubDocument.document_id == document.id
-    ).all()
+    subdocs = db.query(SubDocument).filter(SubDocument.document_id == document.id).all()
 
     # Perform search
     try:
         if subdocs:
             # Use new multi-index search with LLM routing
-            logger.info(f"Using multi-index search for document {job_id} ({len(subdocs)} sub-documents)")
+            logger.info(
+                f"Using multi-index search for document {job_id} ({len(subdocs)} sub-documents)"
+            )
             searcher = create_multi_index_searcher(db)
             # Reranker disabled — runs too slow locally
             results = await searcher.search_subdocuments(
@@ -729,9 +942,10 @@ async def search_document(
                     query=query,
                     document_id=document.id,
                     top_k=top_k,
-                    rerank=False,
+                    rerank=rerank,
                     context_mode=context_mode,
-                    hf_api_token=os.getenv("HF_TOKEN")
+                    hf_api_token=os.getenv("HF_TOKEN"),
+                    node_type_filter=node_types,
                 )
             )
         else:
@@ -743,7 +957,7 @@ async def search_document(
                 logger.error(f"Document {job_id} missing search indexes")
                 raise HTTPException(
                     status_code=500,
-                    detail="Search indexes not available for this document"
+                    detail="Search indexes not available for this document",
                 )
 
             # Reranker disabled — runs too slow locally
@@ -754,12 +968,15 @@ async def search_document(
                     bm25_path=document.bm25_index_path,
                     document_id=document.id,
                     top_k=top_k,
-                    rerank=False,
+                    rerank=rerank,
                     context_mode=context_mode,
+                    node_type_filter=node_types,
                 )
             )
 
-        logger.info(f"Search completed for {job_id}: {len(results)} results (context={context_mode}, node_filter={node_types})")
+        logger.info(
+            f"Search completed for {job_id}: {len(results)} results (context={context_mode}, node_filter={node_types})"
+        )
 
         # Convert to response format and extract citations
         search_results = []
@@ -769,16 +986,26 @@ async def search_document(
             citation = extract_citation_from_result(result, db, document_id=document.id)
             search_results.append(
                 SearchResult(
-                    index=result['index'],
-                    content=result.get('expanded_content', result['content']),  # Use expanded if available
-                    score=result.get('score', 0.0),
-                    dense_score=result.get('dense_score', 0.0),
-                    sparse_score=result.get('sparse_score', 0.0),
-                    rerank_score=result.get('rerank_score'),  # Include rerank score if available
-                    sub_document_key=result.get('sub_document_key'),  # Include sub-document source
-                    contributing_chunks=result.get('contributing_chunks'),  # Include aggregated chunk info
-                    parent_hash=result.get('parent_hash'),  # Include parent hash for context expansion
-                    citation=citation  # Add citation to individual result
+                    index=result["index"],
+                    content=result.get(
+                        "expanded_content", result["content"]
+                    ),  # Use expanded if available
+                    score=result.get("score", 0.0),
+                    dense_score=result.get("dense_score", 0.0),
+                    sparse_score=result.get("sparse_score", 0.0),
+                    rerank_score=result.get(
+                        "rerank_score"
+                    ),  # Include rerank score if available
+                    sub_document_key=result.get(
+                        "sub_document_key"
+                    ),  # Include sub-document source
+                    contributing_chunks=result.get(
+                        "contributing_chunks"
+                    ),  # Include aggregated chunk info
+                    parent_hash=result.get(
+                        "parent_hash"
+                    ),  # Include parent hash for context expansion
+                    citation=citation,  # Add citation to individual result
                 )
             )
             all_citations.append(citation)
@@ -793,7 +1020,7 @@ async def search_document(
             results=search_results,
             context_mode=context_mode,
             node_type_filter=node_types,
-            citations=unique_citations
+            citations=unique_citations,
         )
 
     except Exception as e:
@@ -806,12 +1033,22 @@ async def intelligent_search_document(
     job_id: str,
     query: str = Query(..., description="Search query"),
     top_k: int = Query(10, ge=1, le=100, description="Number of results to return"),
-    context_mode: str = Query("none", description="Context expansion mode: none, narrow (H3), deep (H2)"),
-    node_type_filter: Optional[str] = Query(None, description="Comma-separated node types to filter (e.g., 'code,table')"),
-    rerank: bool = Query(False, description="Enable LLM reranking for better relevance (default: False)"),
-    max_context_length: int = Query(8000, ge=1000, le=20000, description="Maximum context length for LLM evaluation"),
-    enable_planning: bool = Query(True, description="Enable query planning with LLM (default: True)"),
-    db: Session = Depends(get_db)
+    context_mode: str = Query(
+        "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
+    ),
+    node_type_filter: Optional[str] = Query(
+        None, description="Comma-separated node types to filter (e.g., 'code,table')"
+    ),
+    rerank: bool = Query(
+        False, description="Enable LLM reranking for better relevance (default: False)"
+    ),
+    max_context_length: int = Query(
+        8000, ge=1000, le=20000, description="Maximum context length for LLM evaluation"
+    ),
+    enable_planning: bool = Query(
+        True, description="Enable query planning with LLM (default: True)"
+    ),
+    db: Session = Depends(get_db),
 ):
     """
     Intelligent search within a document with query planning: analyzes the question with library cards,
@@ -829,7 +1066,9 @@ async def intelligent_search_document(
     Returns an LLM-generated answer based ONLY on the search results, not on the model's pre-trained knowledge.
     If no relevant information is found, the answer will clearly state so.
     """
-    logger.info(f"Intelligent search request for job {job_id}: '{query[:50]}...' (planning={enable_planning})")
+    logger.info(
+        f"Intelligent search request for job {job_id}: '{query[:50]}...' (planning={enable_planning})"
+    )
 
     # Parse node_type_filter
     node_types = None
@@ -845,16 +1084,16 @@ async def intelligent_search_document(
 
     # Check if document is completed
     if document.status != "completed":
-        logger.warning(f"Document {job_id} not ready for search, status: {document.status}")
+        logger.warning(
+            f"Document {job_id} not ready for search, status: {document.status}"
+        )
         raise HTTPException(
             status_code=400,
-            detail=f"Document not ready for search. Status: {document.status}"
+            detail=f"Document not ready for search. Status: {document.status}",
         )
 
     # Check if document uses sub-document architecture
-    subdocs = db.query(SubDocument).filter(
-        SubDocument.document_id == document.id
-    ).all()
+    subdocs = db.query(SubDocument).filter(SubDocument.document_id == document.id).all()
 
     # Perform search
     try:
@@ -866,23 +1105,32 @@ async def intelligent_search_document(
             library_cards = []
 
             # Get document-level library card
-            doc_card = db.query(LibraryCard).filter(
-                LibraryCard.document_id == document.id,
-                LibraryCard.level == "document"
-            ).first()
+            doc_card = (
+                db.query(LibraryCard)
+                .filter(
+                    LibraryCard.document_id == document.id,
+                    LibraryCard.level == "document",
+                )
+                .first()
+            )
 
             if doc_card:
                 try:
-                    metadata = json.loads(doc_card.extra_metadata) if doc_card.extra_metadata else {}
-                    library_cards.append({
-                        'title': doc_card.title,
-                        'summary': metadata.get('summary', doc_card.content[:200])
-                    })
-                except:
-                    library_cards.append({
-                        'title': doc_card.title,
-                        'summary': doc_card.content[:200]
-                    })
+                    metadata = (
+                        json.loads(doc_card.extra_metadata)
+                        if doc_card.extra_metadata
+                        else {}
+                    )
+                    library_cards.append(
+                        {
+                            "title": doc_card.title,
+                            "summary": metadata.get("summary", doc_card.content[:200]),
+                        }
+                    )
+                except Exception:
+                    library_cards.append(
+                        {"title": doc_card.title, "summary": doc_card.content[:200]}
+                    )
 
             # Get document structure from library cards (H1, H2, H3 hierarchy)
             document_structure = []
@@ -890,50 +1138,66 @@ async def intelligent_search_document(
                 # Get all library cards for subdocuments to see the structural hierarchy
                 for subdoc in subdocs:
                     # Get all hierarchical cards for this subdocument (level_1, level_2, level_3)
-                    hierarchy_cards = db.query(LibraryCard).filter(
-                        LibraryCard.sub_document_id == subdoc.id,
-                        LibraryCard.level.in_(['level_1', 'level_2', 'level_3', 'subdocument'])
-                    ).order_by(LibraryCard.level.desc()).limit(20).all()  # Get top-level structure
+                    hierarchy_cards = (
+                        db.query(LibraryCard)
+                        .filter(
+                            LibraryCard.sub_document_id == subdoc.id,
+                            LibraryCard.level.in_(
+                                ["level_1", "level_2", "level_3", "subdocument"]
+                            ),
+                        )
+                        .order_by(LibraryCard.level.desc())
+                        .limit(20)
+                        .all()
+                    )  # Get top-level structure
 
                     if hierarchy_cards:
                         subdoc_structure = {
-                            'subdocument_name': subdoc.breadcrumb_key,
-                            'sections': []
+                            "subdocument_name": subdoc.breadcrumb_key,
+                            "sections": [],
                         }
                         for card in hierarchy_cards:
-                            subdoc_structure['sections'].append({
-                                'level': card.level,
-                                'title': card.title
-                            })
+                            subdoc_structure["sections"].append(
+                                {"level": card.level, "title": card.title}
+                            )
                         document_structure.append(subdoc_structure)
             else:
                 # For single-index documents, get their library cards
-                hierarchy_cards = db.query(LibraryCard).filter(
-                    LibraryCard.document_id == document.id,
-                    LibraryCard.level.in_(['level_1', 'level_2', 'level_3'])
-                ).order_by(LibraryCard.level.desc()).limit(30).all()
+                hierarchy_cards = (
+                    db.query(LibraryCard)
+                    .filter(
+                        LibraryCard.document_id == document.id,
+                        LibraryCard.level.in_(["level_1", "level_2", "level_3"]),
+                    )
+                    .order_by(LibraryCard.level.desc())
+                    .limit(30)
+                    .all()
+                )
 
                 if hierarchy_cards:
                     doc_structure = {
-                        'subdocument_name': document.filename,
-                        'sections': []
+                        "subdocument_name": document.filename,
+                        "sections": [],
                     }
                     for card in hierarchy_cards:
-                        doc_structure['sections'].append({
-                            'level': card.level,
-                            'title': card.title
-                        })
+                        doc_structure["sections"].append(
+                            {"level": card.level, "title": card.title}
+                        )
                     document_structure.append(doc_structure)
 
             if document_structure:
-                logger.info(f"Creating query plan using document structure from {len(document_structure)} section(s)")
+                logger.info(
+                    f"Creating query plan using document structure from {len(document_structure)} section(s)"
+                )
                 planner = create_query_planner()
                 search_plan = planner.plan_document_search(
                     query,
                     document_library_card=library_cards[0] if library_cards else None,
-                    document_structure=document_structure
+                    document_structure=document_structure,
                 )
-                logger.info(f"Query plan: {search_plan['strategy']} - {search_plan.get('reasoning', '')}")
+                logger.info(
+                    f"Query plan: {search_plan['strategy']} - {search_plan.get('reasoning', '')}"
+                )
 
         # Step 2: Execute search with or without planning
         intelligent_engine = create_intelligent_searcher()
@@ -951,7 +1215,7 @@ async def intelligent_search_document(
                         top_k=top_k,
                         rerank=False,
                         context_mode=context_mode,
-                        hf_api_token=os.getenv("HF_TOKEN")
+                        hf_api_token=os.getenv("HF_TOKEN"),
                     )
                 )
             else:
@@ -959,7 +1223,7 @@ async def intelligent_search_document(
                 if not document.faiss_index_path or not document.bm25_index_path:
                     raise HTTPException(
                         status_code=500,
-                        detail="Search indexes not available for this document"
+                        detail="Search indexes not available for this document",
                     )
 
                 # Reranker disabled — runs too slow locally
@@ -979,7 +1243,7 @@ async def intelligent_search_document(
             query=query,
             search_function=execute_search,
             max_context_length=max_context_length,
-            plan=search_plan
+            plan=search_plan,
         )
 
         logger.info(
@@ -990,31 +1254,37 @@ async def intelligent_search_document(
 
         # Build response
         response_plan = None
-        if intelligent_result.get('plan'):
-            response_plan = SearchPlan(**intelligent_result['plan'])
+        if intelligent_result.get("plan"):
+            response_plan = SearchPlan(**intelligent_result["plan"])
 
         # Convert sub_answers to SubAnswer models
         response_sub_answers = None
-        if intelligent_result.get('sub_answers'):
+        if intelligent_result.get("sub_answers"):
             from ..models import SubAnswer
+
             response_sub_answers = [
-                SubAnswer(**sub_answer) for sub_answer in intelligent_result['sub_answers']
+                SubAnswer(**sub_answer)
+                for sub_answer in intelligent_result["sub_answers"]
             ]
 
         # Extract citations from relevant results
         # Note: relevant_results are indices into the search results array
         # The intelligent search engine returns the search results for us
         all_citations = []
-        search_results = intelligent_result.get('search_results', [])
+        search_results = intelligent_result.get("search_results", [])
 
         if search_results:
-            relevant_indices = intelligent_result.get('relevant_results', [])
+            relevant_indices = intelligent_result.get("relevant_results", [])
 
             # If relevant_results is empty (multi-query planning mode), extract citations from all results
             if not relevant_indices:
-                logger.info("No relevant_results indices (planning mode), extracting citations from all search results")
+                logger.info(
+                    "No relevant_results indices (planning mode), extracting citations from all search results"
+                )
                 for result in search_results:
-                    citation = extract_citation_from_result(result, db, document_id=document.id)
+                    citation = extract_citation_from_result(
+                        result, db, document_id=document.id
+                    )
                     if citation:
                         all_citations.append(citation)
             else:
@@ -1022,7 +1292,9 @@ async def intelligent_search_document(
                 for result_index in relevant_indices:
                     if result_index < len(search_results):
                         result = search_results[result_index]
-                        citation = extract_citation_from_result(result, db, document_id=document.id)
+                        citation = extract_citation_from_result(
+                            result, db, document_id=document.id
+                        )
                         if citation:
                             all_citations.append(citation)
 
@@ -1031,16 +1303,18 @@ async def intelligent_search_document(
         return IntelligentSearchResponse(
             job_id=job_id,
             query=query,
-            answer=intelligent_result['answer'],
-            has_answer=intelligent_result['has_answer'],
-            relevant_results=intelligent_result['relevant_results'],
-            total_evaluated=intelligent_result['total_evaluated'],
+            answer=intelligent_result["answer"],
+            has_answer=intelligent_result["has_answer"],
+            relevant_results=intelligent_result["relevant_results"],
+            total_evaluated=intelligent_result["total_evaluated"],
             context_mode=context_mode,
             plan=response_plan,
             sub_answers=response_sub_answers,
-            citations=unique_citations
+            citations=unique_citations,
         )
 
     except Exception as e:
         logger.error(f"Intelligent search failed for {job_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Intelligent search failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Intelligent search failed: {str(e)}"
+        )

@@ -8,12 +8,14 @@ from pydantic import BaseModel
 # Collection Models
 class CollectionCreate(BaseModel):
     """Request model for creating a collection."""
+
     name: str
     account_id: Optional[str] = None  # Optional account ID to link collection to
 
 
 class CollectionResponse(BaseModel):
     """Response model for collection."""
+
     collection_id: str
     name: str
     logo_url: Optional[str] = None
@@ -25,18 +27,21 @@ class CollectionResponse(BaseModel):
 
 class CollectionListResponse(BaseModel):
     """Response model for collection list."""
+
     collections: List[CollectionResponse]
     total: int
 
 
 class UploadRequest(BaseModel):
     """Request model for document upload."""
+
     collection_id: str
     max_tokens: Optional[int] = 512
 
 
 class UploadResponse(BaseModel):
     """Response model for document upload."""
+
     job_id: str
     collection_id: str
     status: str
@@ -45,6 +50,7 @@ class UploadResponse(BaseModel):
 
 class ProgressResponse(BaseModel):
     """Response model for progress tracking."""
+
     status: str
     progress: int
     stage: str
@@ -55,6 +61,7 @@ class ProgressResponse(BaseModel):
 
 class DocumentInfo(BaseModel):
     """Document metadata information."""
+
     id: int
     job_id: str
     filename: str
@@ -66,6 +73,7 @@ class DocumentInfo(BaseModel):
 
 class ChunkInfo(BaseModel):
     """Chunk information."""
+
     id: int
     chunk_index: int
     content: str
@@ -75,6 +83,7 @@ class ChunkInfo(BaseModel):
 
 class ChunksDownloadResponse(BaseModel):
     """Response model for downloading chunks as JSON."""
+
     document: DocumentInfo
     chunks: List[ChunkInfo]
     total_chunks: int
@@ -82,6 +91,7 @@ class ChunksDownloadResponse(BaseModel):
 
 class DocumentListItem(BaseModel):
     """Document list item."""
+
     id: int
     job_id: str
     collection_id: str
@@ -96,12 +106,14 @@ class DocumentListItem(BaseModel):
 
 class DocumentListResponse(BaseModel):
     """Response model for document list."""
+
     documents: List[DocumentListItem]
     total: int
 
 
 class DocumentDetailResponse(BaseModel):
     """Response model for document details."""
+
     id: int
     job_id: str
     collection_id: str
@@ -119,6 +131,7 @@ class DocumentDetailResponse(BaseModel):
 # Search Models
 class Citation(BaseModel):
     """Citation information for tracing chunk origin."""
+
     library_card_id: Optional[int] = None
     start_char: int
     end_char: int
@@ -128,6 +141,7 @@ class Citation(BaseModel):
 
 class SearchRequest(BaseModel):
     """Request model for search."""
+
     query: str
     top_k: Optional[int] = 10
     dense_weight: Optional[float] = 0.5
@@ -137,33 +151,48 @@ class SearchRequest(BaseModel):
 
 class SearchResult(BaseModel):
     """Single search result."""
+
     index: int
     content: str
     score: float
     dense_score: float
     sparse_score: float
     rerank_score: Optional[float] = None  # Shows reranker score if reranking enabled
-    sub_document_key: Optional[str] = None  # Shows which sub-document this result came from
-    contributing_chunks: Optional[List[int]] = None  # Chunk indices that contributed to this result (for deduplicated parents)
-    parent_hash: Optional[str] = None  # Parent section hash (when context expansion is used)
-    collection_name: Optional[str] = None  # Collection name (for collection-level search)
-    document_filename: Optional[str] = None  # Document filename (for collection-level search)
+    sub_document_key: Optional[str] = (
+        None  # Shows which sub-document this result came from
+    )
+    contributing_chunks: Optional[List[int]] = (
+        None  # Chunk indices that contributed to this result (for deduplicated parents)
+    )
+    parent_hash: Optional[str] = (
+        None  # Parent section hash (when context expansion is used)
+    )
+    collection_name: Optional[str] = (
+        None  # Collection name (for collection-level search)
+    )
+    document_filename: Optional[str] = (
+        None  # Document filename (for collection-level search)
+    )
     citation: Optional[Citation] = None  # Citation information for tracing origin
 
 
 class SearchResponse(BaseModel):
     """Response model for search."""
+
     job_id: str
     query: str
     total_results: int
     results: List[SearchResult]
     context_mode: Optional[str] = None
     node_type_filter: Optional[List[str]] = None
-    citations: Optional[List[Citation]] = None  # All unique citations from search results
+    citations: Optional[List[Citation]] = (
+        None  # All unique citations from search results
+    )
 
 
 class CollectionSearchRequest(BaseModel):
     """Request model for collection-level search."""
+
     query: str
     account_id: Optional[str] = None
     top_k: Optional[int] = 10
@@ -173,16 +202,21 @@ class CollectionSearchRequest(BaseModel):
 
 class CollectionSearchResponse(BaseModel):
     """Response model for collection-level search."""
+
     query: str
     account_id: Optional[str] = None
+    collection_id: Optional[str] = None
     total_results: int
     results: List[SearchResult]
     context_mode: Optional[str] = None
-    citations: Optional[List[Citation]] = None  # All unique citations from search results
+    citations: Optional[List[Citation]] = (
+        None  # All unique citations from search results
+    )
 
 
 class SubAnswer(BaseModel):
     """Answer to a sub-question generated by the planner."""
+
     question: str
     answer: str
     has_answer: bool
@@ -191,6 +225,7 @@ class SubAnswer(BaseModel):
 
 class SearchPlan(BaseModel):
     """Search plan generated by query planner."""
+
     strategy: str
     queries: List[str]
     reasoning: str
@@ -200,6 +235,7 @@ class SearchPlan(BaseModel):
 
 class IntelligentSearchResponse(BaseModel):
     """Response model for intelligent search on document."""
+
     job_id: str
     query: str
     answer: str
@@ -209,11 +245,14 @@ class IntelligentSearchResponse(BaseModel):
     context_mode: Optional[str] = None
     plan: Optional[SearchPlan] = None
     sub_answers: Optional[List[SubAnswer]] = None
-    citations: Optional[List[Citation]] = None  # All unique citations from search results
+    citations: Optional[List[Citation]] = (
+        None  # All unique citations from search results
+    )
 
 
 class IntelligentCollectionSearchResponse(BaseModel):
     """Response model for intelligent search on collections."""
+
     query: str
     account_id: Optional[str] = None
     answer: str
@@ -223,18 +262,24 @@ class IntelligentCollectionSearchResponse(BaseModel):
     context_mode: Optional[str] = None
     plan: Optional[SearchPlan] = None
     sub_answers: Optional[List[SubAnswer]] = None
-    citations: Optional[List[Citation]] = None  # All unique citations from search results
+    citations: Optional[List[Citation]] = (
+        None  # All unique citations from search results
+    )
 
 
 class StreamingProgressEvent(BaseModel):
     """Streaming event for intelligent search progress updates."""
-    event_type: str  # 'planning', 'subquestion_start', 'subquestion_complete', 'final_answer'
+
+    event_type: (
+        str  # 'planning', 'subquestion_start', 'subquestion_complete', 'final_answer'
+    )
     data: Dict[str, Any]  # Event-specific data
 
 
 # Account Export Models
 class LibraryCardInfo(BaseModel):
     """Library card information."""
+
     id: int
     level: str
     title: str
@@ -244,6 +289,7 @@ class LibraryCardInfo(BaseModel):
 
 class DocumentExportInfo(BaseModel):
     """Complete document information for export."""
+
     id: int
     job_id: str
     filename: str
@@ -257,6 +303,7 @@ class DocumentExportInfo(BaseModel):
 
 class CollectionExportInfo(BaseModel):
     """Complete collection information for export."""
+
     collection_id: str
     name: str
     logo_url: Optional[str] = None
@@ -268,6 +315,7 @@ class CollectionExportInfo(BaseModel):
 
 class AccountExportResponse(BaseModel):
     """Complete account export with all data."""
+
     account_id: str
     name: str
     created_at: str

@@ -10,10 +10,18 @@ from pathlib import Path
 from fastmcp import FastMCP
 
 from doc_search.infrastructure.data import (
-    SessionLocal, Collection, Document, Account, LibraryCard,
-    SubDocument, DocumentStructure, Chunk,
+    SessionLocal,
+    Collection,
+    Document,
+    Account,
+    LibraryCard,
+    SubDocument,
+    DocumentStructure,
+    Chunk,
 )
 from doc_search.infrastructure.logging_config import get_logger
+from doc_search.presentation.mcp.search_jobs import SearchJob, SearchJobManager
+from doc_search.presentation.mcp.search_presenter import format_search_results
 
 logger = get_logger(__name__)
 
@@ -23,6 +31,7 @@ logger = get_logger(__name__)
 # which would load models from disk and initialize HTTP clients repeatedly.
 
 _cache: dict[str, object] = {}
+_search_job_manager = SearchJobManager()
 
 
 def _cached(name: str, factory):
@@ -41,7 +50,9 @@ def _hf_token():
 
 
 def _resolve_collection(db, collection_id: str) -> Collection | None:
-    return db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    return (
+        db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    )
 
 
 def _resolve_account(db, account_id: str) -> Account | None:
@@ -50,33 +61,45 @@ def _resolve_account(db, account_id: str) -> Account | None:
 
 def _get_chat_client():
     """Return a cached HuggingFaceChatClient singleton."""
+
     def _create():
         from doc_search.startup import create_chat_client
+
         return create_chat_client()
+
     return _cached("chat_client", _create)
 
 
 def _get_query_planner():
     """Return a cached QueryPlanner singleton."""
+
     def _create():
         from doc_search.startup import create_query_planner
+
         return create_query_planner(_get_chat_client())
+
     return _cached("query_planner", _create)
 
 
 def _get_embedder():
     """Return a cached HuggingFaceEmbedder singleton (stateless HTTP client)."""
+
     def _create():
         from doc_search.startup import create_embedder
+
         return create_embedder()
+
     return _cached("embedder", _create)
 
 
 def _get_reranker():
     """Return a cached LocalCrossEncoderReranker singleton (lazy-loads model)."""
+
     def _create():
         from doc_search.startup import create_reranker
+
         return create_reranker()
+
     return _cached("reranker", _create)
 
 
@@ -87,6 +110,7 @@ def _get_multi_index_searcher(db):
     for SqlSearchDataAccess), but all its expensive dependencies are.
     """
     from doc_search.startup import create_multi_index_searcher
+
     return create_multi_index_searcher(
         db_session=db,
         embedder=_get_embedder(),
@@ -97,25 +121,113 @@ def _get_multi_index_searcher(db):
 
 def _get_intelligent_searcher():
     """Return a cached IntelligentSearcher singleton."""
+
     def _create():
         from doc_search.startup import create_intelligent_searcher
+
         return create_intelligent_searcher(_get_chat_client())
+
     return _cached("intelligent_searcher", _create)
 
 
 def _clear_cache():
     """Clear the singleton cache (used in tests)."""
+    for obj in _cache.values():
+        clear = getattr(obj, "clear_cache", None)
+        if callable(clear):
+            clear()
     _cache.clear()
+    _search_job_manager.clear()
+
+
+def _parse_node_type_filter(node_type_filter: str | None) -> list[str] | None:
+    if not node_type_filter:
+        return None
+    parsed = [item.strip() for item in node_type_filter.split(",") if item.strip()]
+    return parsed or None
+
+
+async def _run_search_documents_text(
+    query: str,
+    top_k: int = 10,
+    rerank: bool = False,
+    context_mode: str = "none",
+    account_id: str | None = None,
+    collection_id: str | None = None,
+    node_type_filter: str | None = None,
+    routing_mode: str = "auto",
+) -> str:
+    from doc_search.core.application.dto.collection_search import CollectionSearch
+
+    db = _get_db()
+    try:
+        if collection_id:
+            col = _resolve_collection(db, collection_id)
+            if not col:
+                return f"Collection not found: {collection_id}"
+            scope = f"in collection '{col.name}'"
+        else:
+            scope = ""
+
+        searcher = _get_multi_index_searcher(db)
+        results = await searcher.search_collections(
+            CollectionSearch(
+                query=query,
+                account_id=account_id or None,
+                collection_id=collection_id,
+                top_k=min(top_k, 100),
+                rerank=rerank,
+                context_mode=context_mode,
+                hf_api_token=_hf_token(),
+                node_type_filter=_parse_node_type_filter(node_type_filter),
+                routing_mode=routing_mode,
+            )
+        )
+        return format_search_results(query, results, scope=scope)
+    finally:
+        db.close()
+
+
+async def _execute_search_job(job: SearchJob) -> None:
+    _search_job_manager.update(job, status="running", progress="Search running")
+    try:
+        result = await _run_search_documents_text(**job.params)
+        _search_job_manager.update(
+            job,
+            status="completed",
+            progress="Search completed",
+            result=result,
+        )
+    except asyncio.CancelledError:
+        _search_job_manager.update(job, status="cancelled", progress="Search cancelled")
+        raise
+    except Exception as exc:
+        logger.error("Background search job failed: %s", exc, exc_info=True)
+        _search_job_manager.update(
+            job,
+            status="failed",
+            progress="Search failed",
+            error=str(exc),
+        )
 
 
 # ── reused intelligent‑search helper ──────────────────────────
 
+
 async def _run_intelligent_collection_search(
-    query: str, top_k: int, context_mode: str, account_id: str | None,
-    enable_planning: bool, rerank: bool, node_type_filter: str | None, db,
+    query: str,
+    top_k: int,
+    context_mode: str,
+    account_id: str | None,
+    enable_planning: bool,
+    rerank: bool,
+    node_type_filter: str | None,
+    db,
 ) -> str:
     from doc_search.core.application.dto.collection_search import CollectionSearch
-    from doc_search.core.application.use_cases.selectors.collection_selector import CollectionSelector
+    from doc_search.core.application.use_cases.selectors.collection_selector import (
+        CollectionSelector,
+    )
 
     token = _hf_token()
     if not token:
@@ -133,14 +245,22 @@ async def _run_intelligent_collection_search(
         router = CollectionSelector(_get_chat_client())
         meta = []
         for c in collections:
-            card = db.query(LibraryCard).filter(
-                LibraryCard.collection_id == c.id, LibraryCard.level == "collection",
-            ).first()
-            meta.append({
-                "id": c.id, "name": c.name,
-                "library_card_summary": card.content[:500] if card else c.name,
-                "document_count": len(c.documents),
-            })
+            card = (
+                db.query(LibraryCard)
+                .filter(
+                    LibraryCard.collection_id == c.id,
+                    LibraryCard.level == "collection",
+                )
+                .first()
+            )
+            meta.append(
+                {
+                    "id": c.id,
+                    "name": c.name,
+                    "library_card_summary": card.content[:500] if card else c.name,
+                    "document_count": len(c.documents),
+                }
+            )
 
         # Route to the best collection (sync LLM call — offloaded to thread)
         routed_ids = router.select(query, meta)
@@ -152,21 +272,33 @@ async def _run_intelligent_collection_search(
         if routed_coll:
             for doc in routed_coll.documents:
                 for subdoc in doc.sub_documents:
-                    cards = db.query(LibraryCard).filter(
-                        LibraryCard.sub_document_id == subdoc.id,
-                        LibraryCard.level.in_(["level_1", "level_2", "level_3"]),
-                    ).order_by(LibraryCard.level.desc()).limit(20).all()
+                    cards = (
+                        db.query(LibraryCard)
+                        .filter(
+                            LibraryCard.sub_document_id == subdoc.id,
+                            LibraryCard.level.in_(["level_1", "level_2", "level_3"]),
+                        )
+                        .order_by(LibraryCard.level.desc())
+                        .limit(20)
+                        .all()
+                    )
                     if cards:
-                        document_structure.append({
-                            "subdocument_name": subdoc.breadcrumb_key,
-                            "sections": [{"level": c.level, "title": c.title} for c in cards],
-                        })
+                        document_structure.append(
+                            {
+                                "subdocument_name": subdoc.breadcrumb_key,
+                                "sections": [
+                                    {"level": c.level, "title": c.title} for c in cards
+                                ],
+                            }
+                        )
 
         # Plan sub-questions (sync LLM call — offloaded to thread)
         search_plan = None
         if enable_planning and document_structure:
             planner = _get_query_planner()
-            search_plan = planner.plan_document_search(query, document_structure=document_structure)
+            search_plan = planner.plan_document_search(
+                query, document_structure=document_structure
+            )
 
         return collections, routed_coll, document_structure, search_plan
 
@@ -182,16 +314,21 @@ async def _run_intelligent_collection_search(
     async def execute_search(q: str):
         return await coll_searcher.search_collections(
             CollectionSearch(
-                query=q, account_id=account_id or "",
-                top_k=min(top_k, 100), rerank=False,
-                context_mode=context_mode, hf_api_token=token,
+                query=q,
+                account_id=account_id or "",
+                top_k=min(top_k, 100),
+                rerank=False,
+                context_mode=context_mode,
+                hf_api_token=token,
             )
         )
 
     engine = _get_intelligent_searcher()
     result = await engine.evaluate_and_answer_with_planning(
-        query=query, search_function=execute_search,
-        max_context_length=8000, plan=search_plan,
+        query=query,
+        search_function=execute_search,
+        max_context_length=8000,
+        plan=search_plan,
     )
 
     parts = []
@@ -205,6 +342,7 @@ async def _run_intelligent_collection_search(
 
 
 # ── tool registration ─────────────────────────────────────────
+
 
 def register_tools(mcp: FastMCP):
     """Register all doc-search tools on the given MCP server instance."""
@@ -240,7 +378,9 @@ def register_tools(mcp: FastMCP):
                 return "No accounts found."
             lines = [f"Accounts ({len(accounts)}):\n"]
             for a in accounts:
-                lines.append(f"  • {a.name} — {len(a.collections)} collections — {a.account_id}")
+                lines.append(
+                    f"  • {a.name} — {len(a.collections)} collections — {a.account_id}"
+                )
             return "\n".join(lines)
         finally:
             db.close()
@@ -262,7 +402,9 @@ def register_tools(mcp: FastMCP):
                 f"Collections: {len(acc.collections)}",
             ]
             for col in acc.collections:
-                lines.append(f"  • {col.name} ({len(col.documents)} docs) — {col.collection_id}")
+                lines.append(
+                    f"  • {col.name} ({len(col.documents)} docs) — {col.collection_id}"
+                )
             return "\n".join(lines)
         finally:
             db.close()
@@ -286,14 +428,17 @@ def register_tools(mcp: FastMCP):
 
             collection_id = str(uuid.uuid4())
             col = Collection(
-                collection_id=collection_id, name=name,
+                collection_id=collection_id,
+                name=name,
                 account_id=acc.id if acc else None,
                 ip_address="127.0.0.1",
             )
             db.add(col)
             db.commit()
             extra = f" (account: {acc.name})" if acc else " (no account)"
-            return f"Collection created: {name}{extra}\n  collection_id: {collection_id}"
+            return (
+                f"Collection created: {name}{extra}\n  collection_id: {collection_id}"
+            )
         finally:
             db.close()
 
@@ -308,9 +453,14 @@ def register_tools(mcp: FastMCP):
             if not col:
                 return f"Collection not found: {collection_id}"
 
-            card = db.query(LibraryCard).filter(
-                LibraryCard.collection_id == col.id, LibraryCard.level == "collection",
-            ).first()
+            card = (
+                db.query(LibraryCard)
+                .filter(
+                    LibraryCard.collection_id == col.id,
+                    LibraryCard.level == "collection",
+                )
+                .first()
+            )
 
             lines = [
                 f"Collection: {col.name}",
@@ -323,9 +473,11 @@ def register_tools(mcp: FastMCP):
             if card:
                 lines.append(f"\nSummary: {card.content[:300]}")
             if col.documents:
-                lines.append(f"\nDocuments:")
+                lines.append("\nDocuments:")
                 for d in col.documents:
-                    lines.append(f"  • {d.filename} [{d.status}] — {len(d.chunks)} chunks — job_id={d.job_id}")
+                    lines.append(
+                        f"  • {d.filename} [{d.status}] — {len(d.chunks)} chunks — job_id={d.job_id}"
+                    )
             return "\n".join(lines)
         finally:
             db.close()
@@ -338,7 +490,9 @@ def register_tools(mcp: FastMCP):
         name="upload_document",
         description="Upload a markdown (.md) file to a collection. Returns a job_id for progress tracking.",
     )
-    def upload_document(file_path: str, collection_id: str, max_tokens: int = 512) -> str:
+    def upload_document(
+        file_path: str, collection_id: str, max_tokens: int = 512
+    ) -> str:
         p = Path(file_path)
         if not p.exists():
             return f"Error: file not found — {file_path}"
@@ -355,15 +509,22 @@ def register_tools(mcp: FastMCP):
             job_id = str(uuid.uuid4())
 
             doc = Document(
-                job_id=job_id, collection_id=col.id, filename=p.name,
-                size=len(content.encode("utf-8")), ip_address="127.0.0.1",
-                content=content, status="processing",
+                job_id=job_id,
+                collection_id=col.id,
+                filename=p.name,
+                size=len(content.encode("utf-8")),
+                ip_address="127.0.0.1",
+                content=content,
+                status="processing",
             )
             db.add(doc)
             db.commit()
             db.refresh(doc)
 
-            from doc_search.presentation.api.tasks import process_document_with_subdocuments
+            from doc_search.presentation.api.tasks import (
+                process_document_with_subdocuments,
+            )
+
             threading.Thread(
                 target=process_document_with_subdocuments,
                 args=(job_id, content, max_tokens, SessionLocal()),
@@ -399,8 +560,37 @@ def register_tools(mcp: FastMCP):
             lines = [f"Documents ({len(docs)}):\n"]
             for d in docs:
                 cn = d.collection.name if d.collection else "?"
-                lines.append(f"  • {d.filename} [{d.status}] — {len(d.chunks)} chunks, {cn}")
+                lines.append(
+                    f"  • {d.filename} [{d.status}] — {len(d.chunks)} chunks, {cn}"
+                )
                 lines.append(f"    job_id: {d.job_id}")
+            return "\n".join(lines)
+        finally:
+            db.close()
+
+    @mcp.tool(
+        name="list_collection_documents",
+        description="Compact document list for one collection with names, statuses, chunk counts, and job_id values.",
+    )
+    def list_collection_documents(collection_id: str) -> str:
+        db = _get_db()
+        try:
+            col = _resolve_collection(db, collection_id)
+            if not col:
+                return f"Collection not found: {collection_id}"
+            docs = (
+                db.query(Document)
+                .filter(Document.collection_id == col.id)
+                .order_by(Document.created_at.desc())
+                .all()
+            )
+            if not docs:
+                return f"No documents found in collection: {col.name}"
+            lines = [f"Documents in {col.name} ({len(docs)}):\n"]
+            for d in docs:
+                lines.append(
+                    f"  • {d.filename} [{d.status}] — chunks={len(d.chunks)} — job_id={d.job_id}"
+                )
             return "\n".join(lines)
         finally:
             db.close()
@@ -416,12 +606,21 @@ def register_tools(mcp: FastMCP):
             if not doc:
                 return f"Document not found: {job_id}"
 
-            structure = db.query(DocumentStructure).filter(
-                DocumentStructure.document_id == doc.id,
-            ).first()
-            chunks = db.query(Chunk).filter(
-                Chunk.document_id == doc.id,
-            ).order_by(Chunk.chunk_index).all()
+            structure = (
+                db.query(DocumentStructure)
+                .filter(
+                    DocumentStructure.document_id == doc.id,
+                )
+                .first()
+            )
+            chunks = (
+                db.query(Chunk)
+                .filter(
+                    Chunk.document_id == doc.id,
+                )
+                .order_by(Chunk.chunk_index)
+                .all()
+            )
 
             lines = [
                 f"Document: {doc.filename}",
@@ -440,7 +639,9 @@ def register_tools(mcp: FastMCP):
                 lines.append("\n--- First 3 Chunks ---")
                 for ch in chunks[:3]:
                     preview = ch.content[:300].replace("\n", " ")
-                    lines.append(f"  [{ch.chunk_index}] ({ch.token_count} tokens): {preview}...")
+                    lines.append(
+                        f"  [{ch.chunk_index}] ({ch.token_count} tokens): {preview}..."
+                    )
             return "\n".join(lines)
         finally:
             db.close()
@@ -457,6 +658,7 @@ def register_tools(mcp: FastMCP):
                 return f"Document not found: {job_id}"
 
             from doc_search.presentation.api.tasks import get_processing_status
+
             status = get_processing_status(job_id)
 
             if status:
@@ -486,9 +688,14 @@ def register_tools(mcp: FastMCP):
             if doc.status != "completed":
                 return f"Document not ready. Status: {doc.status}"
 
-            chunks = db.query(Chunk).filter(
-                Chunk.document_id == doc.id,
-            ).order_by(Chunk.chunk_index).all()
+            chunks = (
+                db.query(Chunk)
+                .filter(
+                    Chunk.document_id == doc.id,
+                )
+                .order_by(Chunk.chunk_index)
+                .all()
+            )
 
             lines = [
                 f"Document: {doc.filename}",
@@ -505,7 +712,9 @@ def register_tools(mcp: FastMCP):
                         pass
                 header = meta.get("header", "")
                 node_type = meta.get("node_type", "text")
-                lines.append(f"--- Chunk {ch.chunk_index} [{node_type}] ({ch.token_count} tokens) ---")
+                lines.append(
+                    f"--- Chunk {ch.chunk_index} [{node_type}] ({ch.token_count} tokens) ---"
+                )
                 if header:
                     lines.append(f"  Header: {header}")
                 lines.append(ch.content[:2000])
@@ -527,9 +736,13 @@ def register_tools(mcp: FastMCP):
             if doc.status != "completed":
                 return f"Document not ready. Status: {doc.status}"
 
-            structure = db.query(DocumentStructure).filter(
-                DocumentStructure.document_id == doc.id,
-            ).first()
+            structure = (
+                db.query(DocumentStructure)
+                .filter(
+                    DocumentStructure.document_id == doc.id,
+                )
+                .first()
+            )
             if not structure or not structure.skeleton_structure:
                 return "No structure available."
 
@@ -556,34 +769,120 @@ def register_tools(mcp: FastMCP):
         context_mode: str = "none",
         account_id: str | None = None,
         node_type_filter: str | None = None,
+        routing_mode: str = "auto",
     ) -> str:
-        from doc_search.core.application.dto.collection_search import CollectionSearch
+        return await _run_search_documents_text(
+            query=query,
+            top_k=top_k,
+            rerank=rerank,
+            context_mode=context_mode,
+            account_id=account_id,
+            node_type_filter=node_type_filter,
+            routing_mode=routing_mode,
+        )
 
-        db = _get_db()
-        try:
-            searcher = _get_multi_index_searcher(db)
-            # Reranker disabled — runs too slow locally
-            results = await searcher.search_collections(
-                CollectionSearch(
-                    query=query, account_id=account_id or "",
-                    top_k=min(top_k, 100), rerank=False,
-                    context_mode=context_mode, hf_api_token=_hf_token(),
-                )
-            )
-            if not results:
-                return "No results found."
-            out = [f"Found {len(results)} results for: {query}\n"]
-            for i, r in enumerate(results, 1):
-                src = r.get("collection_name", "?")
-                doc = r.get("document_filename", "?")
-                score = r.get("rerank_score") or r.get("score", 0)
-                content = r.get("expanded_content", r.get("content", ""))
-                out.append(f"--- Result {i} [{src}/{doc}] score={score:.3f} ---")
-                out.append(content[:1500])
-                out.append("")
-            return "\n".join(out)
-        finally:
-            db.close()
+    @mcp.tool(
+        name="search_collection",
+        description="Hybrid search within a single collection by collection_id. Faster than broad search and broader than search_document.",
+    )
+    async def search_collection(
+        collection_id: str,
+        query: str,
+        top_k: int = 10,
+        rerank: bool = False,
+        context_mode: str = "none",
+        node_type_filter: str | None = None,
+    ) -> str:
+        return await _run_search_documents_text(
+            query=query,
+            top_k=top_k,
+            rerank=rerank,
+            context_mode=context_mode,
+            collection_id=collection_id,
+            node_type_filter=node_type_filter,
+        )
+
+    @mcp.tool(
+        name="start_search_documents",
+        description="Start a background search across collections and return a search_job_id for polling.",
+    )
+    async def start_search_documents(
+        query: str,
+        top_k: int = 10,
+        context_mode: str = "none",
+        account_id: str | None = None,
+        collection_id: str | None = None,
+        routing_mode: str = "auto",
+        rerank: bool = False,
+        node_type_filter: str | None = None,
+    ) -> str:
+        job = _search_job_manager.start(
+            params={
+                "query": query,
+                "top_k": top_k,
+                "context_mode": context_mode,
+                "account_id": account_id,
+                "collection_id": collection_id,
+                "routing_mode": routing_mode,
+                "rerank": rerank,
+                "node_type_filter": node_type_filter,
+            },
+            runner=_execute_search_job,
+        )
+        return (
+            "Search job started.\n"
+            f"  search_job_id: {job.job_id}\n"
+            f"  status: {job.status}\n"
+            "Use get_search_progress and get_search_results to poll it."
+        )
+
+    @mcp.tool(
+        name="get_search_progress",
+        description="Get status and progress for a background search job.",
+    )
+    def get_search_progress(search_job_id: str) -> str:
+        job = _search_job_manager.get(search_job_id)
+        if not job:
+            return f"Search job not found: {search_job_id}"
+        return (
+            f"Search job: {job.job_id}\n"
+            f"status: {job.status}\n"
+            f"progress: {job.progress}\n"
+            f"created_at: {job.created_at.isoformat()}\n"
+            f"updated_at: {job.updated_at.isoformat()}"
+            + (f"\nerror: {job.error}" if job.error else "")
+        )
+
+    @mcp.tool(
+        name="get_search_results",
+        description="Get results for a completed background search job.",
+    )
+    def get_search_results(search_job_id: str) -> str:
+        job = _search_job_manager.get(search_job_id)
+        if not job:
+            return f"Search job not found: {search_job_id}"
+        if job.status == "completed":
+            return job.result or "No results found."
+        if job.status == "failed":
+            return f"Search job failed: {job.error or 'unknown error'}"
+        if job.status == "cancelled":
+            return "Search job was cancelled."
+        return (
+            f"Search job not complete yet. status={job.status}, progress={job.progress}"
+        )
+
+    @mcp.tool(
+        name="cancel_search",
+        description="Cancel a running background search job where practical.",
+    )
+    def cancel_search(search_job_id: str) -> str:
+        job = _search_job_manager.get(search_job_id)
+        if not job:
+            return f"Search job not found: {search_job_id}"
+        if job.status in {"completed", "failed", "cancelled"}:
+            return f"Search job already {job.status}."
+        _search_job_manager.cancel(search_job_id)
+        return f"Cancellation requested for search_job_id: {search_job_id}"
 
     @mcp.tool(
         name="search_document",
@@ -597,8 +896,12 @@ def register_tools(mcp: FastMCP):
         context_mode: str = "none",
         node_type_filter: str | None = None,
     ) -> str:
-        from doc_search.core.application.dto.sub_document_search import SubDocumentSearch
-        from doc_search.core.application.dto.single_index_search import SingleIndexSearch
+        from doc_search.core.application.dto.sub_document_search import (
+            SubDocumentSearch,
+        )
+        from doc_search.core.application.dto.single_index_search import (
+            SingleIndexSearch,
+        )
 
         db = _get_db()
         try:
@@ -608,16 +911,22 @@ def register_tools(mcp: FastMCP):
             if doc.status != "completed":
                 return f"Document not ready. Status: {doc.status}"
 
-            subdocs = db.query(SubDocument).filter(SubDocument.document_id == doc.id).all()
+            subdocs = (
+                db.query(SubDocument).filter(SubDocument.document_id == doc.id).all()
+            )
 
             if subdocs:
                 searcher = _get_multi_index_searcher(db)
                 # Reranker disabled — runs too slow locally
                 results = await searcher.search_subdocuments(
                     SubDocumentSearch(
-                        query=query, document_id=doc.id,
-                        top_k=min(top_k, 100), rerank=False,
-                        context_mode=context_mode, hf_api_token=_hf_token(),
+                        query=query,
+                        document_id=doc.id,
+                        top_k=min(top_k, 100),
+                        rerank=rerank,
+                        context_mode=context_mode,
+                        hf_api_token=_hf_token(),
+                        node_type_filter=_parse_node_type_filter(node_type_filter),
                     )
                 )
             else:
@@ -632,8 +941,9 @@ def register_tools(mcp: FastMCP):
                         bm25_path=doc.bm25_index_path,
                         document_id=doc.id,
                         top_k=min(top_k, 100),
-                        rerank=False,
+                        rerank=rerank,
                         context_mode=context_mode,
+                        node_type_filter=_parse_node_type_filter(node_type_filter),
                     )
                 )
 
@@ -669,7 +979,14 @@ def register_tools(mcp: FastMCP):
         db = _get_db()
         try:
             return await _run_intelligent_collection_search(
-                query, top_k, context_mode, account_id, enable_planning, rerank, node_type_filter, db,
+                query,
+                top_k,
+                context_mode,
+                account_id,
+                enable_planning,
+                rerank,
+                node_type_filter,
+                db,
             )
         finally:
             db.close()
@@ -687,8 +1004,12 @@ def register_tools(mcp: FastMCP):
         rerank: bool = False,
         node_type_filter: str | None = None,
     ) -> str:
-        from doc_search.core.application.dto.sub_document_search import SubDocumentSearch
-        from doc_search.core.application.dto.single_index_search import SingleIndexSearch
+        from doc_search.core.application.dto.sub_document_search import (
+            SubDocumentSearch,
+        )
+        from doc_search.core.application.dto.single_index_search import (
+            SingleIndexSearch,
+        )
 
         db = _get_db()
         try:
@@ -705,37 +1026,68 @@ def register_tools(mcp: FastMCP):
                     return None, None, None, f"Document not ready. Status: {doc.status}"
 
                 document_structure = []
-                subdocs = db.query(SubDocument).filter(SubDocument.document_id == doc.id).all()
+                subdocs = (
+                    db.query(SubDocument)
+                    .filter(SubDocument.document_id == doc.id)
+                    .all()
+                )
                 if subdocs:
                     for subdoc in subdocs:
-                        cards = db.query(LibraryCard).filter(
-                            LibraryCard.sub_document_id == subdoc.id,
-                            LibraryCard.level.in_(["level_1", "level_2", "level_3"]),
-                        ).order_by(LibraryCard.level.desc()).limit(20).all()
+                        cards = (
+                            db.query(LibraryCard)
+                            .filter(
+                                LibraryCard.sub_document_id == subdoc.id,
+                                LibraryCard.level.in_(
+                                    ["level_1", "level_2", "level_3"]
+                                ),
+                            )
+                            .order_by(LibraryCard.level.desc())
+                            .limit(20)
+                            .all()
+                        )
                         if cards:
-                            document_structure.append({
-                                "subdocument_name": subdoc.breadcrumb_key,
-                                "sections": [{"level": c.level, "title": c.title} for c in cards],
-                            })
+                            document_structure.append(
+                                {
+                                    "subdocument_name": subdoc.breadcrumb_key,
+                                    "sections": [
+                                        {"level": c.level, "title": c.title}
+                                        for c in cards
+                                    ],
+                                }
+                            )
                 else:
-                    cards = db.query(LibraryCard).filter(
-                        LibraryCard.document_id == doc.id,
-                        LibraryCard.level.in_(["level_1", "level_2", "level_3"]),
-                    ).order_by(LibraryCard.level.desc()).limit(30).all()
+                    cards = (
+                        db.query(LibraryCard)
+                        .filter(
+                            LibraryCard.document_id == doc.id,
+                            LibraryCard.level.in_(["level_1", "level_2", "level_3"]),
+                        )
+                        .order_by(LibraryCard.level.desc())
+                        .limit(30)
+                        .all()
+                    )
                     if cards:
-                        document_structure.append({
-                            "subdocument_name": doc.filename,
-                            "sections": [{"level": c.level, "title": c.title} for c in cards],
-                        })
+                        document_structure.append(
+                            {
+                                "subdocument_name": doc.filename,
+                                "sections": [
+                                    {"level": c.level, "title": c.title} for c in cards
+                                ],
+                            }
+                        )
 
                 search_plan = None
                 if enable_planning and document_structure:
                     planner = _get_query_planner()
-                    search_plan = planner.plan_document_search(query, document_structure=document_structure)
+                    search_plan = planner.plan_document_search(
+                        query, document_structure=document_structure
+                    )
 
                 return doc, subdocs, document_structure, search_plan
 
-            doc, subdocs, document_structure, search_plan = await asyncio.to_thread(_db_and_plan)
+            doc, subdocs, document_structure, search_plan = await asyncio.to_thread(
+                _db_and_plan
+            )
             if isinstance(search_plan, str):  # error message returned
                 return search_plan
 
@@ -746,9 +1098,12 @@ def register_tools(mcp: FastMCP):
                     # Reranker disabled — runs too slow locally
                     return await doc_searcher.search_subdocuments(
                         SubDocumentSearch(
-                            query=q, document_id=doc.id,
-                            top_k=min(top_k, 100), rerank=False,
-                            context_mode=context_mode, hf_api_token=token,
+                            query=q,
+                            document_id=doc.id,
+                            top_k=min(top_k, 100),
+                            rerank=False,
+                            context_mode=context_mode,
+                            hf_api_token=token,
                         )
                     )
                 if not doc.faiss_index_path or not doc.bm25_index_path:
@@ -756,17 +1111,22 @@ def register_tools(mcp: FastMCP):
                 # Reranker disabled — runs too slow locally
                 return await doc_searcher.search_single_index(
                     SingleIndexSearch(
-                        query=q, faiss_path=doc.faiss_index_path,
-                        bm25_path=doc.bm25_index_path, document_id=doc.id,
-                        top_k=min(top_k, 100), rerank=False,
+                        query=q,
+                        faiss_path=doc.faiss_index_path,
+                        bm25_path=doc.bm25_index_path,
+                        document_id=doc.id,
+                        top_k=min(top_k, 100),
+                        rerank=False,
                         context_mode=context_mode,
                     )
                 )
 
             engine = _get_intelligent_searcher()
             result = await engine.evaluate_and_answer_with_planning(
-                query=query, search_function=execute_search,
-                max_context_length=8000, plan=search_plan,
+                query=query,
+                search_function=execute_search,
+                max_context_length=8000,
+                plan=search_plan,
             )
 
             parts = []
@@ -807,19 +1167,32 @@ def register_tools(mcp: FastMCP):
                 lines.append(f"  Documents: {len(col.documents)}")
                 for doc in col.documents:
                     chunks = len(doc.chunks) if doc.chunks else 0
-                    cards = db.query(LibraryCard).filter(
-                        LibraryCard.document_id == doc.id,
-                        LibraryCard.collection_id == None,
-                    ).count()
-                    lines.append(f"  - {doc.filename} [{doc.status}] — {chunks} chunks, {cards} library cards — job_id={doc.job_id}")
+                    cards = (
+                        db.query(LibraryCard)
+                        .filter(
+                            LibraryCard.document_id == doc.id,
+                            LibraryCard.collection_id.is_(None),
+                        )
+                        .count()
+                    )
+                    lines.append(
+                        f"  - {doc.filename} [{doc.status}] — {chunks} chunks, {cards} library cards — job_id={doc.job_id}"
+                    )
                 # collection-level library cards
-                col_cards = db.query(LibraryCard).filter(
-                    LibraryCard.collection_id == col.id, LibraryCard.document_id == None,
-                ).all()
+                col_cards = (
+                    db.query(LibraryCard)
+                    .filter(
+                        LibraryCard.collection_id == col.id,
+                        LibraryCard.document_id.is_(None),
+                    )
+                    .all()
+                )
                 if col_cards:
                     lines.append(f"  Collection-level cards: {len(col_cards)}")
                     for cc in col_cards[:3]:
-                        lines.append(f"    [{cc.level}] {cc.title}: {cc.content[:200]}...")
+                        lines.append(
+                            f"    [{cc.level}] {cc.title}: {cc.content[:200]}..."
+                        )
                 lines.append("")
             return "\n".join(lines)
         finally:
@@ -845,12 +1218,18 @@ def register_tools(mcp: FastMCP):
             ]
             for doc in col.documents:
                 chunks = len(doc.chunks) if doc.chunks else 0
-                cards = db.query(LibraryCard).filter(
-                    LibraryCard.document_id == doc.id,
-                    LibraryCard.collection_id == None,
-                ).all()
+                cards = (
+                    db.query(LibraryCard)
+                    .filter(
+                        LibraryCard.document_id == doc.id,
+                        LibraryCard.collection_id.is_(None),
+                    )
+                    .all()
+                )
                 lines.append(f"## Document: {doc.filename}")
-                lines.append(f"  Status: {doc.status}  |  Size: {doc.size} bytes  |  Chunks: {chunks}")
+                lines.append(
+                    f"  Status: {doc.status}  |  Size: {doc.size} bytes  |  Chunks: {chunks}"
+                )
                 lines.append(f"  job_id: {doc.job_id}")
                 if cards:
                     lines.append(f"  Library cards ({len(cards)}):")
@@ -858,9 +1237,14 @@ def register_tools(mcp: FastMCP):
                         lines.append(f"    [{c.level}] {c.title}: {c.content[:150]}...")
                 lines.append("")
 
-            col_cards = db.query(LibraryCard).filter(
-                LibraryCard.collection_id == col.id, LibraryCard.document_id == None,
-            ).all()
+            col_cards = (
+                db.query(LibraryCard)
+                .filter(
+                    LibraryCard.collection_id == col.id,
+                    LibraryCard.document_id.is_(None),
+                )
+                .all()
+            )
             if col_cards:
                 lines.append("## Collection-level Library Cards")
                 for cc in col_cards:
@@ -889,11 +1273,18 @@ def register_tools(mcp: FastMCP):
                 return "No collections found."
             lines = [f"Collections ({len(collections)}):\n"]
             for c in collections:
-                card = db.query(LibraryCard).filter(
-                    LibraryCard.collection_id == c.id, LibraryCard.level == "collection",
-                ).first()
+                card = (
+                    db.query(LibraryCard)
+                    .filter(
+                        LibraryCard.collection_id == c.id,
+                        LibraryCard.level == "collection",
+                    )
+                    .first()
+                )
                 summary = card.content[:120] if card else "No summary"
-                lines.append(f"  • {c.name} ({len(c.documents)} docs) — {c.collection_id}")
+                lines.append(
+                    f"  • {c.name} ({len(c.documents)} docs) — {c.collection_id}"
+                )
                 lines.append(f"    {summary}")
             return "\n".join(lines)
         finally:

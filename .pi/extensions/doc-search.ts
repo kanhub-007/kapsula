@@ -36,13 +36,23 @@ interface McpToolDef {
   };
 }
 
+type PendingRequest = {
+  resolve: (res: JsonRpcResponse) => void;
+  reject: (err: Error) => void;
+  method: string;
+  startedAt: number;
+  timeoutMs: number;
+  timer: ReturnType<typeof setTimeout>;
+  abortHandler?: () => void;
+  signal?: AbortSignal;
+};
+
 // ── MCP Client over stdio ──────────────────────────────────────
 
 class McpStdioClient {
   private proc: ChildProcess | null = null;
   private requestId = 0;
-  private pending = new Map<number, (res: JsonRpcResponse) => void>();
-  private buffer = "";
+  private pending = new Map<number, PendingRequest>();
 
   async start(cwd: string): Promise<void> {
     this.proc = spawn(".venv/Scripts/python.exe", ["-m", "doc_search.presentation.mcp"], {
@@ -56,10 +66,18 @@ class McpStdioClient {
     rl.on("line", (line: string) => {
       try {
         const msg = JSON.parse(line) as JsonRpcResponse;
-        const resolve = this.pending.get(msg.id);
-        if (resolve) {
+        const pending = this.pending.get(msg.id);
+        if (pending) {
           this.pending.delete(msg.id);
-          resolve(msg);
+          clearTimeout(pending.timer);
+          if (pending.abortHandler) {
+            // `AbortSignal` is an EventTarget in modern Node.
+            // Remove the handler defensively if this request was cancellable.
+            pending.signal?.removeEventListener("abort", pending.abortHandler);
+          }
+          const elapsed = Date.now() - pending.startedAt;
+          console.error(`doc-search MCP ${pending.method} completed in ${elapsed}ms`);
+          pending.resolve(msg);
         }
       } catch {
         // skip non-JSON lines
@@ -67,7 +85,8 @@ class McpStdioClient {
     });
 
     this.proc.stderr?.on("data", (d) => {
-      // swallow stderr (logging)
+      // Forward backend timing/search logs to the Pi process log.
+      console.error(String(d));
     });
 
     // Send initialize
@@ -86,8 +105,8 @@ class McpStdioClient {
     return (res.result as { tools: McpToolDef[] })?.tools ?? [];
   }
 
-  async callTool(name: string, args: Record<string, unknown>): Promise<string> {
-    const res = await this.request("tools/call", { name, arguments: args });
+  async callTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
+    const res = await this.request("tools/call", { name, arguments: args }, signal);
     const content = (res.result as { content?: Array<{ type: string; text?: string }> })?.content;
     if (content && content.length > 0) {
       return content.map((c) => c.text ?? "").join("\n");
@@ -95,22 +114,72 @@ class McpStdioClient {
     return JSON.stringify(res.result);
   }
 
-  private request(method: string, params: Record<string, unknown>): Promise<JsonRpcResponse> {
+  private request(
+    method: string,
+    params: Record<string, unknown>,
+    signal?: AbortSignal
+  ): Promise<JsonRpcResponse> {
     const id = ++this.requestId;
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`MCP request timeout: ${method}`));
-      }, 300000);
+    const timeoutMs = this.timeoutFor(method);
+    const startedAt = Date.now();
 
-      this.pending.set(id, (res: JsonRpcResponse) => {
-        clearTimeout(timeout);
-        if (res.error) reject(new Error(res.error.message));
-        else resolve(res);
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        const pending = this.pending.get(id);
+        if (!pending) return;
+        this.pending.delete(id);
+        clearTimeout(pending.timer);
+        if (pending.abortHandler && signal) {
+          signal.removeEventListener("abort", pending.abortHandler);
+        }
+      };
+
+      const timer = setTimeout(() => {
+        cleanup();
+        const elapsed = Date.now() - startedAt;
+        reject(new Error(`MCP request timeout after ${elapsed}ms (configured ${timeoutMs}ms): ${method}`));
+      }, timeoutMs);
+
+      const abortHandler = () => {
+        cleanup();
+        const elapsed = Date.now() - startedAt;
+        this.send({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: id } });
+        reject(new Error(`MCP request cancelled after ${elapsed}ms: ${method}`));
+      };
+
+      if (signal?.aborted) {
+        clearTimeout(timer);
+        reject(new Error(`MCP request cancelled before send: ${method}`));
+        return;
+      }
+
+      if (signal) {
+        signal.addEventListener("abort", abortHandler, { once: true });
+      }
+
+      this.pending.set(id, {
+        resolve: (res: JsonRpcResponse) => {
+          if (res.error) reject(new Error(res.error.message));
+          else resolve(res);
+        },
+        reject,
+        method,
+        startedAt,
+        timeoutMs,
+        timer,
+        abortHandler: signal ? abortHandler : undefined,
+        signal,
       });
 
+      console.error(`doc-search MCP ${method} started (timeout ${timeoutMs}ms)`);
       this.send({ jsonrpc: "2.0", id, method, params });
     });
+  }
+
+  private timeoutFor(method: string): number {
+    if (method === "tools/call") return 300000;
+    if (method === "initialize" || method === "tools/list") return 30000;
+    return 30000;
   }
 
   private send(msg: Record<string, unknown>): void {
@@ -168,9 +237,9 @@ export default async function (pi: ExtensionAPI) {
           label: tool.name,
           description: tool.description ?? `doc-search tool: ${tool.name}`,
           parameters: paramsSchema,
-          async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+          async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
             try {
-              const result = await client.callTool(tool.name, params as Record<string, unknown>);
+              const result = await client.callTool(tool.name, params as Record<string, unknown>, signal);
               return {
                 content: [{ type: "text" as const, text: result }],
                 details: {},
