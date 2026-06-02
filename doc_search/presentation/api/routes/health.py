@@ -11,14 +11,11 @@ async def root():
     return {
         "message": "Document Chunking API is running",
         "version": "1.0.0",
-        "docs": "/docs"
+        "docs": "/docs",
     }
 
 
 @router.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "service": "document-chunking-api"
-    }
+    return {"status": "healthy", "service": "document-chunking-api"}

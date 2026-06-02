@@ -48,15 +48,16 @@ class HFEndpointReranker:
                     if resp.status != 200:
                         text = await resp.text()
                         logger.warning(
-                            f"Reranker batched returned {resp.status}: "
-                            f"{text[:500]}"
+                            f"Reranker batched returned {resp.status}: " f"{text[:500]}"
                         )
                         return None
                     data = await resp.json()
                     return [
-                        float(1 / (1 + np.exp(-item[0][0])))
-                        if (isinstance(item, list) and item)
-                        else 0.0
+                        (
+                            float(1 / (1 + np.exp(-item[0][0])))
+                            if (isinstance(item, list) and item)
+                            else 0.0
+                        )
                         for item in data
                     ]
         except Exception:
@@ -67,9 +68,7 @@ class HFEndpointReranker:
         self, query: str, candidates: List[Dict[str, Any]]
     ) -> list[float]:
         logger.info("Falling back to concurrent individual reranking")
-        pair_texts = [
-            f"[CLS] {query} [SEP] {c['content']} [SEP]" for c in candidates
-        ]
+        pair_texts = [f"[CLS] {query} [SEP] {c['content']} [SEP]" for c in candidates]
 
         timeout = aiohttp.ClientTimeout(total=30)
         connector = aiohttp.TCPConnector(limit_per_host=100, limit=200)
@@ -79,9 +78,7 @@ class HFEndpointReranker:
             tasks = [self._fetch_single(session, text) for text in pair_texts]
             return await asyncio.gather(*tasks)
 
-    async def _fetch_single(
-        self, session: aiohttp.ClientSession, text: str
-    ) -> float:
+    async def _fetch_single(self, session: aiohttp.ClientSession, text: str) -> float:
         try:
             async with session.post(
                 self._url,
@@ -94,11 +91,7 @@ class HFEndpointReranker:
                 data = await resp.json()
                 logit = (
                     data[0][0]
-                    if (
-                        isinstance(data, list)
-                        and data
-                        and isinstance(data[0], list)
-                    )
+                    if (isinstance(data, list) and data and isinstance(data[0], list))
                     else 0.0
                 )
                 return float(1 / (1 + np.exp(-logit)))

@@ -9,14 +9,13 @@ import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-
-load_dotenv()
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from doc_search.presentation.api.routes import api_router
 from doc_search.startup import bootstrap
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 

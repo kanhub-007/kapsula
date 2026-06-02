@@ -1,7 +1,6 @@
 """Tests for MCP server foundation — server module."""
 
 import os
-import pytest
 from unittest.mock import patch
 
 from doc_search.startup.mcp import create_server, get_transport_config
@@ -71,7 +70,9 @@ class TestBootstrap:
             db.commit()
             bootstrap()
 
-            count_before = db.query(Account).filter(Account.name == "doc-search").count()
+            count_before = (
+                db.query(Account).filter(Account.name == "doc-search").count()
+            )
 
             # Bootstrap again
             bootstrap()
@@ -100,11 +101,14 @@ class TestTransportSelection:
 
     def test_custom_host_and_port(self):
         """Should respect custom host and port env vars."""
-        with patch.dict(os.environ, {
-            "DOCSEARCH_TRANSPORT": "http",
-            "DOCSEARCH_HOST": "0.0.0.0",
-            "DOCSEARCH_PORT": "9000"
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "DOCSEARCH_TRANSPORT": "http",
+                "DOCSEARCH_HOST": "0.0.0.0",
+                "DOCSEARCH_PORT": "9000",
+            },
+        ):
             config = get_transport_config()
             assert config["host"] == "0.0.0.0"
             assert config["port"] == 9000

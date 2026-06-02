@@ -3,20 +3,38 @@
 import json
 import uuid
 
-from fastapi import APIRouter, File, UploadFile, Depends, HTTPException, Request, BackgroundTasks
+from fastapi import (
+    APIRouter,
+    File,
+    UploadFile,
+    Depends,
+    HTTPException,
+    Request,
+    BackgroundTasks,
+)
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from doc_search.infrastructure.data import get_db, Document, DocumentStructure, Chunk, Collection
+from doc_search.infrastructure.data import (
+    get_db,
+    Document,
+    DocumentStructure,
+    Chunk,
+    Collection,
+)
 from doc_search.infrastructure.logging_config import get_logger
 from ..models import (
     UploadResponse,
     ProgressResponse,
     DocumentListResponse,
     DocumentDetailResponse,
-    DocumentListItem
+    DocumentListItem,
 )
-from ..tasks import process_document_with_subdocuments, get_processing_status, processing_status
+from ..tasks import (
+    process_document_with_subdocuments,
+    get_processing_status,
+    processing_status,
+)
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -29,7 +47,7 @@ async def upload_document(
     collection_id: str,
     file: UploadFile = File(...),
     max_tokens: int = 512,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Upload a markdown file for processing to a collection.
@@ -40,22 +58,28 @@ async def upload_document(
 
     Returns job ID and processing status.
     """
-    logger.info(f"Received upload request: collection_id={collection_id}, filename={file.filename}, max_tokens={max_tokens}")
+    logger.info(
+        f"Received upload request: collection_id={collection_id}, filename={file.filename}, max_tokens={max_tokens}"
+    )
 
     # Verify collection exists
-    collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    collection = (
+        db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
         raise HTTPException(status_code=404, detail="Collection not found")
 
     # Validate file type
-    if not file.filename.endswith('.md'):
+    if not file.filename.endswith(".md"):
         logger.warning(f"Invalid file type rejected: {file.filename}")
-        raise HTTPException(status_code=400, detail="Only markdown (.md) files are allowed")
+        raise HTTPException(
+            status_code=400, detail="Only markdown (.md) files are allowed"
+        )
 
     # Read file content
     content = await file.read()
-    markdown_content = content.decode('utf-8')
+    markdown_content = content.decode("utf-8")
     logger.debug(f"File content read: {len(content)} bytes")
 
     # Get client IP
@@ -74,20 +98,22 @@ async def upload_document(
         size=len(content),
         ip_address=client_ip,
         content=markdown_content,
-        status="processing"
+        status="processing",
     )
 
     db.add(document)
     db.commit()
     db.refresh(document)
-    logger.info(f"Document created with job_id: {job_id}, db_id: {document.id}, collection: {collection.name}")
+    logger.info(
+        f"Document created with job_id: {job_id}, db_id: {document.id}, collection: {collection.name}"
+    )
 
     # Initialize progress tracking
     processing_status[job_id] = {
         "status": "processing",
         "progress": 0,
         "stage": "queued",
-        "message": "Document queued for processing..."
+        "message": "Document queued for processing...",
     }
 
     # Process document in background using Russian Doll architecture
@@ -96,14 +122,14 @@ async def upload_document(
         job_id=job_id,
         markdown_content=markdown_content,
         max_tokens=max_tokens,
-        db=db
+        db=db,
     )
 
     return UploadResponse(
         job_id=job_id,
         collection_id=collection_id,
         status="processing",
-        message="Document uploaded successfully. Processing started."
+        message="Document uploaded successfully. Processing started.",
     )
 
 
@@ -135,7 +161,7 @@ async def get_progress(job_id: str, db: Session = Depends(get_db)):
         status=document.status,
         progress=100 if document.status == "completed" else 0,
         stage=document.status,
-        message=f"Document status: {document.status}"
+        message=f"Document status: {document.status}",
     )
 
 
@@ -162,11 +188,15 @@ async def download_structure(job_id: str, db: Session = Depends(get_db)):
         logger.warning(f"Job {job_id} not completed, status: {document.status}")
         raise HTTPException(
             status_code=400,
-            detail=f"Document processing not completed. Current status: {document.status}"
+            detail=f"Document processing not completed. Current status: {document.status}",
         )
 
     # Get document structure
-    structure = db.query(DocumentStructure).filter(DocumentStructure.document_id == document.id).first()
+    structure = (
+        db.query(DocumentStructure)
+        .filter(DocumentStructure.document_id == document.id)
+        .first()
+    )
 
     if not structure or not structure.skeleton_structure:
         logger.warning(f"Job {job_id} has no structure")
@@ -175,13 +205,11 @@ async def download_structure(job_id: str, db: Session = Depends(get_db)):
     logger.info(f"Job {job_id}: Returning structure as MD file")
 
     # Return as downloadable markdown file
-    filename = document.filename.replace('.md', '_structure.md')
+    filename = document.filename.replace(".md", "_structure.md")
     return Response(
         content=structure.skeleton_structure,
         media_type="text/markdown",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        }
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -206,11 +234,16 @@ async def download_chunks(job_id: str, db: Session = Depends(get_db)):
         logger.warning(f"Job {job_id} not completed, status: {document.status}")
         raise HTTPException(
             status_code=400,
-            detail=f"Document processing not completed. Current status: {document.status}"
+            detail=f"Document processing not completed. Current status: {document.status}",
         )
 
     # Get all chunks
-    chunks = db.query(Chunk).filter(Chunk.document_id == document.id).order_by(Chunk.chunk_index).all()
+    chunks = (
+        db.query(Chunk)
+        .filter(Chunk.document_id == document.id)
+        .order_by(Chunk.chunk_index)
+        .all()
+    )
 
     logger.info(f"Job {job_id}: Preparing download with {len(chunks)} chunks")
 
@@ -223,7 +256,7 @@ async def download_chunks(job_id: str, db: Session = Depends(get_db)):
             "size": document.size,
             "created_at": document.created_at.isoformat(),
             "duration": document.duration,
-            "ip_address": document.ip_address
+            "ip_address": document.ip_address,
         },
         "chunks": [
             {
@@ -231,21 +264,21 @@ async def download_chunks(job_id: str, db: Session = Depends(get_db)):
                 "chunk_index": chunk.chunk_index,
                 "content": chunk.content,
                 "token_count": chunk.token_count,
-                "metadata": json.loads(chunk.chunk_metadata) if chunk.chunk_metadata else {}
+                "metadata": (
+                    json.loads(chunk.chunk_metadata) if chunk.chunk_metadata else {}
+                ),
             }
             for chunk in chunks
         ],
-        "total_chunks": len(chunks)
+        "total_chunks": len(chunks),
     }
 
     # Return as downloadable JSON file
-    filename = document.filename.replace('.md', '_chunks.json')
+    filename = document.filename.replace(".md", "_chunks.json")
     return Response(
         content=json.dumps(response_data, indent=2),
         media_type="application/json",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        }
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -271,11 +304,11 @@ async def list_documents(db: Session = Depends(get_db)):
                 status=doc.status,
                 created_at=doc.created_at.isoformat(),
                 duration=doc.duration,
-                chunk_count=len(doc.chunks)
+                chunk_count=len(doc.chunks),
             )
             for doc in documents
         ],
-        total=len(documents)
+        total=len(documents),
     )
 
 
@@ -295,7 +328,11 @@ async def get_document(job_id: str, db: Session = Depends(get_db)):
         logger.warning(f"Job not found: {job_id}")
         raise HTTPException(status_code=404, detail="Job not found")
 
-    structure = db.query(DocumentStructure).filter(DocumentStructure.document_id == document.id).first()
+    structure = (
+        db.query(DocumentStructure)
+        .filter(DocumentStructure.document_id == document.id)
+        .first()
+    )
 
     return DocumentDetailResponse(
         id=document.id,
@@ -309,5 +346,5 @@ async def get_document(job_id: str, db: Session = Depends(get_db)):
         duration=document.duration,
         ip_address=document.ip_address,
         chunk_count=len(document.chunks),
-        structure=structure.skeleton_structure if structure else None
+        structure=structure.skeleton_structure if structure else None,
     )

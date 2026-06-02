@@ -49,9 +49,7 @@ class HybridSearcher:
             fused = filter_by_node_type(fused, node_type_filter)
 
         if rerank and self._reranker:
-            top_results = await self._reranker.rerank(
-                query, fused[: top_k * 2], top_k
-            )
+            top_results = await self._reranker.rerank(query, fused[: top_k * 2], top_k)
         else:
             top_results = fused[:top_k]
 

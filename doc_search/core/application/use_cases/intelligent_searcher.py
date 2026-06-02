@@ -77,7 +77,9 @@ class IntelligentSearcher:
                 "event_type": "subquestion_start",
                 "data": {
                     "subquestion_index": idx,
-                    "subquestion": plan["queries"][idx] if idx < len(plan["queries"]) else "",
+                    "subquestion": (
+                        plan["queries"][idx] if idx < len(plan["queries"]) else ""
+                    ),
                     "completed": len(sub_answers),
                     "total": len(plan["queries"]),
                 },
@@ -180,7 +182,9 @@ class IntelligentSearcher:
 
         for idx, result in enumerate(search_results):
             content = result.get("content", "")
-            text = f"[Result {idx + 1}] (Score: {result.get('score', 0):.3f})\n{content}\n"
+            text = (
+                f"[Result {idx + 1}] (Score: {result.get('score', 0):.3f})\n{content}\n"
+            )
             if current_length + len(text) > max_context_length:
                 break
             context_parts.append(text)
@@ -304,7 +308,12 @@ class IntelligentSearcher:
             answer = self._chat_client.send(
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT_COMBINE},
-                    {"role": "user", "content": USER_MESSAGE_COMBINE.format(query=original_query, context=context)},
+                    {
+                        "role": "user",
+                        "content": USER_MESSAGE_COMBINE.format(
+                            query=original_query, context=context
+                        ),
+                    },
                 ],
                 max_tokens=1500,
                 temperature=0.3,

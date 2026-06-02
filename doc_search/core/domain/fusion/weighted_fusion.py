@@ -61,9 +61,7 @@ def _apply_quality_filter(
     filtered = []
     for result in combined:
         dense = result.get("dense_score", 0)
-        sn = (
-            result.get("sparse_score", 0) / max_sparse if max_sparse > 0 else 0
-        )
+        sn = result.get("sparse_score", 0) / max_sparse if max_sparse > 0 else 0
         if passes_quality_filter(dense, sn, max_sparse):
             filtered.append(result)
     logger.debug(f"Quality filter: kept {len(filtered)}/{len(combined)}")

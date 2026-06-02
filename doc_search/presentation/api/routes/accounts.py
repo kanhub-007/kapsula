@@ -4,26 +4,33 @@ import uuid
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from doc_search.infrastructure.data import get_db, Account, LibraryCard
 from doc_search.infrastructure.logging_config import get_logger
+from ..models import (
+    AccountExportResponse,
+    CollectionListResponse,
+)
 
 logger = get_logger(__name__)
 router = APIRouter()
 
 
 # Pydantic models for request/response
-from pydantic import BaseModel
+
 
 class AccountCreate(BaseModel):
     name: str
+
 
 class AccountResponse(BaseModel):
     account_id: str
     name: str
     created_at: str
     collection_count: int
+
 
 class AccountListResponse(BaseModel):
     accounts: List[AccountResponse]
@@ -32,9 +39,7 @@ class AccountListResponse(BaseModel):
 
 @router.post("/", response_model=AccountResponse)
 async def create_account(
-    request: Request,
-    account_data: AccountCreate,
-    db: Session = Depends(get_db)
+    request: Request, account_data: AccountCreate, db: Session = Depends(get_db)
 ):
     """
     Create a new account.
@@ -54,9 +59,7 @@ async def create_account(
 
     # Create account record
     account = Account(
-        account_id=account_id,
-        name=account_data.name,
-        ip_address=client_ip
+        account_id=account_id, name=account_data.name, ip_address=client_ip
     )
 
     db.add(account)
@@ -69,7 +72,7 @@ async def create_account(
         account_id=account.account_id,
         name=account.name,
         created_at=account.created_at.isoformat(),
-        collection_count=0
+        collection_count=0,
     )
 
 
@@ -89,11 +92,11 @@ async def list_accounts(db: Session = Depends(get_db)):
                 account_id=acc.account_id,
                 name=acc.name,
                 created_at=acc.created_at.isoformat(),
-                collection_count=len(acc.collections)
+                collection_count=len(acc.collections),
             )
             for acc in accounts
         ],
-        total=len(accounts)
+        total=len(accounts),
     )
 
 
@@ -117,11 +120,8 @@ async def get_account(account_id: str, db: Session = Depends(get_db)):
         account_id=account.account_id,
         name=account.name,
         created_at=account.created_at.isoformat(),
-        collection_count=len(account.collections)
+        collection_count=len(account.collections),
     )
-
-
-from ..models import CollectionListResponse  # ensure available for OpenAPI schema
 
 
 @router.get("/{account_id}/collections", response_model=CollectionListResponse)
@@ -150,7 +150,7 @@ async def list_account_collections(account_id: str, db: Session = Depends(get_db
             db.query(LibraryCard)
             .filter(
                 LibraryCard.collection_id == col.id,
-                LibraryCard.document_id == None,  # ensure collection-level
+                LibraryCard.document_id.is_(None),  # ensure collection-level
             )
             .order_by(LibraryCard.created_at.desc())
             .first()
@@ -162,17 +162,15 @@ async def list_account_collections(account_id: str, db: Session = Depends(get_db
                 name=col.name,
                 created_at=col.created_at.isoformat(),
                 document_count=len(col.documents),
-                library_card_summary=(collection_card.content if collection_card else None),
+                library_card_summary=(
+                    collection_card.content if collection_card else None
+                ),
             )
         )
 
     return CollectionListResponse(
-        collections=collections_with_summary,
-        total=len(account.collections)
+        collections=collections_with_summary, total=len(account.collections)
     )
-
-
-from ..models import AccountExportResponse  # ensure available for OpenAPI schema
 
 
 @router.get("/{account_id}/export", response_model=AccountExportResponse)
@@ -202,7 +200,7 @@ async def export_account_data(account_id: str, db: Session = Depends(get_db)):
         AccountExportResponse,
         CollectionExportInfo,
         DocumentExportInfo,
-        LibraryCardInfo
+        LibraryCardInfo,
     )
 
     collections_data = []
@@ -216,10 +214,14 @@ async def export_account_data(account_id: str, db: Session = Depends(get_db)):
         # Process each document in collection
         for document in collection.documents:
             # Get document-level library cards
-            doc_library_cards = db.query(LibraryCard).filter(
-                LibraryCard.document_id == document.id,
-                LibraryCard.collection_id == None  # Document-level only
-            ).all()
+            doc_library_cards = (
+                db.query(LibraryCard)
+                .filter(
+                    LibraryCard.document_id == document.id,
+                    LibraryCard.collection_id.is_(None),  # Document-level only
+                )
+                .all()
+            )
 
             doc_library_cards_info = [
                 LibraryCardInfo(
@@ -227,7 +229,7 @@ async def export_account_data(account_id: str, db: Session = Depends(get_db)):
                     level=card.level,
                     title=card.title,
                     content=card.content,
-                    created_at=card.created_at.isoformat()
+                    created_at=card.created_at.isoformat(),
                 )
                 for card in doc_library_cards
             ]
@@ -242,7 +244,7 @@ async def export_account_data(account_id: str, db: Session = Depends(get_db)):
                     created_at=document.created_at.isoformat(),
                     duration=document.duration,
                     chunk_count=len(document.chunks),
-                    library_cards=doc_library_cards_info
+                    library_cards=doc_library_cards_info,
                 )
             )
 
@@ -250,10 +252,14 @@ async def export_account_data(account_id: str, db: Session = Depends(get_db)):
             total_library_cards += len(doc_library_cards_info)
 
         # Get collection-level library cards
-        collection_library_cards = db.query(LibraryCard).filter(
-            LibraryCard.collection_id == collection.id,
-            LibraryCard.document_id == None  # Collection-level only
-        ).all()
+        collection_library_cards = (
+            db.query(LibraryCard)
+            .filter(
+                LibraryCard.collection_id == collection.id,
+                LibraryCard.document_id.is_(None),  # Collection-level only
+            )
+            .all()
+        )
 
         collection_library_cards_info = [
             LibraryCardInfo(
@@ -261,7 +267,7 @@ async def export_account_data(account_id: str, db: Session = Depends(get_db)):
                 level=card.level,
                 title=card.title,
                 content=card.content,
-                created_at=card.created_at.isoformat()
+                created_at=card.created_at.isoformat(),
             )
             for card in collection_library_cards
         ]
@@ -275,7 +281,7 @@ async def export_account_data(account_id: str, db: Session = Depends(get_db)):
                 created_at=collection.created_at.isoformat(),
                 document_count=len(collection.documents),
                 documents=documents_data,
-                library_cards=collection_library_cards_info
+                library_cards=collection_library_cards_info,
             )
         )
 
@@ -291,5 +297,5 @@ async def export_account_data(account_id: str, db: Session = Depends(get_db)):
         collection_count=len(account.collections),
         total_documents=total_documents,
         total_library_cards=total_library_cards,
-        collections=collections_data
+        collections=collections_data,
     )

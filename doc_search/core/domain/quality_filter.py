@@ -11,4 +11,6 @@ _QUALITY_CONDITIONS = [
 def passes_quality_filter(
     dense: float, sparse_normalized: float, max_sparse: float
 ) -> bool:
-    return any(cond(dense, sparse_normalized, max_sparse) for cond in _QUALITY_CONDITIONS)
+    return any(
+        cond(dense, sparse_normalized, max_sparse) for cond in _QUALITY_CONDITIONS
+    )

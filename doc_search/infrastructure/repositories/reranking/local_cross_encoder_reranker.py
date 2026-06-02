@@ -22,6 +22,7 @@ class LocalCrossEncoderReranker:
     def _ensure_model(self):
         if self._model is None:
             from sentence_transformers import CrossEncoder
+
             logger.info(f"Loading local reranker model: {self._model_name}")
             self._model = CrossEncoder(self._model_name, max_length=512)
 

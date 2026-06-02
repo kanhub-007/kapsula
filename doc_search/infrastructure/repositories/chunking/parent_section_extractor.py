@@ -32,8 +32,10 @@ def extract_parent_sections(markdown_content: str) -> Dict[str, Dict[str, str]]:
                         _close_section(sections, active, close_level, char_position)
 
             active[level] = {
-                "title": title, "level": level,
-                "content_lines": [], "start_char": char_position,
+                "title": title,
+                "level": level,
+                "content_lines": [],
+                "start_char": char_position,
             }
         else:
             for lvl in [1, 2, 3]:
@@ -49,9 +51,7 @@ def extract_parent_sections(markdown_content: str) -> Dict[str, Dict[str, str]]:
     return sections
 
 
-def _close_section(
-    sections: dict, active: dict, level: int, end_char: int
-) -> None:
+def _close_section(sections: dict, active: dict, level: int, end_char: int) -> None:
     data = active[level]
     content = "\n".join(data["content_lines"]).strip()
     hash_input = f"level_{data['level']}:{data['title']}".encode("utf-8")

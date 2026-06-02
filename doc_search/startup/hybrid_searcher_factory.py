@@ -1,11 +1,17 @@
 """Cached HybridSearcher factory."""
 
-from doc_search.infrastructure.repositories.indexing import load_faiss_index, load_bm25_index
+from doc_search.infrastructure.repositories.indexing import (
+    load_faiss_index,
+    load_bm25_index,
+)
 from doc_search.core.domain.interfaces.embedder import Embedder
 from doc_search.core.domain.interfaces.reranker import Reranker
 from doc_search.core.domain.interfaces.fusion import Fusion
 from doc_search.core.domain.fusion.weighted_fusion import WeightedFusion
-from doc_search.infrastructure.repositories.retrieval import DenseRetriever, SparseRetriever
+from doc_search.infrastructure.repositories.retrieval import (
+    DenseRetriever,
+    SparseRetriever,
+)
 from doc_search.core.application.use_cases.hybrid_searcher import HybridSearcher
 from doc_search.infrastructure.logging_config import get_logger
 
@@ -26,7 +32,13 @@ class HybridSearcherFactory:
         reranker: Reranker | None = None,
         fusion: Fusion | None = None,
     ) -> HybridSearcher:
-        key = (faiss_index_path, bm25_index_path, id(embedder), id(reranker), id(fusion))
+        key = (
+            faiss_index_path,
+            bm25_index_path,
+            id(embedder),
+            id(reranker),
+            id(fusion),
+        )
 
         if key not in self._cache:
             logger.debug("Creating new HybridSearcher (cache miss)")
@@ -42,4 +54,3 @@ class HybridSearcherFactory:
                 dense=dense, sparse=sparse, fusion=fusion, reranker=reranker
             )
         return self._cache[key]
-

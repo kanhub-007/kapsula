@@ -6,7 +6,6 @@ from typing import List, Dict, Any
 import faiss
 
 from doc_search.core.domain.interfaces import Embedder
-from doc_search.core.domain.text_processing import tokenize
 
 
 class DenseRetriever:

@@ -44,6 +44,7 @@ class StructureNode:
 
 def _clean_link(text: str) -> str:
     import re
+
     text = re.sub(r"\[([^\]]*)\]\([^\)]*\)", r"\1", text)
     text = re.sub(r"^\[\]\([^\)]*\)", "", text)
     text = re.sub(r"\*\*([^\*]+)\*\*", r"\1", text)

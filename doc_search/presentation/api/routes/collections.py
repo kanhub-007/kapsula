@@ -31,7 +31,7 @@ def save_logo(file: UploadFile, collection_id: str) -> str:
     if file_ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+            detail=f"Invalid file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}",
         )
 
     # Generate unique filename
@@ -52,7 +52,7 @@ async def create_collection(
     name: str = Form(...),
     account_id: str = Form(None),
     logo: UploadFile = File(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Create a new collection with optional logo.
@@ -78,7 +78,9 @@ async def create_collection(
         account = db.query(Account).filter(Account.account_id == account_id).first()
         if not account:
             logger.warning(f"Account not found: {account_id}")
-            raise HTTPException(status_code=404, detail=f"Account not found: {account_id}")
+            raise HTTPException(
+                status_code=404, detail=f"Account not found: {account_id}"
+            )
         logger.info(f"Linking collection to account: {account.account_id}")
 
     # Save logo if provided
@@ -96,7 +98,7 @@ async def create_collection(
         name=name,
         logo_filename=logo_filename,
         account_id=account.id if account else None,
-        ip_address=client_ip
+        ip_address=client_ip,
     )
 
     db.add(collection)
@@ -108,9 +110,13 @@ async def create_collection(
     return CollectionResponse(
         collection_id=collection.collection_id,
         name=collection.name,
-        logo_url=f"/api/v1/collections/{collection_id}/logo/download" if logo_filename else None,
+        logo_url=(
+            f"/api/v1/collections/{collection_id}/logo/download"
+            if logo_filename
+            else None
+        ),
         created_at=collection.created_at.isoformat(),
-        document_count=0
+        document_count=0,
     )
 
 
@@ -119,7 +125,7 @@ async def upload_collection_logo(
     collection_id: str,
     request: Request,
     logo: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Upload or update collection logo.
@@ -132,7 +138,9 @@ async def upload_collection_logo(
     logger.info(f"Uploading logo for collection: {collection_id}")
 
     # Get collection
-    collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    collection = (
+        db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -158,9 +166,13 @@ async def upload_collection_logo(
     return CollectionResponse(
         collection_id=collection.collection_id,
         name=collection.name,
-        logo_url=f"/api/v1/collections/{collection_id}/logo/download" if logo_filename else None,
+        logo_url=(
+            f"/api/v1/collections/{collection_id}/logo/download"
+            if logo_filename
+            else None
+        ),
         created_at=collection.created_at.isoformat(),
-        document_count=len(collection.documents)
+        document_count=len(collection.documents),
     )
 
 
@@ -176,7 +188,9 @@ async def download_collection_logo(collection_id: str, db: Session = Depends(get
     logger.debug(f"Downloading logo for collection: {collection_id}")
 
     # Get collection
-    collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    collection = (
+        db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -197,7 +211,7 @@ async def download_collection_logo(collection_id: str, db: Session = Depends(get
         ".jpeg": "image/jpeg",
         ".gif": "image/gif",
         ".svg": "image/svg+xml",
-        ".webp": "image/webp"
+        ".webp": "image/webp",
     }
     media_type = media_types.get(ext, "application/octet-stream")
 
@@ -206,7 +220,9 @@ async def download_collection_logo(collection_id: str, db: Session = Depends(get
         logo_path,
         media_type=media_type,
         filename=f"{collection.name}_logo{ext}",
-        headers={"Content-Disposition": f'attachment; filename="{collection.name}_logo{ext}"'}
+        headers={
+            "Content-Disposition": f'attachment; filename="{collection.name}_logo{ext}"'
+        },
     )
 
 
@@ -225,18 +241,24 @@ async def list_collections(request: Request, db: Session = Depends(get_db)):
             CollectionResponse(
                 collection_id=col.collection_id,
                 name=col.name,
-                logo_url=f"/api/v1/collections/{col.collection_id}/logo/download" if col.logo_filename else None,
+                logo_url=(
+                    f"/api/v1/collections/{col.collection_id}/logo/download"
+                    if col.logo_filename
+                    else None
+                ),
                 created_at=col.created_at.isoformat(),
-                document_count=len(col.documents)
+                document_count=len(col.documents),
             )
             for col in collections
         ],
-        total=len(collections)
+        total=len(collections),
     )
 
 
 @router.get("/{collection_id}", response_model=CollectionResponse)
-async def get_collection(collection_id: str, request: Request, db: Session = Depends(get_db)):
+async def get_collection(
+    collection_id: str, request: Request, db: Session = Depends(get_db)
+):
     """
     Get detailed information about a specific collection.
 
@@ -246,7 +268,9 @@ async def get_collection(collection_id: str, request: Request, db: Session = Dep
     """
     logger.debug(f"Getting details for collection: {collection_id}")
 
-    collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    collection = (
+        db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -254,9 +278,13 @@ async def get_collection(collection_id: str, request: Request, db: Session = Dep
     return CollectionResponse(
         collection_id=collection.collection_id,
         name=collection.name,
-        logo_url=f"/api/v1/collections/{collection_id}/logo/download" if collection.logo_filename else None,
+        logo_url=(
+            f"/api/v1/collections/{collection_id}/logo/download"
+            if collection.logo_filename
+            else None
+        ),
         created_at=collection.created_at.isoformat(),
-        document_count=len(collection.documents)
+        document_count=len(collection.documents),
     )
 
 
@@ -271,7 +299,9 @@ async def list_collection_documents(collection_id: str, db: Session = Depends(ge
     """
     logger.debug(f"Listing documents for collection: {collection_id}")
 
-    collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    collection = (
+        db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -290,16 +320,18 @@ async def list_collection_documents(collection_id: str, db: Session = Depends(ge
                 status=doc.status,
                 created_at=doc.created_at.isoformat(),
                 duration=doc.duration,
-                chunk_count=len(doc.chunks)
+                chunk_count=len(doc.chunks),
             )
             for doc in collection.documents
         ],
-        total=len(collection.documents)
+        total=len(collection.documents),
     )
 
 
 @router.get("/{collection_id}/export")
-async def export_collection_data(collection_id: str, request: Request, db: Session = Depends(get_db)):
+async def export_collection_data(
+    collection_id: str, request: Request, db: Session = Depends(get_db)
+):
     """
     Export complete collection data including all documents and library cards.
 
@@ -313,16 +345,14 @@ async def export_collection_data(collection_id: str, request: Request, db: Sessi
     This endpoint is useful for backup, migration, or comprehensive data analysis.
     """
     from doc_search.infrastructure.data import LibraryCard
-    from ..models import (
-        CollectionExportInfo,
-        DocumentExportInfo,
-        LibraryCardInfo
-    )
+    from ..models import CollectionExportInfo, DocumentExportInfo, LibraryCardInfo
 
     logger.info(f"Exporting complete data for collection: {collection_id}")
 
     # Get collection
-    collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    collection = (
+        db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -333,10 +363,14 @@ async def export_collection_data(collection_id: str, request: Request, db: Sessi
     # Process each document in collection
     for document in collection.documents:
         # Get document-level library cards
-        doc_library_cards = db.query(LibraryCard).filter(
-            LibraryCard.document_id == document.id,
-            LibraryCard.collection_id == None  # Document-level only
-        ).all()
+        doc_library_cards = (
+            db.query(LibraryCard)
+            .filter(
+                LibraryCard.document_id == document.id,
+                LibraryCard.collection_id.is_(None),  # Document-level only
+            )
+            .all()
+        )
 
         doc_library_cards_info = [
             LibraryCardInfo(
@@ -344,7 +378,7 @@ async def export_collection_data(collection_id: str, request: Request, db: Sessi
                 level=card.level,
                 title=card.title,
                 content=card.content,
-                created_at=card.created_at.isoformat()
+                created_at=card.created_at.isoformat(),
             )
             for card in doc_library_cards
         ]
@@ -359,17 +393,21 @@ async def export_collection_data(collection_id: str, request: Request, db: Sessi
                 created_at=document.created_at.isoformat(),
                 duration=document.duration,
                 chunk_count=len(document.chunks),
-                library_cards=doc_library_cards_info
+                library_cards=doc_library_cards_info,
             )
         )
 
         total_library_cards += len(doc_library_cards_info)
 
     # Get collection-level library cards
-    collection_library_cards = db.query(LibraryCard).filter(
-        LibraryCard.collection_id == collection.id,
-        LibraryCard.document_id == None  # Collection-level only
-    ).all()
+    collection_library_cards = (
+        db.query(LibraryCard)
+        .filter(
+            LibraryCard.collection_id == collection.id,
+            LibraryCard.document_id.is_(None),  # Collection-level only
+        )
+        .all()
+    )
 
     collection_library_cards_info = [
         LibraryCardInfo(
@@ -377,7 +415,7 @@ async def export_collection_data(collection_id: str, request: Request, db: Sessi
             level=card.level,
             title=card.title,
             content=card.content,
-            created_at=card.created_at.isoformat()
+            created_at=card.created_at.isoformat(),
         )
         for card in collection_library_cards
     ]
@@ -392,9 +430,13 @@ async def export_collection_data(collection_id: str, request: Request, db: Sessi
     return CollectionExportInfo(
         collection_id=collection.collection_id,
         name=collection.name,
-        logo_url=f"/api/v1/collections/{collection_id}/logo/download" if collection.logo_filename else None,
+        logo_url=(
+            f"/api/v1/collections/{collection_id}/logo/download"
+            if collection.logo_filename
+            else None
+        ),
         created_at=collection.created_at.isoformat(),
         document_count=len(collection.documents),
         documents=documents_data,
-        library_cards=collection_library_cards_info
+        library_cards=collection_library_cards_info,
     )

@@ -37,9 +37,7 @@ class DocumentIndexBuilder:
         collection_id: str | None = None,
         min_chunk_length: int = 50,
     ) -> IndexPaths:
-        logger.info(
-            f"Building indexes for document {job_id} with {len(chunks)} chunks"
-        )
+        logger.info(f"Building indexes for document {job_id} with {len(chunks)} chunks")
 
         filtered = self._filter(chunks, min_chunk_length)
         if not filtered:
@@ -74,28 +72,24 @@ class DocumentIndexBuilder:
             )
         return kept
 
-    def _indexes_dir(
-        self, account_id: str | None, collection_id: str | None
-    ) -> str:
-        path = os.path.join(
-            self._data_dir,
-            "indexes",
-            *(p for p in (account_id, collection_id) if p),
-        ) if (account_id and collection_id) else os.path.join(
-            self._data_dir, "indexes"
+    def _indexes_dir(self, account_id: str | None, collection_id: str | None) -> str:
+        path = (
+            os.path.join(
+                self._data_dir,
+                "indexes",
+                *(p for p in (account_id, collection_id) if p),
+            )
+            if (account_id and collection_id)
+            else os.path.join(self._data_dir, "indexes")
         )
         os.makedirs(path, exist_ok=True)
         return path
 
-    def _build_faiss(
-        self, texts: List[str], job_id: str, indexes_dir: str
-    ) -> str:
+    def _build_faiss(self, texts: List[str], job_id: str, indexes_dir: str) -> str:
         logger.info(f"Generating embeddings for {len(texts)} chunks")
 
         embeddings = self._embedder.embed(texts)
-        logger.debug(
-            f"Embedding generation complete. Shape: {embeddings.shape}"
-        )
+        logger.debug(f"Embedding generation complete. Shape: {embeddings.shape}")
 
         normalized = embeddings.astype("float32")
         faiss.normalize_L2(normalized)
@@ -109,9 +103,7 @@ class DocumentIndexBuilder:
         logger.info(f"FAISS index created at: {path}")
         return path
 
-    def _build_bm25(
-        self, texts: List[str], job_id: str, indexes_dir: str
-    ) -> str:
+    def _build_bm25(self, texts: List[str], job_id: str, indexes_dir: str) -> str:
         logger.debug(f"Building BM25 index for {len(texts)} chunks")
 
         corpus = [tokenize(t) for t in texts]

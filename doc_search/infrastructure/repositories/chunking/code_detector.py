@@ -15,14 +15,21 @@ def is_code_block(text: str) -> bool:
         return True
 
     code_patterns = [
-        "def ", "function ", "const ", "let ", "var ", "=>", "async ", "await "
+        "def ",
+        "function ",
+        "const ",
+        "let ",
+        "var ",
+        "=>",
+        "async ",
+        "await ",
     ]
     if any(p in text for p in code_patterns):
         return True
 
     if len(lines) > 2:
         indented = sum(
-            1 for l in lines if l.startswith("    ") or l.startswith("\t")
+            1 for line in lines if line.startswith("    ") or line.startswith("\t")
         )
         if indented >= len(lines) * 0.5:
             return True

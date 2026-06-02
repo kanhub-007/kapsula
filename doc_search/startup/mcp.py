@@ -8,12 +8,11 @@ import logging
 import os
 
 from dotenv import load_dotenv
-
-load_dotenv()
-
 from fastmcp import FastMCP
 
 from doc_search.startup import bootstrap
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +36,7 @@ def create_server() -> FastMCP:
     )
 
     from doc_search.presentation.mcp.tools import register_tools
+
     register_tools(server)
 
     config = get_transport_config()

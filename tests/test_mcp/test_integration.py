@@ -3,8 +3,7 @@
 import os
 import asyncio
 import pytest
-from unittest.mock import patch, MagicMock
-
+from unittest.mock import patch
 
 # ── Fixtures ────────────────────────────────────────────────────
 
@@ -14,6 +13,7 @@ def setup_db():
     """Ensure DB tables exist and default account is created."""
     from doc_search.infrastructure.data.connection import init_db
     from doc_search.startup import bootstrap
+
     init_db()
     bootstrap()
     yield
@@ -23,6 +23,7 @@ def setup_db():
 def clean_cache():
     """Clear the singleton cache before and after each test."""
     from doc_search.presentation.mcp.tools import _clear_cache
+
     _clear_cache()
     yield
     _clear_cache()
@@ -113,7 +114,10 @@ class TestSingletonCaching:
 
     def test_intelligent_searcher_is_cached(self, clean_cache):
         """Calling _get_intelligent_searcher() multiple times returns the same instance."""
-        from doc_search.presentation.mcp.tools import _get_intelligent_searcher, _clear_cache
+        from doc_search.presentation.mcp.tools import (
+            _get_intelligent_searcher,
+            _clear_cache,
+        )
 
         _clear_cache()
         s1 = _get_intelligent_searcher()
@@ -132,8 +136,12 @@ class TestSingletonCaching:
     def test_clear_cache_resets_all(self, clean_cache):
         """After clearing cache, new instances are created for all 5 singletons."""
         from doc_search.presentation.mcp.tools import (
-            _get_chat_client, _get_embedder, _get_reranker,
-            _get_query_planner, _get_intelligent_searcher, _clear_cache,
+            _get_chat_client,
+            _get_embedder,
+            _get_reranker,
+            _get_query_planner,
+            _get_intelligent_searcher,
+            _clear_cache,
         )
 
         _clear_cache()
@@ -159,8 +167,11 @@ class TestSingletonCaching:
     def test_multi_index_searcher_reuses_cached_deps(self, clean_cache, mock_hf_token):
         """_get_multi_index_searcher should pass cached singletons to the searcher."""
         from doc_search.presentation.mcp.tools import (
-            _get_multi_index_searcher, _get_embedder,
-            _get_reranker, _get_chat_client, _clear_cache,
+            _get_multi_index_searcher,
+            _get_embedder,
+            _get_reranker,
+            _get_chat_client,
+            _clear_cache,
         )
         from doc_search.presentation.mcp.db import get_db_session
 
@@ -194,7 +205,9 @@ class TestAccountTools:
                 assert "doc-search" in result.content[0].text
 
                 # Create a new account
-                result = await client.call_tool("create_account", {"name": "test-account"})
+                result = await client.call_tool(
+                    "create_account", {"name": "test-account"}
+                )
                 text = result.content[0].text
                 assert "test-account" in text
                 assert "account_id" in text
@@ -222,10 +235,12 @@ class TestAccountTools:
                 text = result.content[0].text
                 # Extract account_id from text like "... — <uuid>"
                 lines = text.split("\n")
-                account_line = [l for l in lines if "doc-search" in l][0]
+                account_line = [line for line in lines if "doc-search" in line][0]
                 account_id = account_line.split("—")[-1].strip().split()[0]
 
-                result = await client.call_tool("get_account", {"account_id": account_id})
+                result = await client.call_tool(
+                    "get_account", {"account_id": account_id}
+                )
                 text = result.content[0].text
                 assert "doc-search" in text
                 assert account_id in text
@@ -246,7 +261,9 @@ class TestCollectionTools:
             async with Client(server) as client:
                 await client.initialize()
 
-                result = await client.call_tool("create_collection", {"name": "test-collection"})
+                result = await client.call_tool(
+                    "create_collection", {"name": "test-collection"}
+                )
                 text = result.content[0].text
                 assert "test-collection" in text
                 assert "collection_id" in text
@@ -269,12 +286,16 @@ class TestCollectionTools:
                 await client.initialize()
 
                 # Create collection
-                result = await client.call_tool("create_collection", {"name": "detail-test"})
+                result = await client.call_tool(
+                    "create_collection", {"name": "detail-test"}
+                )
                 text = result.content[0].text
                 collection_id = text.split("collection_id: ")[1].strip()
 
                 # Get its details
-                result = await client.call_tool("get_collection", {"collection_id": collection_id})
+                result = await client.call_tool(
+                    "get_collection", {"collection_id": collection_id}
+                )
                 text = result.content[0].text
                 assert "detail-test" in text
                 assert "Documents: 0" in text
@@ -296,12 +317,12 @@ class TestCollectionTools:
                 result = await client.call_tool("list_accounts", {})
                 text = result.content[0].text
                 lines = text.split("\n")
-                account_line = [l for l in lines if "doc-search" in l][0]
+                account_line = [line for line in lines if "doc-search" in line][0]
                 account_id = account_line.split("—")[-1].strip().split()[0]
 
                 result = await client.call_tool(
                     "create_collection",
-                    {"name": "accounted-collection", "account_id": account_id}
+                    {"name": "accounted-collection", "account_id": account_id},
                 )
                 text = result.content[0].text
                 assert "accounted-collection" in text
@@ -344,7 +365,9 @@ class TestSearchTools:
             async def _test():
                 async with Client(server) as client:
                     await client.initialize()
-                    result = await client.call_tool("intelligent_search", {"query": "test"})
+                    result = await client.call_tool(
+                        "intelligent_search", {"query": "test"}
+                    )
                     text = result.content[0].text
                     assert "HF_TOKEN not set" in text
 
@@ -367,7 +390,9 @@ class TestSearchTools:
                 await client.initialize()
                 # Call a lightweight search — even with no collections
                 # it should return quickly, not hang
-                result = await client.call_tool("search_documents", {"query": "test", "top_k": 3})
+                result = await client.call_tool(
+                    "search_documents", {"query": "test", "top_k": 3}
+                )
                 return result.content[0].text
 
         async def _test():
@@ -375,7 +400,7 @@ class TestSearchTools:
             tasks = [_run_search() for _ in range(3)]
             results = await asyncio.wait_for(
                 asyncio.gather(*tasks, return_exceptions=True),
-                timeout=10.0  # 10 sec timeout — if it hangs, test fails
+                timeout=10.0,  # 10 sec timeout — if it hangs, test fails
             )
             for r in results:
                 if isinstance(r, Exception):
@@ -402,7 +427,7 @@ class TestDocumentTools:
 
                 result = await client.call_tool(
                     "upload_document",
-                    {"file_path": "/nonexistent/file.md", "collection_id": "fake-id"}
+                    {"file_path": "/nonexistent/file.md", "collection_id": "fake-id"},
                 )
                 text = result.content[0].text
                 assert "not found" in text.lower()
@@ -438,8 +463,7 @@ class TestDocumentTools:
             async with Client(server) as client:
                 await client.initialize()
                 result = await client.call_tool(
-                    "list_documents",
-                    {"collection_id": "nonexistent-id"}
+                    "list_documents", {"collection_id": "nonexistent-id"}
                 )
                 text = result.content[0].text
                 assert "not found" in text.lower()

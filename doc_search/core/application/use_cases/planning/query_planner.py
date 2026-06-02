@@ -58,7 +58,12 @@ class QueryPlanner:
             response = self._chat_client.send(
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT_DOCUMENT},
-                    {"role": "user", "content": USER_MESSAGE_DOCUMENT.format(query=query, context=context)},
+                    {
+                        "role": "user",
+                        "content": USER_MESSAGE_DOCUMENT.format(
+                            query=query, context=context
+                        ),
+                    },
                 ],
                 max_tokens=500,
                 temperature=0.3,
@@ -85,7 +90,11 @@ class QueryPlanner:
                 name = struct.get("subdocument_name", "Unknown")
                 sections = struct.get("sections", [])
                 parts.append(f"\n## {name}")
-                for level, key in [("H1", "level_3"), ("H2", "level_2"), ("H3", "level_1")]:
+                for level, key in [
+                    ("H1", "level_3"),
+                    ("H2", "level_2"),
+                    ("H3", "level_1"),
+                ]:
                     titles = [s["title"] for s in sections if s["level"] == key][:8]
                     if titles:
                         parts.append(f"  {level}: {', '.join(titles)}")

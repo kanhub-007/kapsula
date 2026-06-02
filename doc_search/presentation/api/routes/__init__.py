@@ -13,7 +13,9 @@ api_router = APIRouter()
 # Include sub-routers
 api_router.include_router(health_router, tags=["Health"])
 api_router.include_router(accounts_router, prefix="/accounts", tags=["Accounts"])
-api_router.include_router(collections_router, prefix="/collections", tags=["Collections"])
+api_router.include_router(
+    collections_router, prefix="/collections", tags=["Collections"]
+)
 api_router.include_router(documents_router, prefix="/documents", tags=["Documents"])
 api_router.include_router(search_router, prefix="/search", tags=["Search"])
 

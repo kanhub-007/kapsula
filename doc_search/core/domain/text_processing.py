@@ -25,7 +25,9 @@ def simple_stem(word: str) -> str:
     elif word_lower.endswith("s") and len(word_lower) > 2:
         stemmed = word_lower[:-1]
     elif word_lower.endswith("ed") and len(word_lower) > 3:
-        stemmed = word_lower[:-2] if word_lower[-3] != word_lower[-4] else word_lower[:-1]
+        stemmed = (
+            word_lower[:-2] if word_lower[-3] != word_lower[-4] else word_lower[:-1]
+        )
     elif word_lower.endswith("ing") and len(word_lower) > 4:
         stemmed = word_lower[:-3]
     else:

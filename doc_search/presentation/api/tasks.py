@@ -6,13 +6,32 @@ import os
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 
-from doc_search.infrastructure.data import Document, DocumentStructure, Chunk, LibraryCard, SubDocument, SubDocumentPage, Collection, DATA_DIR
-from doc_search.infrastructure.repositories.chunking import extract_document_structure_skeleton, MarkdownChunker, extract_parent_sections
-from doc_search.infrastructure.repositories.chunking.breadcrumb_parser import extract_subdocuments, generate_content_hash, validate_subdocuments
+from doc_search.infrastructure.data import (
+    Document,
+    DocumentStructure,
+    Chunk,
+    LibraryCard,
+    SubDocument,
+    SubDocumentPage,
+    Collection,
+    DATA_DIR,
+)
+from doc_search.infrastructure.repositories.chunking import (
+    extract_document_structure_skeleton,
+    MarkdownChunker,
+    extract_parent_sections,
+)
+from doc_search.infrastructure.repositories.chunking.breadcrumb_parser import (
+    extract_subdocuments,
+    generate_content_hash,
+    validate_subdocuments,
+)
 from doc_search.infrastructure.repositories.indexing import DocumentIndexBuilder
 from doc_search.infrastructure.repositories.embedding import HuggingFaceEmbedder
 from doc_search.infrastructure.external.llm.chat_client import HuggingFaceChatClient
-from doc_search.core.application.use_cases.collection_summary import CollectionSummaryGenerator
+from doc_search.core.application.use_cases.collection_summary import (
+    CollectionSummaryGenerator,
+)
 from doc_search.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -37,7 +56,7 @@ def match_header_to_parents(header: str, parent_sections: dict) -> dict:
     Context modes: "narrow" uses H3 (immediate), "deep" uses H2 (chapter)
     """
     # Split header into parts
-    parts = [p.strip() for p in header.split('>')]
+    parts = [p.strip() for p in header.split(">")]
 
     # Initialize with None
     parents = {"immediate": None, "chapter": None, "page": None}
@@ -56,7 +75,11 @@ def match_header_to_parents(header: str, parent_sections: dict) -> dict:
             part_lower = part.lower()
 
             # Exact match or partial match (title contains part or part contains title)
-            if title_lower == part_lower or title_lower in part_lower or part_lower in title_lower:
+            if (
+                title_lower == part_lower
+                or title_lower in part_lower
+                or part_lower in title_lower
+            ):
                 # H3 is the most granular (immediate context for narrow mode)
                 if level == "level_3":
                     parents["immediate"] = doc_id
@@ -81,7 +104,9 @@ def match_header_to_parents(header: str, parent_sections: dict) -> dict:
     # If immediate (H3) not found, try using chapter (H2)
     if not parents["immediate"] and parents["chapter"]:
         parents["immediate"] = parents["chapter"]
-        logger.debug(f"No H3 immediate found for '{header}', using H2 chapter as fallback")
+        logger.debug(
+            f"No H3 immediate found for '{header}', using H2 chapter as fallback"
+        )
 
     # If chapter (H2) not found, try using page (H1)
     if not parents["chapter"] and parents["page"]:
@@ -98,7 +123,9 @@ def match_header_to_parents(header: str, parent_sections: dict) -> dict:
     # Log final result
     has_any = any(v is not None for v in parents.values())
     if not has_any:
-        logger.error(f"Failed to find ANY parent for header '{header}' - context expansion will fail!")
+        logger.error(
+            f"Failed to find ANY parent for header '{header}' - context expansion will fail!"
+        )
 
     return parents
 
@@ -106,7 +133,7 @@ def match_header_to_parents(header: str, parent_sections: dict) -> dict:
 def add_citation_metadata_to_chunks(
     chunks: List[Dict[str, Any]],
     parent_sections: Dict[str, Dict[str, str]],
-    markdown_content: str
+    markdown_content: str,
 ) -> List[Dict[str, Any]]:
     """
     Add citation triplet metadata to chunks before they're saved to database.
@@ -131,7 +158,6 @@ def add_citation_metadata_to_chunks(
     for chunk_data in chunks:
         metadata = chunk_data["metadata"]
         chunk_content = chunk_data["content"]
-        header = metadata.get("header", "")
 
         # Find the chunk's position in the original markdown content
         # Use the first 150 characters of chunk content for matching (more reliable)
@@ -165,7 +191,9 @@ def add_citation_metadata_to_chunks(
                         level_priority = {"level_1": 3, "level_2": 2, "level_3": 1}
                         current_priority = level_priority.get(section_data["level"], 0)
 
-                        if best_match is None or current_priority > level_priority.get(best_match["level"], 0):
+                        if best_match is None or current_priority > level_priority.get(
+                            best_match["level"], 0
+                        ):
                             best_match = section_data
                             best_match_doc_id = doc_id
 
@@ -176,21 +204,29 @@ def add_citation_metadata_to_chunks(
                         "start_char": chunk_start_pos,
                         "end_char": chunk_end_pos,
                         "section_title": best_match["title"],
-                        "section_level": best_match["level"]
+                        "section_level": best_match["level"],
                     }
-                    logger.debug(f"Chunk {metadata['chunk_index']}: Citation added (section='{best_match['title']}', pos={chunk_start_pos}-{chunk_end_pos})")
+                    logger.debug(
+                        f"Chunk {metadata['chunk_index']}: Citation added (section='{best_match['title']}', pos={chunk_start_pos}-{chunk_end_pos})"
+                    )
                 else:
-                    logger.warning(f"Chunk {metadata['chunk_index']}: No matching parent section found")
+                    logger.warning(
+                        f"Chunk {metadata['chunk_index']}: No matching parent section found"
+                    )
                     metadata["citation"] = None
             else:
-                logger.warning(f"Chunk {metadata['chunk_index']}: Could not find chunk position in document")
+                logger.warning(
+                    f"Chunk {metadata['chunk_index']}: Could not find chunk position in document"
+                )
                 metadata["citation"] = None
 
         except Exception as e:
-            logger.error(f"Error adding citation to chunk {metadata.get('chunk_index', '?')}: {e}")
+            logger.error(
+                f"Error adding citation to chunk {metadata.get('chunk_index', '?')}: {e}"
+            )
             metadata["citation"] = None
 
-    logger.info(f"Citation metadata added to all chunks")
+    logger.info("Citation metadata added to all chunks")
     return chunks
 
 
@@ -213,7 +249,7 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
             "status": "processing",
             "progress": 10,
             "stage": "extracting_structure",
-            "message": "Extracting document structure..."
+            "message": "Extracting document structure...",
         }
         logger.debug(f"Job {job_id}: Extracting structure")
 
@@ -228,8 +264,7 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
 
         # Save structure to database
         doc_structure = DocumentStructure(
-            document_id=document.id,
-            skeleton_structure=skeleton_structure
+            document_id=document.id, skeleton_structure=skeleton_structure
         )
         db.add(doc_structure)
         db.commit()
@@ -239,7 +274,7 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
             "status": "processing",
             "progress": 20,
             "stage": "extracting_parents",
-            "message": "Extracting parent sections (H1, H2, H3)..."
+            "message": "Extracting parent sections (H1, H2, H3)...",
         }
         logger.debug(f"Job {job_id}: Extracting parent sections")
 
@@ -250,16 +285,20 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
             # Log sample of extracted sections
             sample_sections = list(parent_sections.items())[:3]
             for doc_id, section in sample_sections:
-                logger.debug(f"  Sample parent: {section['level']} - '{section['title']}' ({len(section['content'])} chars)")
+                logger.debug(
+                    f"  Sample parent: {section['level']} - '{section['title']}' ({len(section['content'])} chars)"
+                )
         else:
-            logger.warning(f"Job {job_id}: No parent sections found! Document may have no H1/H2/H3 headings.")
+            logger.warning(
+                f"Job {job_id}: No parent sections found! Document may have no H1/H2/H3 headings."
+            )
 
         # Update progress: Structure extracted
         processing_status[job_id] = {
             "status": "processing",
             "progress": 30,
             "stage": "chunking",
-            "message": "Creating chunks..."
+            "message": "Creating chunks...",
         }
 
         # Chunk the document
@@ -272,7 +311,7 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
         chunks_with_citations = add_citation_metadata_to_chunks(
             chunks=chunks,
             parent_sections=parent_sections,
-            markdown_content=markdown_content
+            markdown_content=markdown_content,
         )
         logger.info(f"Job {job_id}: Added citation metadata to chunks")
 
@@ -281,9 +320,11 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
             "status": "processing",
             "progress": 60,
             "stage": "saving_chunks",
-            "message": f"Saving {len(chunks_with_citations)} chunks to database..."
+            "message": f"Saving {len(chunks_with_citations)} chunks to database...",
         }
-        logger.debug(f"Job {job_id}: Saving {len(chunks_with_citations)} chunks to database")
+        logger.debug(
+            f"Job {job_id}: Saving {len(chunks_with_citations)} chunks to database"
+        )
 
         # Save chunks to database
         for chunk_data in chunks_with_citations:
@@ -292,7 +333,7 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
                 content=chunk_data["content"],
                 chunk_index=chunk_data["metadata"]["chunk_index"],
                 token_count=chunk_data["token_count"],
-                chunk_metadata=json.dumps(chunk_data["metadata"])
+                chunk_metadata=json.dumps(chunk_data["metadata"]),
             )
             db.add(chunk)
 
@@ -304,7 +345,7 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
             "status": "processing",
             "progress": 65,
             "stage": "saving_parents",
-            "message": f"Saving {len(parent_sections)} parent sections to database..."
+            "message": f"Saving {len(parent_sections)} parent sections to database...",
         }
         logger.debug(f"Job {job_id}: Saving parent sections to database")
 
@@ -316,14 +357,16 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
                 level=section_data["level"],
                 title=section_data["title"],
                 content=section_data["content"],
-                extra_metadata=json.dumps({
-                    "extraction_time": time.time(),
-                    "start_char": section_data.get("start_char", 0),
-                    "end_char": section_data.get("end_char", 0)
-                })
+                extra_metadata=json.dumps(
+                    {
+                        "extraction_time": time.time(),
+                        "start_char": section_data.get("start_char", 0),
+                        "end_char": section_data.get("end_char", 0),
+                    }
+                ),
             )
             db.add(library_card)
-        
+
         db.commit()
         logger.debug(f"Job {job_id}: Parent sections saved to database")
 
@@ -332,7 +375,7 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
             "status": "processing",
             "progress": 70,
             "stage": "linking_chunks",
-            "message": "Linking chunks to parent sections..."
+            "message": "Linking chunks to parent sections...",
         }
         logger.debug(f"Job {job_id}: Linking chunks to parent sections")
 
@@ -346,12 +389,14 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
             "chunks_linked_immediate": 0,
             "chunks_linked_chapter": 0,
             "chunks_linked_page": 0,
-            "chunks_no_match": 0
+            "chunks_no_match": 0,
         }
 
         # Create a mapping of library card doc_ids (hashes) to database IDs
         library_cards_map = {}
-        for library_card in db.query(LibraryCard).filter(LibraryCard.document_id == document.id).all():
+        for library_card in (
+            db.query(LibraryCard).filter(LibraryCard.document_id == document.id).all()
+        ):
             library_cards_map[library_card.doc_id] = library_card.id
 
         # Update each chunk with parent pointers and resolve citation library_card_ids
@@ -378,7 +423,9 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
 
                 if not any(parents.values()):
                     link_stats["chunks_no_match"] += 1
-                    logger.warning(f"Job {job_id}: Chunk {chunk.chunk_index} with header '{header}' has NO parent matches!")
+                    logger.warning(
+                        f"Job {job_id}: Chunk {chunk.chunk_index} with header '{header}' has NO parent matches!"
+                    )
 
                 # Resolve citation library_card_id if citation exists
                 citation = metadata.get("citation")
@@ -388,9 +435,13 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
                         citation["library_card_id"] = library_cards_map[doc_id]
                         # Remove the temporary doc_id field
                         del citation["library_card_doc_id"]
-                        logger.debug(f"Chunk {chunk.chunk_index}: Resolved citation library_card_id={citation['library_card_id']}")
+                        logger.debug(
+                            f"Chunk {chunk.chunk_index}: Resolved citation library_card_id={citation['library_card_id']}"
+                        )
                     else:
-                        logger.warning(f"Chunk {chunk.chunk_index}: Could not resolve library_card_doc_id '{doc_id}'")
+                        logger.warning(
+                            f"Chunk {chunk.chunk_index}: Could not resolve library_card_doc_id '{doc_id}'"
+                        )
                         citation["library_card_id"] = None
                         del citation["library_card_doc_id"]
 
@@ -399,7 +450,9 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
                 # Save updated metadata back to chunk
                 chunk.chunk_metadata = json.dumps(metadata)
             else:
-                logger.warning(f"Job {job_id}: Chunk {chunk.chunk_index} has NO header in metadata")
+                logger.warning(
+                    f"Job {job_id}: Chunk {chunk.chunk_index} has NO header in metadata"
+                )
 
         db.commit()
 
@@ -407,40 +460,49 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
         logger.info(f"Job {job_id}: Parent linking complete:")
         logger.info(f"  Total chunks: {link_stats['total_chunks']}")
         logger.info(f"  Chunks with headers: {link_stats['chunks_with_headers']}")
-        logger.info(f"  Chunks linked to immediate (H3): {link_stats['chunks_linked_immediate']}")
-        logger.info(f"  Chunks linked to chapter (H2): {link_stats['chunks_linked_chapter']}")
+        logger.info(
+            f"  Chunks linked to immediate (H3): {link_stats['chunks_linked_immediate']}"
+        )
+        logger.info(
+            f"  Chunks linked to chapter (H2): {link_stats['chunks_linked_chapter']}"
+        )
         logger.info(f"  Chunks linked to page (H1): {link_stats['chunks_linked_page']}")
         logger.info(f"  Chunks with NO matches: {link_stats['chunks_no_match']}")
 
         if link_stats["chunks_no_match"] > 0:
-            logger.error(f"Job {job_id}: {link_stats['chunks_no_match']} chunks failed to link to parents - context expansion will fail for these!")
+            logger.error(
+                f"Job {job_id}: {link_stats['chunks_no_match']} chunks failed to link to parents - context expansion will fail for these!"
+            )
 
         # Update progress: Building indexes
         processing_status[job_id] = {
             "status": "processing",
             "progress": 85,
             "stage": "building_indexes",
-            "message": "Building search indexes (FAISS and BM25)..."
+            "message": "Building search indexes (FAISS and BM25)...",
         }
         logger.debug(f"Job {job_id}: Building search indexes")
 
         # Build FAISS and BM25 indexes
         try:
             # Get account_id and collection_id for organized storage
-            account_id = document.collection.account.account_id if document.collection.account else None
+            account_id = (
+                document.collection.account.account_id
+                if document.collection.account
+                else None
+            )
             collection_id = document.collection.collection_id
 
             embedder = HuggingFaceEmbedder(
-                endpoint_url=os.getenv("EMBEDDING_MODEL_URL", "Qwen/Qwen3-Embedding-8B"),
-                token=os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN", "")
+                endpoint_url=os.getenv(
+                    "EMBEDDING_MODEL_URL", "Qwen/Qwen3-Embedding-8B"
+                ),
+                token=os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN", ""),
             )
             builder = DocumentIndexBuilder(embedder, DATA_DIR)
 
             index_paths = builder.build(
-                chunks,
-                job_id,
-                account_id=account_id,
-                collection_id=collection_id
+                chunks, job_id, account_id=account_id, collection_id=collection_id
             )
 
             # Update document with index paths
@@ -471,12 +533,14 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
             "stage": "completed",
             "message": f"Processing completed successfully. Created {len(chunks)} chunks in {duration:.2f} seconds.",
             "chunk_count": len(chunks),
-            "duration": duration
+            "duration": duration,
         }
         logger.info(f"Job {job_id}: SUCCESS - {len(chunks)} chunks in {duration:.2f}s")
 
     except Exception as e:
-        logger.error(f"Job {job_id}: Processing failed with error: {str(e)}", exc_info=True)
+        logger.error(
+            f"Job {job_id}: Processing failed with error: {str(e)}", exc_info=True
+        )
 
         # Update document with error status
         document = db.query(Document).filter(Document.job_id == job_id).first()
@@ -489,14 +553,16 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
             "status": "failed",
             "progress": 0,
             "stage": "failed",
-            "message": f"Processing failed: {str(e)}"
+            "message": f"Processing failed: {str(e)}",
         }
 
     finally:
         db.close()
 
 
-def process_document_with_subdocuments(job_id: str, markdown_content: str, max_tokens: int, db: Session):
+def process_document_with_subdocuments(
+    job_id: str, markdown_content: str, max_tokens: int, db: Session
+):
     """
     Process document with breadcrumb-based sub-document architecture.
 
@@ -515,7 +581,7 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
             "status": "processing",
             "progress": 5,
             "stage": "parsing_breadcrumbs",
-            "message": "Parsing document breadcrumbs..."
+            "message": "Parsing document breadcrumbs...",
         }
 
         # Get document from database
@@ -528,7 +594,9 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
         subdocs = extract_subdocuments(markdown_content)
 
         if not validate_subdocuments(subdocs):
-            logger.warning(f"Job {job_id}: No valid sub-documents found, falling back to legacy processing")
+            logger.warning(
+                f"Job {job_id}: No valid sub-documents found, falling back to legacy processing"
+            )
             return process_document(job_id, markdown_content, max_tokens, db)
 
         logger.info(f"Job {job_id}: Found {len(subdocs)} sub-documents")
@@ -538,7 +606,7 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
             "status": "processing",
             "progress": 10,
             "stage": "processing_subdocuments",
-            "message": f"Processing {len(subdocs)} sub-documents..."
+            "message": f"Processing {len(subdocs)} sub-documents...",
         }
 
         # Step 2: Process each sub-document
@@ -547,7 +615,7 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
 
         embedder = HuggingFaceEmbedder(
             endpoint_url=os.getenv("EMBEDDING_MODEL_URL", "Qwen/Qwen3-Embedding-8B"),
-            token=os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN", "")
+            token=os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN", ""),
         )
         builder = DocumentIndexBuilder(embedder, DATA_DIR)
 
@@ -555,13 +623,15 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
             subdoc_count += 1
             progress = 10 + int((subdoc_count / len(subdocs)) * 70)  # 10-80%
 
-            logger.info(f"Job {job_id}: Processing sub-document '{breadcrumb_key}' ({len(pages)} pages)")
+            logger.info(
+                f"Job {job_id}: Processing sub-document '{breadcrumb_key}' ({len(pages)} pages)"
+            )
 
             processing_status[job_id] = {
                 "status": "processing",
                 "progress": progress,
                 "stage": "processing_subdocuments",
-                "message": f"Processing sub-document {subdoc_count}/{len(subdocs)}: '{breadcrumb_key}'"
+                "message": f"Processing sub-document {subdoc_count}/{len(subdocs)}: '{breadcrumb_key}'",
             }
 
             # Create sub-document record
@@ -569,12 +639,14 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
                 document_id=document.id,
                 breadcrumb_key=breadcrumb_key,
                 breadcrumb_level=2,
-                page_count=len(pages)
+                page_count=len(pages),
             )
             db.add(subdoc)
             db.flush()
 
-            logger.debug(f"Job {job_id}: Created SubDocument record {subdoc.id} for '{breadcrumb_key}'")
+            logger.debug(
+                f"Job {job_id}: Created SubDocument record {subdoc.id} for '{breadcrumb_key}'"
+            )
 
             # Save pages to sub_document_pages table
             for page in pages:
@@ -582,7 +654,7 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
                     sub_document_id=subdoc.id,
                     page_title=page["title"],
                     breadcrumb_full=page["breadcrumb"],
-                    content_hash=generate_content_hash(page["content"])
+                    content_hash=generate_content_hash(page["content"]),
                 )
                 db.add(page_record)
 
@@ -591,33 +663,43 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
 
             # Extract parent sections from sub-document content
             parent_sections = extract_parent_sections(subdoc_content)
-            logger.info(f"Job {job_id}: Extracted {len(parent_sections)} parent sections from '{breadcrumb_key}'")
+            logger.info(
+                f"Job {job_id}: Extracted {len(parent_sections)} parent sections from '{breadcrumb_key}'"
+            )
 
             # Chunk sub-document
             chunks = MarkdownChunker(max_tokens=max_tokens).chunk(subdoc_content)
-            logger.info(f"Job {job_id}: Created {len(chunks)} chunks for '{breadcrumb_key}'")
+            logger.info(
+                f"Job {job_id}: Created {len(chunks)} chunks for '{breadcrumb_key}'"
+            )
 
             # Add citation metadata to chunks
             chunks = add_citation_metadata_to_chunks(
                 chunks=chunks,
                 parent_sections=parent_sections,
-                markdown_content=subdoc_content
+                markdown_content=subdoc_content,
             )
-            logger.debug(f"Job {job_id}: Added citation metadata to chunks for '{breadcrumb_key}'")
+            logger.debug(
+                f"Job {job_id}: Added citation metadata to chunks for '{breadcrumb_key}'"
+            )
 
             total_chunks += len(chunks)
 
             # Build indexes for this sub-document
             try:
                 # Get account_id and collection_id for organized storage
-                account_id = document.collection.account.account_id if document.collection.account else None
+                account_id = (
+                    document.collection.account.account_id
+                    if document.collection.account
+                    else None
+                )
                 collection_id = document.collection.collection_id
 
                 index_paths = builder.build(
                     chunks,
                     job_id=f"{job_id}_subdoc_{subdoc.id}",
                     account_id=account_id,
-                    collection_id=collection_id
+                    collection_id=collection_id,
                 )
 
                 # Update sub-document with index paths
@@ -629,11 +711,18 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
                 logger.debug(f"  BM25: {index_paths.bm25}")
 
             except Exception as e:
-                logger.error(f"Job {job_id}: Failed to build indexes for '{breadcrumb_key}': {e}")
+                logger.error(
+                    f"Job {job_id}: Failed to build indexes for '{breadcrumb_key}': {e}"
+                )
                 # Continue without indexes
 
             # Save chunks linked to sub-document
-            subdoc_link_stats = {"with_immediate": 0, "with_chapter": 0, "with_page": 0, "no_match": 0}
+            subdoc_link_stats = {
+                "with_immediate": 0,
+                "with_chapter": 0,
+                "with_page": 0,
+                "no_match": 0,
+            }
 
             for chunk_data in chunks:
                 # Match header to parent sections
@@ -659,11 +748,13 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
                     content=chunk_data["content"],
                     chunk_index=chunk_data["metadata"]["chunk_index"],
                     token_count=chunk_data["token_count"],
-                    chunk_metadata=json.dumps(chunk_data["metadata"])
+                    chunk_metadata=json.dumps(chunk_data["metadata"]),
                 )
                 db.add(chunk)
 
-            logger.info(f"Job {job_id}: Subdoc '{breadcrumb_key}' linking stats - immediate:{subdoc_link_stats['with_immediate']}, chapter:{subdoc_link_stats['with_chapter']}, page:{subdoc_link_stats['with_page']}, no_match:{subdoc_link_stats['no_match']}")
+            logger.info(
+                f"Job {job_id}: Subdoc '{breadcrumb_key}' linking stats - immediate:{subdoc_link_stats['with_immediate']}, chapter:{subdoc_link_stats['with_chapter']}, page:{subdoc_link_stats['with_page']}, no_match:{subdoc_link_stats['no_match']}"
+            )
 
             # Create LibraryCard for sub-document
             page_titles = [p["title"] for p in pages]
@@ -674,12 +765,14 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
                 level="subdocument",
                 title=breadcrumb_key,
                 content=f"Contains {len(pages)} pages: {', '.join(page_titles[:5])}{'...' if len(page_titles) > 5 else ''}",
-                extra_metadata=json.dumps({
-                    "page_titles": page_titles,
-                    "faiss_path": subdoc.faiss_index_path,
-                    "bm25_path": subdoc.bm25_index_path,
-                    "extraction_time": time.time()
-                })
+                extra_metadata=json.dumps(
+                    {
+                        "page_titles": page_titles,
+                        "faiss_path": subdoc.faiss_index_path,
+                        "bm25_path": subdoc.bm25_index_path,
+                        "extraction_time": time.time(),
+                    }
+                ),
             )
             db.add(library_card)
 
@@ -692,11 +785,13 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
                     level=section_data["level"],
                     title=section_data["title"],
                     content=section_data["content"],
-                    extra_metadata=json.dumps({
-                        "extraction_time": time.time(),
-                        "start_char": section_data.get("start_char", 0),
-                        "end_char": section_data.get("end_char", 0)
-                    })
+                    extra_metadata=json.dumps(
+                        {
+                            "extraction_time": time.time(),
+                            "start_char": section_data.get("start_char", 0),
+                            "end_char": section_data.get("end_char", 0),
+                        }
+                    ),
                 )
                 db.add(parent_card)
 
@@ -704,14 +799,20 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
 
             # Resolve citation library_card_ids now that library cards are saved
             library_cards_map = {}
-            for library_card in db.query(LibraryCard).filter(
-                LibraryCard.sub_document_id == subdoc.id,
-                LibraryCard.level.in_(['level_1', 'level_2', 'level_3'])
-            ).all():
+            for library_card in (
+                db.query(LibraryCard)
+                .filter(
+                    LibraryCard.sub_document_id == subdoc.id,
+                    LibraryCard.level.in_(["level_1", "level_2", "level_3"]),
+                )
+                .all()
+            ):
                 library_cards_map[library_card.doc_id] = library_card.id
 
             # Update chunks with resolved library_card_ids
-            subdoc_chunks = db.query(Chunk).filter(Chunk.sub_document_id == subdoc.id).all()
+            subdoc_chunks = (
+                db.query(Chunk).filter(Chunk.sub_document_id == subdoc.id).all()
+            )
             for chunk in subdoc_chunks:
                 metadata = json.loads(chunk.chunk_metadata)
                 citation = metadata.get("citation")
@@ -723,7 +824,9 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
                         del citation["library_card_doc_id"]
                         chunk.chunk_metadata = json.dumps(metadata)
                     else:
-                        logger.warning(f"Could not resolve library_card_doc_id '{doc_id}' for chunk {chunk.chunk_index}")
+                        logger.warning(
+                            f"Could not resolve library_card_doc_id '{doc_id}' for chunk {chunk.chunk_index}"
+                        )
 
             db.commit()
             logger.info(f"Job {job_id}: Completed processing '{breadcrumb_key}'")
@@ -738,18 +841,22 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
             level="document",
             title="Document Overview",
             content=f"Contains {len(subdocs)} sub-documents with {sum(subdoc_summary.values())} total pages",
-            extra_metadata=json.dumps({
-                "sub_documents": subdoc_summary,
-                "total_pages": sum(subdoc_summary.values()),
-                "total_chunks": total_chunks,
-                "extraction_time": time.time()
-            })
+            extra_metadata=json.dumps(
+                {
+                    "sub_documents": subdoc_summary,
+                    "total_pages": sum(subdoc_summary.values()),
+                    "total_chunks": total_chunks,
+                    "extraction_time": time.time(),
+                }
+            ),
         )
         db.add(main_card)
 
         # Calculate duration
         duration = time.time() - start_time
-        logger.info(f"Job {job_id}: Russian Doll processing completed in {duration:.2f} seconds")
+        logger.info(
+            f"Job {job_id}: Russian Doll processing completed in {duration:.2f} seconds"
+        )
 
         # Update document with completion status
         document.status = "completed"
@@ -772,12 +879,16 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
             "message": f"Russian Doll processing completed. Created {len(subdocs)} sub-documents with {total_chunks} total chunks in {duration:.2f}s.",
             "subdocument_count": len(subdocs),
             "chunk_count": total_chunks,
-            "duration": duration
+            "duration": duration,
         }
-        logger.info(f"Job {job_id}: SUCCESS - {len(subdocs)} sub-documents, {total_chunks} chunks in {duration:.2f}s")
+        logger.info(
+            f"Job {job_id}: SUCCESS - {len(subdocs)} sub-documents, {total_chunks} chunks in {duration:.2f}s"
+        )
 
     except Exception as e:
-        logger.error(f"Job {job_id}: Russian Doll processing failed: {str(e)}", exc_info=True)
+        logger.error(
+            f"Job {job_id}: Russian Doll processing failed: {str(e)}", exc_info=True
+        )
 
         # Update document with error status
         document = db.query(Document).filter(Document.job_id == job_id).first()
@@ -790,7 +901,7 @@ def process_document_with_subdocuments(job_id: str, markdown_content: str, max_t
             "status": "failed",
             "progress": 0,
             "stage": "failed",
-            "message": f"Russian Doll processing failed: {str(e)}"
+            "message": f"Russian Doll processing failed: {str(e)}",
         }
 
     finally:
@@ -812,26 +923,33 @@ def update_collection_library_card(document_id: int, db: Session):
         return
 
     # Get document's main library card
-    doc_card = db.query(LibraryCard).filter(
-        LibraryCard.document_id == document_id,
-        LibraryCard.level == "document"
-    ).first()
+    doc_card = (
+        db.query(LibraryCard)
+        .filter(LibraryCard.document_id == document_id, LibraryCard.level == "document")
+        .first()
+    )
 
     if not doc_card:
         logger.warning(f"No document library card found for document {document_id}")
         return
 
     # Get collection
-    collection = db.query(Collection).filter(Collection.id == document.collection_id).first()
+    collection = (
+        db.query(Collection).filter(Collection.id == document.collection_id).first()
+    )
     if not collection:
         logger.error(f"Collection {document.collection_id} not found")
         return
 
     # Get existing collection library card
-    existing_collection_card = db.query(LibraryCard).filter(
-        LibraryCard.collection_id == collection.id,
-        LibraryCard.level == "collection"
-    ).first()
+    existing_collection_card = (
+        db.query(LibraryCard)
+        .filter(
+            LibraryCard.collection_id == collection.id,
+            LibraryCard.level == "collection",
+        )
+        .first()
+    )
 
     # Parse document metadata
     doc_metadata = {}
@@ -839,20 +957,31 @@ def update_collection_library_card(document_id: int, db: Session):
         try:
             doc_metadata = json.loads(doc_card.extra_metadata)
         except json.JSONDecodeError:
-            logger.warning(f"Failed to parse document library card metadata for document {document_id}")
+            logger.warning(
+                f"Failed to parse document library card metadata for document {document_id}"
+            )
 
     # Initialize summary generator
-    summary_generator = CollectionSummaryGenerator(HuggingFaceChatClient(token=os.getenv("HF_TOKEN", ""), model=os.getenv("INTELLIGENT_SEARCH_MODEL", "deepseek-ai/DeepSeek-V3.2-Exp")))
+    summary_generator = CollectionSummaryGenerator(
+        HuggingFaceChatClient(
+            token=os.getenv("HF_TOKEN", ""),
+            model=os.getenv(
+                "INTELLIGENT_SEARCH_MODEL", "deepseek-ai/DeepSeek-V3.2-Exp"
+            ),
+        )
+    )
 
     if not existing_collection_card:
         # Create new collection library card
-        logger.info(f"Creating new collection library card for collection {collection.id}")
+        logger.info(
+            f"Creating new collection library card for collection {collection.id}"
+        )
 
         summary = summary_generator.generate_new_collection_summary(
             collection_name=collection.name,
             document_summary=doc_card.content,
             document_filename=document.filename,
-            document_metadata=doc_metadata
+            document_metadata=doc_metadata,
         )
 
         new_card = LibraryCard(
@@ -861,21 +990,27 @@ def update_collection_library_card(document_id: int, db: Session):
             level="collection",
             title=collection.name,
             content=summary,
-            extra_metadata=json.dumps({
-                "document_summaries": [
-                    {
-                        "document_id": document.id,
-                        "filename": document.filename,
-                        "summary": doc_card.content,
-                        "subdocument_count": doc_metadata.get("sub_documents", {}).__len__() if "sub_documents" in doc_metadata else 0,
-                        "page_count": doc_metadata.get("total_pages", 0)
-                    }
-                ],
-                "total_documents": 1,
-                "total_pages": doc_metadata.get("total_pages", 0),
-                "last_updated": time.time(),
-                "generation_method": "new"
-            })
+            extra_metadata=json.dumps(
+                {
+                    "document_summaries": [
+                        {
+                            "document_id": document.id,
+                            "filename": document.filename,
+                            "summary": doc_card.content,
+                            "subdocument_count": (
+                                doc_metadata.get("sub_documents", {}).__len__()
+                                if "sub_documents" in doc_metadata
+                                else 0
+                            ),
+                            "page_count": doc_metadata.get("total_pages", 0),
+                        }
+                    ],
+                    "total_documents": 1,
+                    "total_pages": doc_metadata.get("total_pages", 0),
+                    "last_updated": time.time(),
+                    "generation_method": "new",
+                }
+            ),
         )
         db.add(new_card)
         db.commit()
@@ -883,7 +1018,9 @@ def update_collection_library_card(document_id: int, db: Session):
 
     else:
         # Update existing collection library card
-        logger.info(f"Updating existing collection library card for collection {collection.id}")
+        logger.info(
+            f"Updating existing collection library card for collection {collection.id}"
+        )
 
         # Parse existing metadata
         existing_metadata = {}
@@ -891,7 +1028,9 @@ def update_collection_library_card(document_id: int, db: Session):
             try:
                 existing_metadata = json.loads(existing_collection_card.extra_metadata)
             except json.JSONDecodeError:
-                logger.warning(f"Failed to parse existing collection library card metadata")
+                logger.warning(
+                    "Failed to parse existing collection library card metadata"
+                )
                 existing_metadata = {"document_summaries": []}
 
         # Get existing document summaries
@@ -904,21 +1043,29 @@ def update_collection_library_card(document_id: int, db: Session):
             existing_documents=existing_summaries,
             new_document_summary=doc_card.content,
             new_document_filename=document.filename,
-            new_document_metadata=doc_metadata
+            new_document_metadata=doc_metadata,
         )
 
         # Update metadata
-        existing_summaries.append({
-            "document_id": document.id,
-            "filename": document.filename,
-            "summary": doc_card.content,
-            "subdocument_count": doc_metadata.get("sub_documents", {}).__len__() if "sub_documents" in doc_metadata else 0,
-            "page_count": doc_metadata.get("total_pages", 0)
-        })
+        existing_summaries.append(
+            {
+                "document_id": document.id,
+                "filename": document.filename,
+                "summary": doc_card.content,
+                "subdocument_count": (
+                    doc_metadata.get("sub_documents", {}).__len__()
+                    if "sub_documents" in doc_metadata
+                    else 0
+                ),
+                "page_count": doc_metadata.get("total_pages", 0),
+            }
+        )
 
         existing_metadata["document_summaries"] = existing_summaries
         existing_metadata["total_documents"] = len(existing_summaries)
-        existing_metadata["total_pages"] = sum(s.get("page_count", 0) for s in existing_summaries)
+        existing_metadata["total_pages"] = sum(
+            s.get("page_count", 0) for s in existing_summaries
+        )
         existing_metadata["last_updated"] = time.time()
         existing_metadata["generation_method"] = "incremental"
 

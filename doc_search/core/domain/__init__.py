@@ -16,8 +16,20 @@ from .interfaces.chat_client import ChatClient
 from .interfaces.search_data_access import SearchDataAccess
 
 __all__ = [
-    "Account", "Collection", "Document", "DocumentStructure",
-    "SubDocument", "SubDocumentPage", "LibraryCard", "Chunk",
-    "Embedder", "Reranker", "Retriever", "Fusion", "Chunker",
-    "ElementHandler", "ChatClient", "SearchDataAccess",
+    "Account",
+    "Collection",
+    "Document",
+    "DocumentStructure",
+    "SubDocument",
+    "SubDocumentPage",
+    "LibraryCard",
+    "Chunk",
+    "Embedder",
+    "Reranker",
+    "Retriever",
+    "Fusion",
+    "Chunker",
+    "ElementHandler",
+    "ChatClient",
+    "SearchDataAccess",
 ]

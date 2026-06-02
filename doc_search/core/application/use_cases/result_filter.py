@@ -18,6 +18,7 @@ def filter_by_node_type(
             metadata = result.get("metadata", {})
             if isinstance(metadata, str):
                 import json
+
                 metadata = json.loads(metadata)
             if metadata.get("node_type", "text") in node_types:
                 filtered.append(result)
