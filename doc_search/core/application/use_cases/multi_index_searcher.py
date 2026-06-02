@@ -80,6 +80,8 @@ class MultiIndexSearcher:
         if not all_results:
             return []
 
+        all_results.sort(key=lambda r: r.get("score", 0), reverse=True)
+
         if search.rerank:
             all_results = await self._reranker.rerank(search.query, all_results, len(all_results))
 
@@ -140,6 +142,8 @@ class MultiIndexSearcher:
         if not all_results:
             return []
 
+        all_results.sort(key=lambda r: r.get("score", 0), reverse=True)
+
         if search.rerank:
             all_results = await self._reranker.rerank(search.query, all_results, len(all_results))
 
@@ -151,6 +155,8 @@ class MultiIndexSearcher:
     def _build_subdoc_metadata(self, subdocs: list[SubDocument]) -> list[dict]:
         metadata = []
         for sd in subdocs:
+            if not sd.faiss_index_path or not sd.bm25_index_path:
+                continue
             card = self._data.get_library_card_for_sub_doc(sd.id)
             page_titles = _parse_page_titles(card)
             metadata.append({
