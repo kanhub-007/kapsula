@@ -61,6 +61,9 @@ def _memory_guide_text() -> str:
         "  • get_search_results(search_job_id) -> retrieve when status=\"completed\"\n"
         "  • cancel_search(search_job_id) -> abort if needed\n\n"
         "INSPECTING KNOWLEDGE\n"
+        "  • get_library_cards(collection_id) — browse H1/H2/H3 section cards with content "
+        "    previews. Use BEFORE searching to understand what topics exist, then formulate "
+        "    a targeted query. Optional: filter by level or document_job_id.\n"
         "  • get_collection(collection_id) — list all documents in a collection\n"
         "  • list_collections(account_id) — overview of all collections\n"
         "  • get_document_info(job_id) — chunk preview, structure skeleton\n"
@@ -68,6 +71,8 @@ def _memory_guide_text() -> str:
         "  • export_collection(collection_id) — full dump for external analysis\n\n"
         "BEST PRACTICES\n"
         "  • ALWAYS use context_mode=\"deep\" when retrieving for LLM consumption.\n"
+        "  • Browse before search: call get_library_cards() first to see what topics exist,"
+        "    then formulate a targeted query — much more effective than blind searching.\n"
         "  • For complex reasoning questions, use intelligent_search (not plain search).\n"
         "  • Scope searches as narrowly as possible: document > collection > global.\n"
         "  • After uploading, verify with get_document_progress() before searching.\n"
@@ -99,4 +104,4 @@ def register_tools(mcp: FastMCP):
         return _memory_guide_text()
 
     from kapsula.infrastructure.logging_config import get_logger
-    get_logger(__name__).info("Registered 20 MCP tools across 5 modules")
+    get_logger(__name__).info("Registered 21 MCP tools across 5 modules")

@@ -198,3 +198,104 @@ def register_collection_tools(mcp: FastMCP):
             )
         finally:
             db.close()
+
+    @mcp.tool(
+        name="get_library_cards",
+        description=(
+            "Browse the knowledge structure of a collection or document. "
+            "Returns H1/H2/H3 section cards with titles and content previews — "
+            "like a table of contents with summaries. Use this BEFORE searching "
+            "to understand what topics exist, then formulate a targeted search query. "
+            "Filter by level ('level_1'=H3, 'level_2'=H2, 'level_3'=H1) or scope "
+            "to one document via document_job_id."
+        ),
+    )
+    def get_library_cards(
+        collection_id: str,
+        level: str | None = None,
+        document_job_id: str | None = None,
+        limit: int = 50,
+    ) -> str:
+        db = _get_db()
+        try:
+            from kapsula.infrastructure.data import (
+                Collection as OrmCollection,
+                LibraryCard as OrmLibraryCard,
+                Document as OrmDocument,
+            )
+
+            col = db.query(OrmCollection).filter(
+                OrmCollection.collection_id == collection_id
+            ).first()
+            if not col:
+                return f"Collection not found: {collection_id}"
+
+            q = db.query(OrmLibraryCard).filter(
+                OrmLibraryCard.collection_id == col.id,
+            )
+
+            # Filter to structural levels only (exclude 'collection'/'document' summary cards)
+            if level:
+                q = q.filter(OrmLibraryCard.level == level)
+            else:
+                q = q.filter(
+                    OrmLibraryCard.level.in_(['level_1', 'level_2', 'level_3'])
+                )
+
+            # Optionally scope to one document
+            if document_job_id:
+                doc = db.query(OrmDocument).filter(
+                    OrmDocument.job_id == document_job_id
+                ).first()
+                if not doc:
+                    return f"Document not found: {document_job_id}"
+                q = q.filter(OrmLibraryCard.document_id == doc.id)
+
+            cards = q.order_by(
+                OrmLibraryCard.level.desc(),  # level_3 (H1) first
+                OrmLibraryCard.title,
+            ).limit(limit).all()
+
+            if not cards:
+                return f"No library cards found in collection '{col.name}'."
+
+            # Group by level for structured output
+            level_labels = {
+                'level_3': 'H1',
+                'level_2': 'H2',
+                'level_1': 'H3',
+            }
+
+            # Build document filename lookup
+            doc_ids = set(c.document_id for c in cards if c.document_id)
+            doc_names: dict[int, str] = {}
+            if doc_ids:
+                docs = db.query(OrmDocument).filter(
+                    OrmDocument.id.in_(doc_ids)
+                ).all()
+                doc_names = {d.id: d.filename for d in docs}
+
+            lines = [
+                f"Library Cards — {col.name} ({len(cards)} cards)"
+            ]
+            if level:
+                lines[0] += f" [filtered: {level_labels.get(level, level)}]"
+            if document_job_id:
+                doc_name = doc_names.get(doc.id, "?") if doc else "?"
+                lines[0] += f" [document: {doc_name}]"
+            lines.append("")
+
+            indent = {'level_3': '', 'level_2': '  ', 'level_1': '    '}
+            for card in cards:
+                lvl_label = level_labels.get(card.level, card.level)
+                ind = indent.get(card.level, '')
+                doc_name = doc_names.get(card.document_id, '?') if card.document_id else '?'
+                preview = card.content[:200].replace('\n', ' ').strip()
+                lines.append(
+                    f"{ind}[{lvl_label}] {card.title} — "
+                    f"\"{preview}...\" ({doc_name})"
+                )
+
+            return "\n".join(lines)
+        finally:
+            db.close()

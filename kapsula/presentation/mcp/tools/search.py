@@ -67,7 +67,7 @@ async def _run_search_documents_text(
                 routing_mode=routing_mode,
             )
         )
-        return format_search_results(query, results, scope=scope)
+        return format_search_results(query, results, scope=scope, context_mode=context_mode)
     finally:
         db.close()
 
@@ -245,13 +245,12 @@ def register_search_tools(mcp: FastMCP):
     @mcp.tool(
         name="search_documents",
         description=(
-            "Search across ALL collections in an account with hybrid FAISS+BM25 retrieval. "
-            "Returns ranked chunks with scores and source info. Use for broad exploration when "
-            "you don't know which collection holds the answer. For targeted searches, prefer "
-            "search_collection (scoped to one domain) or search_document (scoped to one file). "
-            "context_mode: 'none'=raw chunk, 'narrow'=H3 section, 'deep'=H2 chapter. "
-            "node_type_filter: comma-separated types like 'table,code' to restrict to specific content kinds. "
-            "When you need a synthesized answer (not just chunks), use intelligent_search instead."
+            "RAW CHUNK RETRIEVAL — returns ranked chunks with scores; YOU judge relevance. "
+            "Scores: 0.0-1.0 (>0.5 good, >0.7 strong, <0.3 noise). "
+            "Best for: fact lookup with known keywords, finding exact text, citing specific passages. "
+            "NOT for: complex reasoning or comparisons — use intelligent_search for those. "
+            "context_mode: 'none'=raw chunk, 'narrow'=H3 section, 'deep'=H2 chapter (use 'deep' for LLM). "
+            "node_type_filter: comma-separated like 'table,code' to restrict content types."
         ),
     )
     async def search_documents(
@@ -467,13 +466,14 @@ def register_search_tools(mcp: FastMCP):
     @mcp.tool(
         name="intelligent_search",
         description=(
-            "LLM-powered search across collections — NOT just chunk retrieval. "
-            "The system plans sub-questions, executes multiple searches, evaluates results, "
-            "and synthesizes a grounded answer with reasoning. Use when the user asks a complex "
-            "question that requires reasoning across documents ('how do X and Y relate?', "
-            "'what's the best approach for Z?'). For simple fact retrieval, use search_collection "
-            "or search_documents instead — they're faster. context_mode: 'none'/'narrow'/'deep'. "
-            "enable_planning=True uses the LLM to plan sub-questions for better coverage."
+            "AI-SYNTHESIZED ANSWER — the system plans, searches, and reasons for you. "
+            "Returns a grounded answer with reasoning, not raw chunks. "
+            "Best for: complex questions, cross-document reasoning, comparisons, analysis, "
+            "or when you do not know exact search terms. "
+            "NOT for: simple fact retrieval (what is X?) — use search_collection instead; "
+            "it is faster and gives you exact citations. "
+            "context_mode: none/narrow/deep. enable_planning=True (default) "
+            "decomposes complex questions into sub-searches for better coverage."
         ),
     )
     async def intelligent_search(
