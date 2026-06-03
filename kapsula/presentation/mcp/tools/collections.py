@@ -5,7 +5,6 @@ import uuid
 from fastmcp import FastMCP
 
 from kapsula.infrastructure.data import (
-    LibraryCard as OrmLibraryCard,
     Account as OrmAccount,
 )
 from kapsula.infrastructure.repositories.data.sql_account_repository import (
@@ -20,6 +19,11 @@ from kapsula.infrastructure.repositories.data.sql_query_repositories import (
 from kapsula.core.domain.entities.collection import Collection
 from ._shared import _get_db
 
+# Library card level constants — the levels used for structural (extractive)
+# heading cards: level_1=H3, level_2=H2, level_3=H1.
+_STRUCTURAL_LEVELS = ("level_1", "level_2", "level_3")
+_LEVEL_DISPLAY = {"level_3": "H1", "level_2": "H2", "level_1": "H3"}
+_LEVEL_INDENT = {"level_3": "", "level_2": "  ", "level_1": "    "}
 
 _account_repo = SqlAccountRepository()
 _collection_repo = SqlCollectionRepository()
@@ -76,7 +80,9 @@ def register_collection_tools(mcp: FastMCP):
                 f"Created: {col.created_at.isoformat() if col.created_at else '?'}",
             ]
             if col.account_id:
-                acc = db.query(OrmAccount).filter(OrmAccount.id == col.account_id).first()
+                acc = (
+                    db.query(OrmAccount).filter(OrmAccount.id == col.account_id).first()
+                )
                 if acc:
                     lines.append(f"Account: {acc.name} ({acc.account_id})")
             if card:
@@ -85,7 +91,10 @@ def register_collection_tools(mcp: FastMCP):
                 lines.append("\nDocuments:")
                 # Domain collection has documents=[], need ORM for full load
                 from kapsula.infrastructure.data import Collection as OrmCollection
-                orm_col = db.query(OrmCollection).filter(OrmCollection.id == col.id).first()
+
+                orm_col = (
+                    db.query(OrmCollection).filter(OrmCollection.id == col.id).first()
+                )
                 if orm_col:
                     for d in orm_col.documents:
                         lines.append(
@@ -181,7 +190,11 @@ def register_collection_tools(mcp: FastMCP):
             )
             from kapsula.infrastructure.data import Collection as OrmCollection
 
-            col = db.query(OrmCollection).filter(OrmCollection.collection_id == collection_id).first()
+            col = (
+                db.query(OrmCollection)
+                .filter(OrmCollection.collection_id == collection_id)
+                .first()
+            )
             if not col:
                 return f"Collection not found: {collection_id}"
             result = CollectionMaintenanceRunner(db).run(col)
@@ -224,9 +237,11 @@ def register_collection_tools(mcp: FastMCP):
                 Document as OrmDocument,
             )
 
-            col = db.query(OrmCollection).filter(
-                OrmCollection.collection_id == collection_id
-            ).first()
+            col = (
+                db.query(OrmCollection)
+                .filter(OrmCollection.collection_id == collection_id)
+                .first()
+            )
             if not col:
                 return f"Collection not found: {collection_id}"
 
@@ -234,66 +249,61 @@ def register_collection_tools(mcp: FastMCP):
                 OrmLibraryCard.collection_id == col.id,
             )
 
-            # Filter to structural levels only (exclude 'collection'/'document' summary cards)
+            # Filter to structural levels only (exclude 'collection'/'document' summary cards).
+            # When Phase 3 adds topic/evolution/gap cards (which use card_type not level),
+            # this filter will need to include them for full knowledge browsing.
             if level:
                 q = q.filter(OrmLibraryCard.level == level)
             else:
-                q = q.filter(
-                    OrmLibraryCard.level.in_(['level_1', 'level_2', 'level_3'])
-                )
+                q = q.filter(OrmLibraryCard.level.in_(_STRUCTURAL_LEVELS))
 
             # Optionally scope to one document
             if document_job_id:
-                doc = db.query(OrmDocument).filter(
-                    OrmDocument.job_id == document_job_id
-                ).first()
+                doc = (
+                    db.query(OrmDocument)
+                    .filter(OrmDocument.job_id == document_job_id)
+                    .first()
+                )
                 if not doc:
                     return f"Document not found: {document_job_id}"
                 q = q.filter(OrmLibraryCard.document_id == doc.id)
 
-            cards = q.order_by(
-                OrmLibraryCard.level.desc(),  # level_3 (H1) first
-                OrmLibraryCard.title,
-            ).limit(limit).all()
+            cards = (
+                q.order_by(
+                    OrmLibraryCard.level.desc(),  # level_3 (H1) first
+                    OrmLibraryCard.title,
+                )
+                .limit(limit)
+                .all()
+            )
 
             if not cards:
                 return f"No library cards found in collection '{col.name}'."
-
-            # Group by level for structured output
-            level_labels = {
-                'level_3': 'H1',
-                'level_2': 'H2',
-                'level_1': 'H3',
-            }
 
             # Build document filename lookup
             doc_ids = set(c.document_id for c in cards if c.document_id)
             doc_names: dict[int, str] = {}
             if doc_ids:
-                docs = db.query(OrmDocument).filter(
-                    OrmDocument.id.in_(doc_ids)
-                ).all()
+                docs = db.query(OrmDocument).filter(OrmDocument.id.in_(doc_ids)).all()
                 doc_names = {d.id: d.filename for d in docs}
 
-            lines = [
-                f"Library Cards — {col.name} ({len(cards)} cards)"
-            ]
+            lines = [f"Library Cards — {col.name} ({len(cards)} cards)"]
             if level:
-                lines[0] += f" [filtered: {level_labels.get(level, level)}]"
+                lines[0] += f" [filtered: {_LEVEL_DISPLAY.get(level, level)}]"
             if document_job_id:
-                doc_name = doc_names.get(doc.id, "?") if doc else "?"
+                doc_name = doc_names.get(doc.id, "?")
                 lines[0] += f" [document: {doc_name}]"
             lines.append("")
 
-            indent = {'level_3': '', 'level_2': '  ', 'level_1': '    '}
             for card in cards:
-                lvl_label = level_labels.get(card.level, card.level)
-                ind = indent.get(card.level, '')
-                doc_name = doc_names.get(card.document_id, '?') if card.document_id else '?'
-                preview = card.content[:200].replace('\n', ' ').strip()
+                lvl_label = _LEVEL_DISPLAY.get(card.level, card.level)
+                ind = _LEVEL_INDENT.get(card.level, "")
+                doc_name = (
+                    doc_names.get(card.document_id, "?") if card.document_id else "?"
+                )
+                preview = card.content[:200].replace("\n", " ").strip()
                 lines.append(
-                    f"{ind}[{lvl_label}] {card.title} — "
-                    f"\"{preview}...\" ({doc_name})"
+                    f"{ind}[{lvl_label}] {card.title} — " f'"{preview}..." ({doc_name})'
                 )
 
             return "\n".join(lines)
