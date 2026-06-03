@@ -1,0 +1,29 @@
+"""Repository interface for Collection persistence."""
+
+from abc import ABC, abstractmethod
+
+from doc_search.core.domain.entities.collection import Collection
+
+
+class CollectionRepository(ABC):
+    """Persistence for collections."""
+
+    @abstractmethod
+    def list_all(self, db) -> list[Collection]:
+        """Return all collections ordered by creation date descending."""
+
+    @abstractmethod
+    def list_by_account(self, db, account_id: str) -> list[Collection]:
+        """Return collections belonging to a specific account."""
+
+    @abstractmethod
+    def find_by_collection_id(self, db, collection_id: str) -> Collection | None:
+        """Return the collection with the given GUID, or None."""
+
+    @abstractmethod
+    def find_by_id(self, db, internal_id: int) -> Collection | None:
+        """Return the collection with the given internal ID, or None."""
+
+    @abstractmethod
+    def save(self, db, collection: Collection) -> None:
+        """Persist a new collection and flush its identity."""

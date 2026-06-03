@@ -4,8 +4,15 @@ import uuid
 
 from fastmcp import FastMCP
 
-from doc_search.infrastructure.data import Account
-from ._shared import _get_db, _resolve_account
+from doc_search.core.domain.entities.account import Account
+from doc_search.core.domain.entities.collection import Collection
+from doc_search.infrastructure.repositories.data.sql_account_repository import (
+    SqlAccountRepository,
+)
+from ._shared import _get_db
+
+
+_account_repo = SqlAccountRepository()
 
 
 def register_account_tools(mcp: FastMCP):
@@ -18,8 +25,7 @@ def register_account_tools(mcp: FastMCP):
         try:
             account_id = str(uuid.uuid4())
             acc = Account(account_id=account_id, name=name, ip_address="127.0.0.1")
-            db.add(acc)
-            db.commit()
+            _account_repo.save(db, acc)
             return f"Account created: {name}\n  account_id: {account_id}"
         finally:
             db.close()
@@ -31,7 +37,7 @@ def register_account_tools(mcp: FastMCP):
     def list_accounts() -> str:
         db = _get_db()
         try:
-            accounts = db.query(Account).order_by(Account.created_at.desc()).all()
+            accounts = _account_repo.list_all(db)
             if not accounts:
                 return "No accounts found."
             lines = [f"Accounts ({len(accounts)}):\n"]
@@ -50,7 +56,7 @@ def register_account_tools(mcp: FastMCP):
     def get_account(account_id: str) -> str:
         db = _get_db()
         try:
-            acc = _resolve_account(db, account_id)
+            acc = _account_repo.find_by_account_id(db, account_id)
             if not acc:
                 return f"Account not found: {account_id}"
             lines = [
