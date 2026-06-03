@@ -23,10 +23,15 @@ def strip_inline_formatting(text: str) -> str:
     text = re.sub(r"~~(.+?)~~", r"\1", text)
     # Blockquote prefix (> at line start)
     text = re.sub(r"^> ?", "", text, flags=re.MULTILINE)
-    # Unordered list markers (- or * at line start)
+    # Unordered list markers (- or * at line start, or inline between joined items)
     text = re.sub(r"^(?:- |\* )(.*)$", r"\1", text, flags=re.MULTILINE)
+    # Inline list markers — when items are joined on one line: "... - item ..."
+    text = re.sub(r"(?<=\S) (?:- |\* )(?=\S)", " ", text)
     # Ordered list markers (1. 2. etc at line start)
     text = re.sub(r"^\d+\.\s+(.*)$", r"\1", text, flags=re.MULTILINE)
+    # Collapse newlines and multiple spaces (after line-start patterns applied)
+    text = re.sub(r"\n+", " ", text)
+    text = re.sub(r" +", " ", text)
     return text
 
 
@@ -45,11 +50,12 @@ def find_chunk_in_markdown(
 
     # 2) Match against formatting-stripped markdown
     stripped_md = strip_inline_formatting(markdown_content)
-    pos = stripped_md.find(search_text)
+    stripped_search = strip_inline_formatting(search_text)
+    pos = stripped_md.find(stripped_search)
     if pos == -1:
-        # 3) Progressive shortening — try shorter prefixes (down to 30 chars)
-        for length in range(len(search_text) - 10, 29, -5):
-            shorter = search_text[:length].strip()
+        # 3) Progressive shortening on stripped text
+        for length in range(len(stripped_search) - 10, 29, -5):
+            shorter = stripped_search[:length].strip()
             pos = stripped_md.find(shorter)
             if pos != -1:
                 break
@@ -64,12 +70,20 @@ def find_chunk_in_markdown(
 def _map_stripped_to_raw(
     stripped_md: str, stripped_pos: int, raw_content: str
 ) -> int:
-    """Map a character position in stripped markdown back to raw markdown."""
+    """Map a character position in stripped markdown back to raw markdown.
+
+    The stripped version may have newlines and multiple spaces collapsed,
+    so we skip past those in the raw content while advancing through stripped."""
     raw_pos = 0
     stripped_i = 0
     while stripped_i < stripped_pos and raw_pos < len(raw_content):
-        if stripped_md[stripped_i] == raw_content[raw_pos]:
+        sc = stripped_md[stripped_i]
+        rc = raw_content[raw_pos]
+        if sc == rc:
             stripped_i += 1
+            raw_pos += 1
+        elif rc in ("\n", "\r", " ", "\t") and stripped_md[stripped_i - 1:stripped_i + 1] != rc:
+            # Skip whitespace in raw that was collapsed in stripped
             raw_pos += 1
         else:
             raw_pos += 1
