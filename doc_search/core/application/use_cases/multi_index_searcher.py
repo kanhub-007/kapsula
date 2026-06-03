@@ -58,16 +58,14 @@ class MultiIndexSearcher:
         reranker: Reranker,
         chat_client: ChatClient,
         make_searcher: Callable,
-        aggregate_strategy: CollectionSearchStrategy | None = None,
-        account_strategy: CollectionSearchStrategy | None = None,
+        strategies: list[CollectionSearchStrategy] | None = None,
     ):
         self._data = data
         self._embedder = embedder
         self._reranker = reranker
         self._chat_client = chat_client
         self._make_searcher = make_searcher
-        self._aggregate_strategy = aggregate_strategy
-        self._account_strategy = account_strategy
+        self._strategies = strategies or []
 
     def _get_searcher(self, faiss_path: str, bm25_path: str):
         return self._make_searcher(faiss_path, bm25_path)
@@ -168,10 +166,10 @@ class MultiIndexSearcher:
             )
             return []
 
-        # Account aggregate fast path
-        if scope.kind == SearchScopeKind.ACCOUNT and self._account_strategy is not None:
+        # Aggregate fast path: try each injected strategy
+        for strategy in self._strategies:
             metadata = self._build_collection_metadata(collections)
-            account_results = await self._account_strategy.search(
+            aggregate_results = await strategy.search(
                 collection=metadata[0] if metadata else {},
                 query=search.query,
                 top_k=search.top_k,
@@ -180,16 +178,16 @@ class MultiIndexSearcher:
                 context_mode=search.context_mode,
                 node_type_filter=search.node_type_filter,
             )
-            if account_results is not None:
-                _route_scorer.compute_weights(account_results)
-                account_results.sort(key=lambda r: r.get("score", 0), reverse=True)
-                account_results = _quota_policy.apply(account_results, search.top_k)
+            if aggregate_results is not None:
+                _route_scorer.compute_weights(aggregate_results)
+                aggregate_results.sort(key=lambda r: r.get("score", 0), reverse=True)
+                aggregate_results = _quota_policy.apply(aggregate_results, search.top_k)
                 logger.info(
-                    "Collection search total time %.3fs: account aggregate fast path returned=%s",
+                    "Collection search total time %.3fs: aggregate fast path returned=%s",
                     perf_counter() - total_started,
-                    len(account_results),
+                    len(aggregate_results),
                 )
-                return account_results
+                return aggregate_results
 
         metadata = self._build_collection_metadata(collections)
         routing_started = perf_counter()
@@ -217,32 +215,6 @@ class MultiIndexSearcher:
             search.collection_id,
             search.account_id,
         )
-
-        # Fast path: try aggregate index strategy for single-collection scope
-        if (
-            scope.kind == SearchScopeKind.COLLECTION
-            and len(selected) == 1
-            and self._aggregate_strategy is not None
-        ):
-            aggregate_results = await self._aggregate_strategy.search(
-                collection=selected[0],
-                query=search.query,
-                top_k=search.top_k,
-                per_document_multiplier=search.per_document_multiplier,
-                rerank=search.rerank,
-                context_mode=search.context_mode,
-                node_type_filter=search.node_type_filter,
-            )
-            if aggregate_results is not None:
-                _route_scorer.compute_weights(aggregate_results)
-                aggregate_results.sort(key=lambda r: r.get("score", 0), reverse=True)
-                aggregate_results = _quota_policy.apply(aggregate_results, search.top_k)
-                logger.info(
-                    "Collection search total time %.3fs: aggregate fast path returned=%s",
-                    perf_counter() - total_started,
-                    len(aggregate_results),
-                )
-                return aggregate_results
 
         document_concurrency = _document_concurrency()
         document_semaphore = asyncio.Semaphore(document_concurrency)

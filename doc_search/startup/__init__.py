@@ -128,8 +128,10 @@ def create_multi_index_searcher(
         reranker=reranker,
         chat_client=chat_client,
         make_searcher=make_searcher,
-        aggregate_strategy=create_aggregate_search_strategy(embedder),
-        account_strategy=create_account_search_strategy(embedder),
+        strategies=[
+            create_aggregate_search_strategy(embedder),
+            create_account_search_strategy(embedder),
+        ],
     )
 
 
@@ -138,16 +140,41 @@ def create_aggregate_search_strategy(embedder=None):
     from doc_search.infrastructure.repositories.indexing.aggregate_index_search_strategy import (
         AggregateIndexSearchStrategy,
     )
+    from doc_search.core.application.dto.aggregate_index_paths import (
+        AggregateIndexPaths,
+    )
 
     embedder = embedder or create_embedder()
-    return AggregateIndexSearchStrategy(data_dir=DATA_DIR, embedder=embedder)
+
+    def _collection_paths(collection: dict):
+        return AggregateIndexPaths.for_collection(
+            DATA_DIR,
+            account_guid=collection.get("account_guid"),
+            collection_guid=collection.get("collection_guid"),
+        )
+
+    return AggregateIndexSearchStrategy(
+        data_dir=DATA_DIR, embedder=embedder, path_factory=_collection_paths
+    )
 
 
 def create_account_search_strategy(embedder=None):
     from doc_search.infrastructure.data.connection import DATA_DIR
-    from doc_search.infrastructure.repositories.indexing.account_index_search_strategy import (
-        AccountIndexSearchStrategy,
+    from doc_search.infrastructure.repositories.indexing.aggregate_index_search_strategy import (
+        AggregateIndexSearchStrategy,
+    )
+    from doc_search.core.application.dto.aggregate_index_paths import (
+        AggregateIndexPaths,
     )
 
     embedder = embedder or create_embedder()
-    return AccountIndexSearchStrategy(data_dir=DATA_DIR, embedder=embedder)
+
+    def _account_paths(collection: dict):
+        guid = collection.get("account_guid")
+        if not guid:
+            return None
+        return AggregateIndexPaths.for_account(DATA_DIR, guid)
+
+    return AggregateIndexSearchStrategy(
+        data_dir=DATA_DIR, embedder=embedder, path_factory=_account_paths
+    )

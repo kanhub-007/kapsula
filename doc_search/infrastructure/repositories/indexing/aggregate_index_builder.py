@@ -1,8 +1,4 @@
-"""Collection-level aggregate index builder.
-
-Rebuilds FAISS and BM25 indexes that span all completed documents in a
-collection so that collection-scoped queries can use a single search pass.
-"""
+"""Aggregate index builder for collection and account scopes."""
 
 from __future__ import annotations
 
@@ -17,11 +13,8 @@ import numpy as np
 from rank_bm25 import BM25Plus
 from sqlalchemy.orm import Session
 
-from doc_search.core.application.dto.account_index_paths import (
-    AccountIndexPaths,
-)
-from doc_search.core.application.dto.collection_index_paths import (
-    CollectionIndexPaths,
+from doc_search.core.application.dto.aggregate_index_paths import (
+    AggregateIndexPaths,
 )
 from doc_search.core.domain.interfaces.embedder import Embedder
 from doc_search.core.domain.text_processing import tokenize
@@ -32,7 +25,7 @@ logger = get_logger(__name__)
 
 
 class AggregateIndexBuilder:
-    """Build aggregate FAISS and BM25 indexes for a collection."""
+    """Build aggregate FAISS and BM25 indexes for collections and accounts."""
 
     def __init__(self, embedder: Embedder, data_dir: str):
         self._embedder = embedder
@@ -45,11 +38,7 @@ class AggregateIndexBuilder:
         account_id: str | None = None,
         collection_guid: str | None = None,
     ) -> tuple[str | None, str | None]:
-        """Build or rebuild aggregate indexes for a collection.
-
-        Returns:
-            (faiss_path, bm25_path) or (None, None) if nothing to index.
-        """
+        """Build collection-level aggregate indexes."""
         docs = (
             db.query(Document)
             .filter(
@@ -59,41 +48,16 @@ class AggregateIndexBuilder:
             .all()
         )
         if not docs:
-            logger.info(
-                "No completed documents for collection %s; skipping aggregate index build",
-                collection_id,
-            )
+            logger.info("No completed documents for collection %s", collection_id)
             return None, None
 
-        indexes_dir = CollectionIndexPaths.from_parts(
-            self._data_dir, account_id, collection_guid
-        ).indexes_dir
-        os.makedirs(indexes_dir, exist_ok=True)
-        texts, mapping = self._collect_texts_and_mapping(docs)
-        if not texts:
-            return None, None
-
-        logger.info(
-            "Building aggregate indexes for collection %s: %s chunks from %s documents",
-            collection_id,
-            len(texts),
-            len(docs),
+        return self._build_from_docs(
+            docs,
+            AggregateIndexPaths.for_collection(
+                self._data_dir, account_id, collection_guid
+            ),
+            label=f"collection {collection_id}",
         )
-
-        embeddings = self._embedder.embed(texts)
-        paths = CollectionIndexPaths(indexes_dir=indexes_dir)
-        faiss_path = self._build_faiss_at(embeddings, paths.faiss)
-        bm25_path = self._build_bm25_at(texts, paths.bm25)
-        self._save_mapping_at(mapping, paths.mapping)
-
-        logger.info(
-            "Aggregate indexes built for collection %s: faiss=%s bm25=%s chunks=%s",
-            collection_id,
-            os.path.basename(faiss_path) if faiss_path else "none",
-            os.path.basename(bm25_path) if bm25_path else "none",
-            len(texts),
-        )
-        return faiss_path, bm25_path
 
     def build_account(
         self,
@@ -101,7 +65,7 @@ class AggregateIndexBuilder:
         account_id: int,
         account_guid: str,
     ) -> tuple[str | None, str | None]:
-        """Build or rebuild aggregate indexes for an account."""
+        """Build account-level aggregate indexes."""
         from doc_search.infrastructure.data.tables.collection import Collection
 
         collection_ids = (
@@ -109,7 +73,7 @@ class AggregateIndexBuilder:
         )
         cids = [row[0] for row in collection_ids]
         if not cids:
-            logger.info("No collections for account %s; skipping", account_id)
+            logger.info("No collections for account %s", account_id)
             return None, None
 
         docs = (
@@ -121,37 +85,43 @@ class AggregateIndexBuilder:
             .all()
         )
         if not docs:
-            logger.info(
-                "No completed documents for account %s; skipping aggregate",
-                account_id,
-            )
+            logger.info("No completed documents for account %s", account_id)
             return None, None
 
-        indexes_dir = AccountIndexPaths.from_parts(
-            self._data_dir, account_guid
-        ).indexes_dir
-        os.makedirs(indexes_dir, exist_ok=True)
+        return self._build_from_docs(
+            docs,
+            AggregateIndexPaths.for_account(self._data_dir, account_guid),
+            label=f"account {account_id}",
+        )
 
+    # ── shared build pipeline ─────────────────────────────────────
+
+    def _build_from_docs(
+        self,
+        docs: list[Document],
+        paths: AggregateIndexPaths,
+        label: str,
+    ) -> tuple[str | None, str | None]:
+        os.makedirs(paths.indexes_dir, exist_ok=True)
         texts, mapping = self._collect_texts_and_mapping(docs)
         if not texts:
             return None, None
 
         logger.info(
-            "Building account aggregate indexes for %s: %s chunks from %s documents",
-            account_id,
+            "Building aggregate indexes for %s: %s chunks from %s documents",
+            label,
             len(texts),
             len(docs),
         )
 
         embeddings = self._embedder.embed(texts)
-        paths = AccountIndexPaths(indexes_dir=indexes_dir)
         faiss_path = self._build_faiss_at(embeddings, paths.faiss)
         bm25_path = self._build_bm25_at(texts, paths.bm25)
         self._save_mapping_at(mapping, paths.mapping)
 
         logger.info(
-            "Account aggregate indexes built for %s: faiss=%s bm25=%s chunks=%s",
-            account_id,
+            "Aggregate indexes built for %s: faiss=%s bm25=%s chunks=%s",
+            label,
             os.path.basename(faiss_path) if faiss_path else "none",
             os.path.basename(bm25_path) if bm25_path else "none",
             len(texts),
@@ -223,18 +193,3 @@ class AggregateIndexBuilder:
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(mapping, handle)
         logger.info("Aggregate chunk mapping saved: %s entries", len(mapping))
-
-
-def load_aggregate_chunk_mapping(paths: CollectionIndexPaths) -> list[dict[str, Any]]:
-    return _load_mapping_from_path(paths.mapping)
-
-
-def load_account_chunk_mapping(paths: AccountIndexPaths) -> list[dict[str, Any]]:
-    return _load_mapping_from_path(paths.mapping)
-
-
-def _load_mapping_from_path(path: str) -> list[dict[str, Any]]:
-    if not os.path.exists(path):
-        return []
-    with open(path, "r", encoding="utf-8") as handle:
-        return json.load(handle)
