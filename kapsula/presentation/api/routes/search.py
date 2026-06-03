@@ -142,13 +142,19 @@ async def search_across_collections(
     """
     Search across multiple collections using LLM routing.
 
-    - **query**: Search query text
-    - **account_id**: Optional account ID to filter collections (if not provided, searches all collections)
-    - **top_k**: Number of results to return (1-100)
-    - **context_mode**: Context expansion mode - "none" (default), "narrow" (H3 parent), "deep" (H2 chapter)
-    - **rerank**: Enable LLM reranking for better relevance (default: False)
+    Use this for broad exploration when you don't know which collection holds
+    the answer. For targeted searches, use /search/collections/{collection_id}
+    instead — it's faster and more precise.
 
-    Returns search results with scores, content, and source information (collection, document).
+    For LLM consumption, set context_mode="deep" to get full H2 chapter context.
+
+    - **query**: Search query text
+    - **account_id**: Optional account ID to filter collections
+    - **top_k**: Number of results to return (1-100, default 10)
+    - **context_mode**: "none" (raw chunk), "narrow" (H3 section), "deep" (H2 chapter)
+    - **rerank**: Enable cross-encoder reranking (default: False)
+
+    Returns search results with scores, content, and source information.
     """
     logger.info(
         f"Collection search request: '{query[:50]}...' (account_id={account_id})"
@@ -209,8 +215,18 @@ async def search_collection(
     """
     Search within a single collection by collection_id.
 
-    This is a middle-ground search scope: faster and less noisy than searching
-    all collections, but broader than requiring an exact document job_id.
+    Faster and more precise than global search — use when you know which
+    knowledge domain holds the answer. Get collection_id from GET /collections.
+
+    For LLM consumption, set context_mode="deep" to get full H2 chapter context.
+
+    - **collection_id**: Collection ID (GUID) to search within
+    - **query**: Search query text
+    - **top_k**: Number of results to return (1-100, default 10)
+    - **context_mode**: "none" (raw chunk), "narrow" (H3 section), "deep" (H2 chapter)
+    - **rerank**: Enable cross-encoder reranking (default: False)
+
+    Returns search results with scores, content, and source information.
     """
     logger.info(
         f"Scoped collection search: collection_id={collection_id}, query='{query[:50]}...'"
@@ -309,22 +325,21 @@ async def intelligent_search_across_collections(
     db: Session = Depends(get_db),
 ):
     """
-    Intelligent search with proper flow:
-    1. Route to correct collection (existing routing)
-    2. Get library cards from that collection
-    3. Plan sub-questions using library cards
-    4. Route each sub-question to correct subdocument index
-    5. Aggregate results and generate answer
+    Intelligent LLM-powered search across collections.
+
+    The system plans sub-questions, searches each, evaluates results, and
+    synthesizes a grounded answer. Best for complex questions, cross-document
+    reasoning, comparisons, and analysis. Not for simple fact retrieval.
+
+    For LLM consumption, set context_mode="deep" to get full H2 chapter context.
 
     - **query**: Search query text
-    - **account_id**: Optional account ID to filter collections (if not provided, searches all collections)
-    - **top_k**: Number of search results to retrieve (1-100)
-    - **context_mode**: Context expansion mode - "none" (default), "narrow" (H3 parent), "deep" (H2 chapter)
-    - **rerank**: Enable LLM reranking for better relevance (default: False)
-    - **max_context_length**: Maximum character length for LLM context window (1000-20000)
-    - **enable_planning**: Enable query planning to create sub-questions (default: True)
+    - **account_id**: Optional account ID to filter collections
+    - **top_k**: Number of search results per sub-question (1-100, default 10)
+    - **context_mode**: "none" (raw chunk), "narrow" (H3 section), "deep" (H2 chapter)
+    - **enable_planning**: Decompose complex questions into sub-searches (default: True)
 
-    Returns an LLM-generated answer based ONLY on the search results.
+    Returns an LLM-generated answer grounded in search results.
     """
     logger.info(
         f"Intelligent collection search: '{query[:50]}...' (account_id={account_id}, planning={enable_planning})"
@@ -890,16 +905,21 @@ async def search_document(
     db: Session = Depends(get_db),
 ):
     """
-    Search within a specific document using hybrid search.
+    Search within a specific document using hybrid (FAISS+BM25) retrieval.
+
+    Most precise scope — use when you know exactly which document contains
+    the answer. For broader searches, use /search/collections/{collection_id}.
+    Get job_id from GET /collections/{collection_id}/documents.
+
+    For LLM consumption, set context_mode="deep" to get full H2 chapter context.
 
     - **job_id**: Job ID (GUID) of the document to search
     - **query**: Search query text
-    - **top_k**: Number of results to return (1-100)
-    - **context_mode**: Context expansion mode - "none" (default), "narrow" (H3 parent), "deep" (H2 chapter)
-    - **node_type_filter**: Filter by content type (comma-separated): "code", "table", "text"
-    - **rerank**: Enable LLM reranking for better relevance (default: False)
+    - **top_k**: Number of results to return (1-100, default 10)
+    - **context_mode**: "none" (raw chunk), "narrow" (H3 section), "deep" (H2 chapter)
+    - **node_type_filter**: Filter by content type: "code", "table", "text"
 
-    Returns search results with scores and content.
+    Returns search results with scores, content, and citations.
     """
     logger.info(f"Search request for job {job_id}: '{query[:50]}...'")
 
@@ -1051,20 +1071,21 @@ async def intelligent_search_document(
     db: Session = Depends(get_db),
 ):
     """
-    Intelligent search within a document with query planning: analyzes the question with library cards,
-    creates an optimal search strategy, then uses LLM to formulate an answer.
+    Intelligent LLM-powered search within a single document.
+
+    Analyzes the document structure via library cards, plans sub-questions,
+    searches, and synthesizes a grounded answer. Use for reasoning about a
+    specific document's content.
+
+    For LLM consumption, set context_mode="deep" to get full H2 chapter context.
 
     - **job_id**: Job ID (GUID) of the document to search
     - **query**: Search query text
-    - **top_k**: Number of search results to retrieve (1-100)
-    - **context_mode**: Context expansion mode - "none" (default), "narrow" (H3 parent), "deep" (H2 chapter)
-    - **node_type_filter**: Filter by content type (comma-separated): "code", "table", "text"
-    - **rerank**: Enable LLM reranking for better relevance (default: False)
-    - **max_context_length**: Maximum character length for LLM context window (1000-20000)
-    - **enable_planning**: Enable query planning to break down complex questions (default: True)
+    - **top_k**: Number of search results per sub-question (1-100, default 10)
+    - **context_mode**: "none" (raw chunk), "narrow" (H3 section), "deep" (H2 chapter)
+    - **enable_planning**: Decompose complex questions into sub-searches (default: True)
 
-    Returns an LLM-generated answer based ONLY on the search results, not on the model's pre-trained knowledge.
-    If no relevant information is found, the answer will clearly state so.
+    Returns an LLM-generated answer grounded in search results.
     """
     logger.info(
         f"Intelligent search request for job {job_id}: '{query[:50]}...' (planning={enable_planning})"

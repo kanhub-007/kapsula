@@ -9,13 +9,14 @@ router = APIRouter()
 async def root():
     """API health check endpoint."""
     return {
-        "message": "Document Chunking API is running",
+        "message": "Kapsula Memory System API is running",
         "version": "1.0.0",
         "docs": "/docs",
+        "service": "kapsula-memory-system",
     }
 
 
 @router.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy", "service": "document-chunking-api"}
+    return {"status": "healthy", "service": "kapsula-memory-system"}

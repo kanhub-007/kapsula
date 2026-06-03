@@ -55,14 +55,18 @@ async def upload_document(
     db: Session = Depends(get_db),
 ):
     """
-    Upload a markdown file for processing to a collection.
+    Upload a markdown file to a collection for processing.
+
+    Use well-structured markdown with H2/H3 headings — each heading becomes
+    a library card for navigation and context expansion. Without proper headings,
+    the browse-before-search workflow breaks down.
 
     - **collection_id**: Collection ID (GUID) to upload document to
-    - **file**: Markdown file to upload
-    - **max_tokens**: Maximum token length for embedding model (default: 512)
-    - **ingestion_mode**: Upload intent: fast, indexed (default), or full
+    - **file**: Markdown (.md) file — must use H2/H3 headings for best results
+    - **max_tokens**: Maximum token length per chunk (default: 512)
+    - **ingestion_mode**: \"fast\" (no indexes), \"indexed\" (FAISS+BM25, default), \"full\" (indexes + summary)
 
-    Returns job ID and processing status.
+    Returns job ID for tracking progress via GET /documents/progress/{job_id}.
     """
     try:
         ingestion_mode = UploadIngestionMode.normalize(ingestion_mode)
