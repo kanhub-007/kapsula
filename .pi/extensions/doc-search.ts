@@ -64,6 +64,8 @@ class McpHttpClient {
       capabilities: {},
       clientInfo: { name: "pi-doc-search", version: "1.0.0" },
     });
+    // MCP spec: server waits for initialized notification before processing requests
+    await this.sendNotification("notifications/initialized", {});
     this.connected = true;
   }
 
@@ -194,7 +196,10 @@ class McpHttpClient {
 
     const response = await fetch(this.baseUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
       body: JSON.stringify(body),
     });
 
@@ -205,10 +210,41 @@ class McpHttpClient {
     }
 
     const text = await response.text();
-    if (!text.trim()) {
+    const body = this.parseStreamableHttp(text);
+    if (!body) {
       return { jsonrpc: "2.0", id, result: {} };
     }
-    return JSON.parse(text) as JsonRpcResponse;
+    return JSON.parse(body) as JsonRpcResponse;
+  }
+
+  private parseStreamableHttp(text: string): string | null {
+    // FastMCP streamable-http returns SSE: "event: message\ndata: {...}\n\n"
+    // Plain JSON is also accepted as fallback.
+    if (text.startsWith("{")) {
+      return text;
+    }
+    const lines = text.split("\n");
+    for (const line of lines) {
+      if (line.startsWith("data:")) {
+        return line.slice(5).trim();
+      }
+    }
+    return null;
+  }
+
+  private async sendNotification(
+    method: string,
+    params: Record<string, unknown>
+  ): Promise<void> {
+    const body = { jsonrpc: "2.0", method, params };
+    await fetch(this.baseUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify(body),
+    });
   }
 
   private timeoutFor(method: string): number {
