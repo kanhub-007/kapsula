@@ -18,10 +18,16 @@ from sqlalchemy.orm import Session
 from doc_search.infrastructure.data import (
     get_db,
     SessionLocal,
-    Document,
-    DocumentStructure,
-    Chunk,
-    Collection,
+)
+from doc_search.infrastructure.data.tables.document import Document as OrmDocument
+from doc_search.infrastructure.data.tables.document_structure import DocumentStructure as OrmDocumentStructure
+from doc_search.infrastructure.data.tables.chunk import Chunk as OrmChunk
+from doc_search.infrastructure.data.tables.collection import Collection as OrmCollection
+from doc_search.infrastructure.repositories.data.sql_document_repository import (
+    SqlDocumentRepository,
+)
+from doc_search.infrastructure.repositories.data.sql_query_repositories import (
+    SqlChunkRepository,
 )
 from doc_search.infrastructure.logging_config import get_logger
 from ..models import (
@@ -79,7 +85,7 @@ async def upload_document(
 
     # Verify collection exists
     collection = (
-        db.query(Collection).filter(Collection.collection_id == collection_id).first()
+        db.query(OrmCollection).filter(OrmOrmCollection.collection_id == collection_id).first()
     )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
@@ -106,7 +112,7 @@ async def upload_document(
     logger.info(f"Generated job ID: {job_id}")
 
     # Create document record
-    document = Document(
+    document = OrmDocument(
         job_id=job_id,
         collection_id=collection.id,
         filename=file.filename,
@@ -170,7 +176,7 @@ async def get_progress(job_id: str, db: Session = Depends(get_db)):
     logger.debug(f"Progress check for job: {job_id}")
 
     # Check if document exists
-    document = db.query(Document).filter(Document.job_id == job_id).first()
+    document = db.query(OrmDocument).filter(OrmOrmDocument.job_id == job_id).first()
     if not document:
         logger.warning(f"Job not found: {job_id}")
         raise HTTPException(status_code=404, detail="Job not found")
@@ -218,7 +224,7 @@ async def download_structure(job_id: str, db: Session = Depends(get_db)):
     logger.info(f"Structure download request for job: {job_id}")
 
     # Check if document exists and is completed
-    document = db.query(Document).filter(Document.job_id == job_id).first()
+    document = db.query(OrmDocument).filter(OrmOrmDocument.job_id == job_id).first()
     if not document:
         logger.warning(f"Job not found: {job_id}")
         raise HTTPException(status_code=404, detail="Job not found")
@@ -232,8 +238,8 @@ async def download_structure(job_id: str, db: Session = Depends(get_db)):
 
     # Get document structure
     structure = (
-        db.query(DocumentStructure)
-        .filter(DocumentStructure.document_id == document.id)
+        db.query(OrmDocumentStructure)
+        .filter(OrmOrmDocumentStructure.document_id == document.id)
         .first()
     )
 
@@ -264,7 +270,7 @@ async def download_chunks(job_id: str, db: Session = Depends(get_db)):
     logger.info(f"Chunks download request for job: {job_id}")
 
     # Check if document exists and is completed
-    document = db.query(Document).filter(Document.job_id == job_id).first()
+    document = db.query(OrmDocument).filter(OrmOrmDocument.job_id == job_id).first()
     if not document:
         logger.warning(f"Job not found: {job_id}")
         raise HTTPException(status_code=404, detail="Job not found")
@@ -278,9 +284,9 @@ async def download_chunks(job_id: str, db: Session = Depends(get_db)):
 
     # Get all chunks
     chunks = (
-        db.query(Chunk)
-        .filter(Chunk.document_id == document.id)
-        .order_by(Chunk.chunk_index)
+        db.query(OrmChunk)
+        .filter(OrmOrmChunk.document_id == document.id)
+        .order_by(OrmChunk.chunk_index)
         .all()
     )
 
@@ -329,7 +335,7 @@ async def list_documents(db: Session = Depends(get_db)):
     Returns a list of all documents in the database.
     """
     logger.debug("Listing all documents")
-    documents = db.query(Document).order_by(Document.created_at.desc()).all()
+    documents = db.query(OrmDocument).order_by(OrmDocument.created_at.desc()).all()
 
     return DocumentListResponse(
         documents=[
@@ -362,14 +368,14 @@ async def get_document(job_id: str, db: Session = Depends(get_db)):
     """
     logger.debug(f"Getting details for job: {job_id}")
 
-    document = db.query(Document).filter(Document.job_id == job_id).first()
+    document = db.query(OrmDocument).filter(OrmOrmDocument.job_id == job_id).first()
     if not document:
         logger.warning(f"Job not found: {job_id}")
         raise HTTPException(status_code=404, detail="Job not found")
 
     structure = (
-        db.query(DocumentStructure)
-        .filter(DocumentStructure.document_id == document.id)
+        db.query(OrmDocumentStructure)
+        .filter(OrmOrmDocumentStructure.document_id == document.id)
         .first()
     )
 

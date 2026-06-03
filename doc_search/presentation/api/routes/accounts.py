@@ -4,7 +4,14 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from doc_search.infrastructure.data import get_db, Account, LibraryCard
+from doc_search.infrastructure.data import get_db
+from doc_search.infrastructure.data.tables.account import Account as OrmAccount
+from doc_search.infrastructure.data.tables.collection import Collection as OrmCollection
+from doc_search.infrastructure.data import LibraryCard as OrmLibraryCard
+from doc_search.infrastructure.repositories.data.sql_account_repository import (
+    SqlAccountRepository,
+)
+from doc_search.core.domain.entities.account import Account
 from doc_search.infrastructure.logging_config import get_logger
 from ..models import (
     AccountCreate,
@@ -16,64 +23,43 @@ from ..models import (
 
 logger = get_logger(__name__)
 router = APIRouter()
+_account_repo = SqlAccountRepository()
 
 
 @router.post("/", response_model=AccountResponse)
 async def create_account(
     request: Request, account_data: AccountCreate, db: Session = Depends(get_db)
 ):
-    """
-    Create a new account.
-
-    - **name**: Name of the account
-
-    Returns account ID (GUID) and metadata.
-    """
     logger.info(f"Creating account: {account_data.name}")
-
-    # Get client IP
     client_ip = request.client.host
-
-    # Generate unique account ID (GUID)
     account_id = str(uuid.uuid4())
-    logger.info(f"Generated account ID: {account_id}")
-
-    # Create account record
-    account = Account(
-        account_id=account_id, name=account_data.name, ip_address=client_ip
-    )
-
-    db.add(account)
-    db.commit()
-    db.refresh(account)
-
+    acc = Account(account_id=account_id, name=account_data.name, ip_address=client_ip)
+    _account_repo.save(db, acc)
     logger.info(f"Account created: {account_id}")
-
     return AccountResponse(
-        account_id=account.account_id,
-        name=account.name,
-        created_at=account.created_at.isoformat(),
+        account_id=account_id,
+        name=account_data.name,
+        created_at=acc.created_at.isoformat() if acc.created_at else "",
         collection_count=0,
     )
 
 
 @router.get("/", response_model=AccountListResponse)
 async def list_accounts(db: Session = Depends(get_db)):
-    """
-    List all accounts.
-
-    Returns a list of all accounts with collection counts.
-    """
-    logger.debug("Listing all accounts")
-    accounts = db.query(Account).order_by(Account.created_at.desc()).all()
-
+    accounts = _account_repo.list_all(db)
+    # Need ORM for collection counts (relationships)
+    orm_accounts = {
+        a.account_id: db.query(OrmAccount).filter(OrmAccount.account_id == a.account_id).first()
+        for a in accounts
+    }
     return AccountListResponse(
         accounts=[
             AccountResponse(
                 account_id=acc.account_id,
                 name=acc.name,
-                created_at=acc.created_at.isoformat(),
-                collection_count=len(acc.collections),
+                created_at=acc.created_at.isoformat() if acc.created_at else "",
+                collection_count=len(orm_accounts[acc.account_id].collections)
+                if acc.account_id in orm_accounts else 0,
             )
             for acc in accounts
         ],
@@ -83,200 +69,82 @@ async def list_accounts(db: Session = Depends(get_db)):
 
 @router.get("/{account_id}", response_model=AccountResponse)
 async def get_account(account_id: str, db: Session = Depends(get_db)):
-    """
-    Get detailed information about a specific account.
-
-    - **account_id**: Account ID (GUID)
-
-    Returns account details including collection count.
-    """
-    logger.debug(f"Getting details for account: {account_id}")
-
-    account = db.query(Account).filter(Account.account_id == account_id).first()
-    if not account:
-        logger.warning(f"Account not found: {account_id}")
+    acc = _account_repo.find_by_account_id(db, account_id)
+    if not acc:
         raise HTTPException(status_code=404, detail="Account not found")
-
+    orm_acc = db.query(OrmAccount).filter(OrmAccount.account_id == account_id).first()
     return AccountResponse(
-        account_id=account.account_id,
-        name=account.name,
-        created_at=account.created_at.isoformat(),
-        collection_count=len(account.collections),
+        account_id=acc.account_id,
+        name=acc.name,
+        created_at=acc.created_at.isoformat() if acc.created_at else "",
+        collection_count=len(orm_acc.collections) if orm_acc else 0,
     )
 
 
 @router.get("/{account_id}/collections", response_model=CollectionListResponse)
 async def list_account_collections(account_id: str, db: Session = Depends(get_db)):
-    """
-    List all collections in an account.
-
-    - **account_id**: Account ID (GUID)
-
-    Returns all collections belonging to this account.
-    """
-    logger.debug(f"Listing collections for account: {account_id}")
-
-    account = db.query(Account).filter(Account.account_id == account_id).first()
-    if not account:
-        logger.warning(f"Account not found: {account_id}")
+    acc = _account_repo.find_by_account_id(db, account_id)
+    if not acc:
         raise HTTPException(status_code=404, detail="Account not found")
-
-    from ..models import CollectionResponse, CollectionListResponse
-
-    # Build response including summarized collection-level library card (if available)
+    from ..models import CollectionResponse as CollResponse
+    orm_acc = db.query(OrmAccount).filter(OrmAccount.account_id == account_id).first()
+    if not orm_acc:
+        return CollectionListResponse(collections=[], total=0)
     collections_with_summary = []
-    for col in account.collections:
-        # Get the most recent collection-level library card (not document-level)
-        collection_card = (
-            db.query(LibraryCard)
-            .filter(
-                LibraryCard.collection_id == col.id,
-                LibraryCard.document_id.is_(None),  # ensure collection-level
-            )
-            .order_by(LibraryCard.created_at.desc())
+    for col in orm_acc.collections:
+        card = (
+            db.query(OrmLibraryCard)
+            .filter(OrmLibraryCard.collection_id == col.id, OrmLibraryCard.document_id.is_(None))
+            .order_by(OrmLibraryCard.created_at.desc())
             .first()
         )
-
         collections_with_summary.append(
-            CollectionResponse(
+            CollResponse(
                 collection_id=col.collection_id,
                 name=col.name,
                 created_at=col.created_at.isoformat(),
                 document_count=len(col.documents),
-                library_card_summary=(
-                    collection_card.content if collection_card else None
-                ),
+                library_card_summary=card.content if card else None,
             )
         )
-
-    return CollectionListResponse(
-        collections=collections_with_summary, total=len(account.collections)
-    )
+    return CollectionListResponse(collections=collections_with_summary, total=len(orm_acc.collections))
 
 
 @router.get("/{account_id}/export", response_model=AccountExportResponse)
 async def export_account_data(account_id: str, db: Session = Depends(get_db)):
-    """
-    Export complete account data including all collections, documents, file content, and library cards.
-
-    - **account_id**: Account ID (GUID)
-
-    Returns comprehensive account information with:
-    - All collections
-    - All documents with original file content
-    - All library cards (document-level and collection-level)
-    - Complete metadata
-
-    This endpoint is useful for backup, migration, or comprehensive data analysis.
-    """
-    logger.info(f"Exporting complete data for account: {account_id}")
-
-    # Get account
-    account = db.query(Account).filter(Account.account_id == account_id).first()
-    if not account:
-        logger.warning(f"Account not found: {account_id}")
+    acc = _account_repo.find_by_account_id(db, account_id)
+    if not acc:
         raise HTTPException(status_code=404, detail="Account not found")
-
-    from ..models import (
-        AccountExportResponse,
-        CollectionExportInfo,
-        DocumentExportInfo,
-        LibraryCardInfo,
-    )
-
+    from ..models import AccountExportResponse, CollectionExportInfo, DocumentExportInfo, LibraryCardInfo
+    orm_acc = db.query(OrmAccount).filter(OrmAccount.account_id == account_id).first()
+    if not orm_acc:
+        raise HTTPException(status_code=404, detail="Account not found")
     collections_data = []
-    total_documents = 0
-    total_library_cards = 0
-
-    # Process each collection
-    for collection in account.collections:
-        documents_data = []
-
-        # Process each document in collection
-        for document in collection.documents:
-            # Get document-level library cards
-            doc_library_cards = (
-                db.query(LibraryCard)
-                .filter(
-                    LibraryCard.document_id == document.id,
-                    LibraryCard.collection_id.is_(None),  # Document-level only
-                )
-                .all()
-            )
-
-            doc_library_cards_info = [
-                LibraryCardInfo(
-                    id=card.id,
-                    level=card.level,
-                    title=card.title,
-                    content=card.content,
-                    created_at=card.created_at.isoformat(),
-                )
-                for card in doc_library_cards
-            ]
-
-            documents_data.append(
-                DocumentExportInfo(
-                    id=document.id,
-                    job_id=document.job_id,
-                    filename=document.filename,
-                    size=document.size,
-                    status=document.status,
-                    created_at=document.created_at.isoformat(),
-                    duration=document.duration,
-                    chunk_count=len(document.chunks),
-                    library_cards=doc_library_cards_info,
-                )
-            )
-
-            total_documents += 1
-            total_library_cards += len(doc_library_cards_info)
-
-        # Get collection-level library cards
-        collection_library_cards = (
-            db.query(LibraryCard)
-            .filter(
-                LibraryCard.collection_id == collection.id,
-                LibraryCard.document_id.is_(None),  # Collection-level only
-            )
-            .all()
-        )
-
-        collection_library_cards_info = [
-            LibraryCardInfo(
-                id=card.id,
-                level=card.level,
-                title=card.title,
-                content=card.content,
-                created_at=card.created_at.isoformat(),
-            )
-            for card in collection_library_cards
-        ]
-
-        total_library_cards += len(collection_library_cards_info)
-
-        collections_data.append(
-            CollectionExportInfo(
-                collection_id=collection.collection_id,
-                name=collection.name,
-                created_at=collection.created_at.isoformat(),
-                document_count=len(collection.documents),
-                documents=documents_data,
-                library_cards=collection_library_cards_info,
-            )
-        )
-
-    logger.info(
-        f"Account export completed: {len(collections_data)} collections, "
-        f"{total_documents} documents, {total_library_cards} library cards"
-    )
-
+    total_docs = 0; total_cards = 0
+    for col in orm_acc.collections:
+        docs_data = []
+        for doc in col.documents:
+            doc_cards = db.query(OrmLibraryCard).filter(
+                OrmLibraryCard.document_id == doc.id, OrmLibraryCard.collection_id.is_(None)
+            ).all()
+            docs_data.append(DocumentExportInfo(
+                id=doc.id, job_id=doc.job_id, filename=doc.filename, size=doc.size,
+                status=doc.status, created_at=doc.created_at.isoformat(),
+                duration=doc.duration, chunk_count=len(doc.chunks),
+                library_cards=[LibraryCardInfo(id=c.id, level=c.level, title=c.title, content=c.content, created_at=c.created_at.isoformat()) for c in doc_cards],
+            ))
+            total_docs += 1; total_cards += len(doc_cards)
+        col_cards = db.query(OrmLibraryCard).filter(
+            OrmLibraryCard.collection_id == col.id, OrmLibraryCard.document_id.is_(None)
+        ).all()
+        total_cards += len(col_cards)
+        collections_data.append(CollectionExportInfo(
+            collection_id=col.collection_id, name=col.name, created_at=col.created_at.isoformat(),
+            document_count=len(col.documents), documents=docs_data,
+            library_cards=[LibraryCardInfo(id=c.id, level=c.level, title=c.title, content=c.content, created_at=c.created_at.isoformat()) for c in col_cards],
+        ))
     return AccountExportResponse(
-        account_id=account.account_id,
-        name=account.name,
-        created_at=account.created_at.isoformat(),
-        collection_count=len(account.collections),
-        total_documents=total_documents,
-        total_library_cards=total_library_cards,
-        collections=collections_data,
+        account_id=acc.account_id, name=acc.name, created_at=acc.created_at.isoformat() if acc.created_at else "",
+        collection_count=len(orm_acc.collections), total_documents=total_docs,
+        total_library_cards=total_cards, collections=collections_data,
     )

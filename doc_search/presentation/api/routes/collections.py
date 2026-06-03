@@ -9,7 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request, File, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from doc_search.infrastructure.data import get_db, Collection, Account, DATA_DIR
+from doc_search.infrastructure.data import get_db, DATA_DIR
+from doc_search.infrastructure.data.tables.collection import Collection as OrmCollection
+from doc_search.infrastructure.data.tables.account import Account as OrmAccount
+from doc_search.infrastructure.data import LibraryCard as OrmLibraryCard
+from doc_search.infrastructure.repositories.data.sql_collection_repository import (
+    SqlCollectionRepository,
+)
+from doc_search.core.domain.entities.collection import Collection
 from doc_search.infrastructure.logging_config import get_logger
 from ..models import CollectionResponse, CollectionListResponse
 
@@ -46,6 +53,7 @@ def save_logo(file: UploadFile, collection_id: str) -> str:
     return logo_filename
 
 
+_collection_repo = SqlCollectionRepository()
 @router.post("/", response_model=CollectionResponse)
 async def create_collection(
     request: Request,
@@ -75,7 +83,7 @@ async def create_collection(
     # If account_id provided, verify it exists and get the account
     account = None
     if account_id:
-        account = db.query(Account).filter(Account.account_id == account_id).first()
+        account = db.query(OrmAccount).filter(OrmOrmAccount.account_id == account_id).first()
         if not account:
             logger.warning(f"Account not found: {account_id}")
             raise HTTPException(
@@ -92,7 +100,7 @@ async def create_collection(
             logger.error(f"Error saving logo: {e}")
             raise HTTPException(status_code=500, detail=f"Error saving logo: {str(e)}")
 
-    # Create collection record
+    # Create collection via repository
     collection = Collection(
         collection_id=collection_id,
         name=name,
@@ -100,10 +108,7 @@ async def create_collection(
         account_id=account.id if account else None,
         ip_address=client_ip,
     )
-
-    db.add(collection)
-    db.commit()
-    db.refresh(collection)
+    _collection_repo.save(db, collection)
 
     logger.info(f"Collection created: {collection_id}")
 
@@ -139,7 +144,7 @@ async def upload_collection_logo(
 
     # Get collection
     collection = (
-        db.query(Collection).filter(Collection.collection_id == collection_id).first()
+        db.query(OrmCollection).filter(OrmOrmCollection.collection_id == collection_id).first()
     )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
@@ -189,7 +194,7 @@ async def download_collection_logo(collection_id: str, db: Session = Depends(get
 
     # Get collection
     collection = (
-        db.query(Collection).filter(Collection.collection_id == collection_id).first()
+        db.query(OrmCollection).filter(OrmOrmCollection.collection_id == collection_id).first()
     )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
@@ -234,7 +239,7 @@ async def list_collections(request: Request, db: Session = Depends(get_db)):
     Returns a list of all collections with document counts and logo download URLs.
     """
     logger.debug("Listing all collections")
-    collections = db.query(Collection).order_by(Collection.created_at.desc()).all()
+    collections = db.query(OrmCollection).order_by(OrmCollection.created_at.desc()).all()
 
     return CollectionListResponse(
         collections=[
@@ -269,7 +274,7 @@ async def get_collection(
     logger.debug(f"Getting details for collection: {collection_id}")
 
     collection = (
-        db.query(Collection).filter(Collection.collection_id == collection_id).first()
+        db.query(OrmCollection).filter(OrmOrmCollection.collection_id == collection_id).first()
     )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
@@ -300,7 +305,7 @@ async def list_collection_documents(collection_id: str, db: Session = Depends(ge
     logger.debug(f"Listing documents for collection: {collection_id}")
 
     collection = (
-        db.query(Collection).filter(Collection.collection_id == collection_id).first()
+        db.query(OrmCollection).filter(OrmOrmCollection.collection_id == collection_id).first()
     )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
@@ -351,7 +356,7 @@ async def export_collection_data(
 
     # Get collection
     collection = (
-        db.query(Collection).filter(Collection.collection_id == collection_id).first()
+        db.query(OrmCollection).filter(OrmOrmCollection.collection_id == collection_id).first()
     )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
