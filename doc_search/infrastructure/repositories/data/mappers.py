@@ -157,8 +157,17 @@ def sub_document_from_orm(orm) -> "domain_sd.SubDocument":
 
 
 def _collection_from_orm_safe(orm) -> "domain_coll.Collection":
-    """Collection without account population (safe for Document→Collection path)."""
+    """Collection with account (but account flat — no collections).
+    
+    Safe for Document→Collection→Account path.  Account has collections=[].
+    """
     from doc_search.core.domain.entities.collection import Collection
+    account = None
+    try:
+        if orm.account is not None:
+            account = _account_from_orm_safe(orm.account)
+    except Exception:
+        pass
     return Collection(
         id=orm.id,
         collection_id=orm.collection_id,
@@ -167,7 +176,7 @@ def _collection_from_orm_safe(orm) -> "domain_coll.Collection":
         logo_filename=orm.logo_filename,
         created_at=orm.created_at,
         ip_address=orm.ip_address,
-        account=None,
+        account=account,
         documents=[],
     )
 

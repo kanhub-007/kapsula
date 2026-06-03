@@ -55,7 +55,15 @@ class SqlDocumentRepository(DocumentRepository):
     def find_document_by_job_id(
         self, db: Session, job_id: str
     ) -> DomainDocument | None:
-        orm_doc = db.query(Document).filter(Document.job_id == job_id).first()
+        from sqlalchemy.orm import joinedload
+        orm_doc = (
+            db.query(Document)
+            .options(
+                joinedload(Document.collection).joinedload(Collection.account)
+            )
+            .filter(Document.job_id == job_id)
+            .first()
+        )
         if orm_doc is None:
             return None
         return document_from_orm(orm_doc)
