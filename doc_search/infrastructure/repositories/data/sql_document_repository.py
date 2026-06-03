@@ -30,6 +30,28 @@ logger = get_logger(__name__)
 class SqlDocumentRepository(DocumentRepository):
     """Persists documents via SQLAlchemy, mapping through domain entities."""
 
+    def list_all(self, db: Session) -> list[DomainDocument]:
+        orm_list = db.query(Document).order_by(Document.created_at.desc()).all()
+        return [document_from_orm(d) for d in orm_list]
+
+    def list_by_collection(
+        self, db: Session, collection_guid: str
+    ) -> list[DomainDocument]:
+        col = (
+            db.query(Collection)
+            .filter(Collection.collection_id == collection_guid)
+            .first()
+        )
+        if col is None:
+            return []
+        orm_list = (
+            db.query(Document)
+            .filter(Document.collection_id == col.id)
+            .order_by(Document.created_at.desc())
+            .all()
+        )
+        return [document_from_orm(d) for d in orm_list]
+
     def find_document_by_job_id(
         self, db: Session, job_id: str
     ) -> DomainDocument | None:

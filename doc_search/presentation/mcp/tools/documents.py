@@ -5,14 +5,20 @@ import json
 from fastmcp import FastMCP
 
 from doc_search.infrastructure.data import (
-    Document,
-    DocumentStructure,
-    Chunk,
+    Document as OrmDocument,
+    DocumentStructure as OrmDocumentStructure,
 )
-from ._shared import (
-    _get_db,
-    _resolve_collection,
+from doc_search.infrastructure.repositories.data.sql_document_repository import (
+    SqlDocumentRepository,
 )
+from doc_search.infrastructure.repositories.data.sql_query_repositories import (
+    SqlChunkRepository,
+)
+from ._shared import _get_db
+
+
+_doc_repo = SqlDocumentRepository()
+_chunk_repo = SqlChunkRepository()
 
 
 def register_document_tools(mcp: FastMCP):
@@ -95,21 +101,20 @@ def register_document_tools(mcp: FastMCP):
     def list_documents(collection_id: str | None = None) -> str:
         db = _get_db()
         try:
-            q = db.query(Document)
             if collection_id:
-                col = _resolve_collection(db, collection_id)
-                if not col:
-                    return f"Collection not found: {collection_id}"
-                q = q.filter(Document.collection_id == col.id)
-            docs = q.order_by(Document.created_at.desc()).all()
+                docs = _doc_repo.list_by_collection(db, collection_id)
+                if docs and not any(True for _ in [docs]):
+                    pass  # list_by_collection returns empty on unknown collection
+            else:
+                docs = _doc_repo.list_all(db)
             if not docs:
                 return "No documents found."
 
             lines = [f"Documents ({len(docs)}):\n"]
             for d in docs:
-                cn = d.collection.name if d.collection else "?"
+                chunks_count = _chunk_repo.count_by_document(db, d.id) if d.id else 0
                 lines.append(
-                    f"  • {d.filename} [{d.status}] — {len(d.chunks)} chunks, {cn}"
+                    f"  • {d.filename} [{d.status}] — {chunks_count} chunks"
                 )
                 lines.append(f"    job_id: {d.job_id}")
             return "\n".join(lines)
@@ -123,21 +128,14 @@ def register_document_tools(mcp: FastMCP):
     def list_collection_documents(collection_id: str) -> str:
         db = _get_db()
         try:
-            col = _resolve_collection(db, collection_id)
-            if not col:
-                return f"Collection not found: {collection_id}"
-            docs = (
-                db.query(Document)
-                .filter(Document.collection_id == col.id)
-                .order_by(Document.created_at.desc())
-                .all()
-            )
+            docs = _doc_repo.list_by_collection(db, collection_id)
             if not docs:
-                return f"No documents found in collection: {col.name}"
-            lines = [f"Documents in {col.name} ({len(docs)}):\n"]
+                return f"No documents found in collection: {collection_id}"
+            lines = [f"Documents in collection ({len(docs)}):\n"]
             for d in docs:
+                chunks_count = _chunk_repo.count_by_document(db, d.id) if d.id else 0
                 lines.append(
-                    f"  • {d.filename} [{d.status}] — chunks={len(d.chunks)} — job_id={d.job_id}"
+                    f"  • {d.filename} [{d.status}] — chunks={chunks_count} — job_id={d.job_id}"
                 )
             return "\n".join(lines)
         finally:
@@ -150,26 +148,23 @@ def register_document_tools(mcp: FastMCP):
     def get_document_info(job_id: str) -> str:
         db = _get_db()
         try:
-            doc = db.query(Document).filter(Document.job_id == job_id).first()
+            doc = _doc_repo.find_document_by_job_id(db, job_id)
             if not doc:
                 return f"Document not found: {job_id}"
 
-            structure = (
-                db.query(DocumentStructure)
-                .filter(DocumentStructure.document_id == doc.id)
-                .first()
-            )
-            chunks = (
-                db.query(Chunk)
-                .filter(Chunk.document_id == doc.id)
-                .order_by(Chunk.chunk_index)
-                .all()
-            )
+            structure = None
+            if doc.id:
+                structure = (
+                    db.query(OrmDocumentStructure)
+                    .filter(OrmDocumentStructure.document_id == doc.id)
+                    .first()
+                )
+
+            chunks = _chunk_repo.list_by_document(db, doc.id) if doc.id else []
 
             lines = [
                 f"Document: {doc.filename}",
                 f"Status: {doc.status}",
-                f"Collection: {doc.collection.name if doc.collection else '?'}",
                 f"Size: {doc.size} bytes",
                 f"Chunks: {len(chunks)}",
                 f"Duration: {doc.duration:.2f}s" if doc.duration else "Duration: —",
@@ -197,7 +192,7 @@ def register_document_tools(mcp: FastMCP):
     def get_document_progress(job_id: str) -> str:
         db = _get_db()
         try:
-            doc = db.query(Document).filter(Document.job_id == job_id).first()
+            doc = _doc_repo.find_document_by_job_id(db, job_id)
             if not doc:
                 return f"Document not found: {job_id}"
 
@@ -205,6 +200,7 @@ def register_document_tools(mcp: FastMCP):
             from doc_search.presentation.upload.stale_progress_guard import StaleProgressGuard
 
             status = get_processing_status(job_id)
+            chunks_count = _chunk_repo.count_by_document(db, doc.id) if doc.id else 0
 
             if status:
                 live_progress = int(status.get("progress", 0) or 0)
@@ -215,7 +211,7 @@ def register_document_tools(mcp: FastMCP):
                     live_status=live_status,
                     live_stage=live_stage,
                     live_progress=live_progress,
-                    chunk_count=len(doc.chunks),
+                    chunk_count=chunks_count,
                     duration=doc.duration,
                 )
                 if terminal_override:
@@ -249,18 +245,13 @@ def register_document_tools(mcp: FastMCP):
     def download_document_chunks(job_id: str) -> str:
         db = _get_db()
         try:
-            doc = db.query(Document).filter(Document.job_id == job_id).first()
+            doc = _doc_repo.find_document_by_job_id(db, job_id)
             if not doc:
                 return f"Document not found: {job_id}"
             if doc.status != "completed":
                 return f"Document not ready. Status: {doc.status}"
 
-            chunks = (
-                db.query(Chunk)
-                .filter(Chunk.document_id == doc.id)
-                .order_by(Chunk.chunk_index)
-                .all()
-            )
+            chunks = _chunk_repo.list_by_document(db, doc.id) if doc.id else []
 
             lines = [
                 f"Document: {doc.filename}",
@@ -295,15 +286,15 @@ def register_document_tools(mcp: FastMCP):
     def download_document_structure(job_id: str) -> str:
         db = _get_db()
         try:
-            doc = db.query(Document).filter(Document.job_id == job_id).first()
+            doc = _doc_repo.find_document_by_job_id(db, job_id)
             if not doc:
                 return f"Document not found: {job_id}"
             if doc.status != "completed":
                 return f"Document not ready. Status: {doc.status}"
 
             structure = (
-                db.query(DocumentStructure)
-                .filter(DocumentStructure.document_id == doc.id)
+                db.query(OrmDocumentStructure)
+                .filter(OrmDocumentStructure.document_id == doc.id)
                 .first()
             )
             if not structure or not structure.skeleton_structure:
@@ -384,45 +375,45 @@ def register_document_tools(mcp: FastMCP):
     def get_upload_metrics() -> str:
         db = _get_db()
         try:
-            from doc_search.infrastructure.data import UploadJob
+            from doc_search.infrastructure.data import UploadJob as OrmUploadJob
             from sqlalchemy import func
 
-            total = db.query(UploadJob).count()
+            total = db.query(OrmUploadJob).count()
             if total == 0:
                 return "No upload jobs recorded yet."
 
             completed = (
-                db.query(UploadJob).filter(UploadJob.status == "completed").count()
+                db.query(OrmUploadJob).filter(OrmUploadJob.status == "completed").count()
             )
-            failed = db.query(UploadJob).filter(UploadJob.status == "failed").count()
+            failed = db.query(OrmUploadJob).filter(OrmUploadJob.status == "failed").count()
             processing = (
-                db.query(UploadJob).filter(UploadJob.status == "processing").count()
+                db.query(OrmUploadJob).filter(OrmUploadJob.status == "processing").count()
             )
 
             durations = [
                 row[0]
-                for row in db.query(UploadJob.duration)
-                .filter(UploadJob.duration.isnot(None))
+                for row in db.query(OrmUploadJob.duration)
+                .filter(OrmUploadJob.duration.isnot(None))
                 .all()
                 if row[0] is not None
             ]
             avg_duration = sum(durations) / len(durations) if durations else None
             max_duration = max(durations) if durations else None
             total_chunks = (
-                db.query(func.sum(UploadJob.chunk_count))
-                .filter(UploadJob.chunk_count.isnot(None))
+                db.query(func.sum(OrmUploadJob.chunk_count))
+                .filter(OrmUploadJob.chunk_count.isnot(None))
                 .scalar()
                 or 0
             )
 
             mode_stats = (
                 db.query(
-                    UploadJob.ingestion_mode,
-                    func.count(UploadJob.id),
-                    func.avg(UploadJob.duration),
+                    OrmUploadJob.ingestion_mode,
+                    func.count(OrmUploadJob.id),
+                    func.avg(OrmUploadJob.duration),
                 )
-                .filter(UploadJob.ingestion_mode.isnot(None))
-                .group_by(UploadJob.ingestion_mode)
+                .filter(OrmUploadJob.ingestion_mode.isnot(None))
+                .group_by(OrmUploadJob.ingestion_mode)
                 .all()
             )
 

@@ -5,11 +5,25 @@ import uuid
 from fastmcp import FastMCP
 
 from doc_search.infrastructure.data import (
-    Collection,
-    Account,
-    LibraryCard,
+    LibraryCard as OrmLibraryCard,
+    Account as OrmAccount,
 )
-from ._shared import _get_db, _resolve_collection, _resolve_account
+from doc_search.infrastructure.repositories.data.sql_account_repository import (
+    SqlAccountRepository,
+)
+from doc_search.infrastructure.repositories.data.sql_collection_repository import (
+    SqlCollectionRepository,
+)
+from doc_search.infrastructure.repositories.data.sql_query_repositories import (
+    SqlLibraryCardRepository,
+)
+from doc_search.core.domain.entities.collection import Collection
+from ._shared import _get_db
+
+
+_account_repo = SqlAccountRepository()
+_collection_repo = SqlCollectionRepository()
+_card_repo = SqlLibraryCardRepository()
 
 
 def register_collection_tools(mcp: FastMCP):
@@ -20,22 +34,22 @@ def register_collection_tools(mcp: FastMCP):
     def create_collection(name: str, account_id: str | None = None) -> str:
         db = _get_db()
         try:
-            acc = None
+            acc_id = None
             if account_id:
-                acc = _resolve_account(db, account_id)
+                acc = _account_repo.find_by_account_id(db, account_id)
                 if not acc:
                     return f"Account not found: {account_id}"
+                acc_id = acc.id
 
             collection_id = str(uuid.uuid4())
             col = Collection(
                 collection_id=collection_id,
                 name=name,
-                account_id=acc.id if acc else None,
+                account_id=acc_id,
                 ip_address="127.0.0.1",
             )
-            db.add(col)
-            db.commit()
-            extra = f" (account: {acc.name})" if acc else " (no account)"
+            _collection_repo.save(db, col)
+            extra = f" (account: {account_id})" if account_id else " (no account)"
             return (
                 f"Collection created: {name}{extra}\n  collection_id: {collection_id}"
             )
@@ -49,18 +63,11 @@ def register_collection_tools(mcp: FastMCP):
     def get_collection(collection_id: str) -> str:
         db = _get_db()
         try:
-            col = _resolve_collection(db, collection_id)
+            col = _collection_repo.find_by_collection_id(db, collection_id)
             if not col:
                 return f"Collection not found: {collection_id}"
 
-            card = (
-                db.query(LibraryCard)
-                .filter(
-                    LibraryCard.collection_id == col.id,
-                    LibraryCard.level == "collection",
-                )
-                .first()
-            )
+            card = _card_repo.find_collection_card(db, col.id) if col.id else None
 
             lines = [
                 f"Collection: {col.name}",
@@ -68,16 +75,22 @@ def register_collection_tools(mcp: FastMCP):
                 f"Documents: {len(col.documents)}",
                 f"Created: {col.created_at.isoformat() if col.created_at else '?'}",
             ]
-            if col.account:
-                lines.append(f"Account: {col.account.name} ({col.account.account_id})")
+            if col.account_id:
+                acc = db.query(OrmAccount).filter(OrmAccount.id == col.account_id).first()
+                if acc:
+                    lines.append(f"Account: {acc.name} ({acc.account_id})")
             if card:
                 lines.append(f"\nSummary: {card.content[:300]}")
             if col.documents:
                 lines.append("\nDocuments:")
-                for d in col.documents:
-                    lines.append(
-                        f"  • {d.filename} [{d.status}] — {len(d.chunks)} chunks — job_id={d.job_id}"
-                    )
+                # Domain collection has documents=[], need ORM for full load
+                from doc_search.infrastructure.data import Collection as OrmCollection
+                orm_col = db.query(OrmCollection).filter(OrmCollection.id == col.id).first()
+                if orm_col:
+                    for d in orm_col.documents:
+                        lines.append(
+                            f"  • {d.filename} [{d.status}] — {len(d.chunks)} chunks — job_id={d.job_id}"
+                        )
             return "\n".join(lines)
         finally:
             db.close()
@@ -89,22 +102,15 @@ def register_collection_tools(mcp: FastMCP):
     def list_collections(account_id: str | None = None) -> str:
         db = _get_db()
         try:
-            q = db.query(Collection)
             if account_id:
-                q = q.join(Account).filter(Account.account_id == account_id)
-            collections = q.order_by(Collection.created_at.desc()).all()
+                collections = _collection_repo.list_by_account(db, account_id)
+            else:
+                collections = _collection_repo.list_all(db)
             if not collections:
                 return "No collections found."
             lines = [f"Collections ({len(collections)}):\n"]
             for c in collections:
-                card = (
-                    db.query(LibraryCard)
-                    .filter(
-                        LibraryCard.collection_id == c.id,
-                        LibraryCard.level == "collection",
-                    )
-                    .first()
-                )
+                card = _card_repo.find_collection_card(db, c.id) if c.id else None
                 summary = card.content[:120] if card else "No summary"
                 lines.append(
                     f"  • {c.name} ({len(c.documents)} docs) — {c.collection_id}"
@@ -134,8 +140,8 @@ def register_collection_tools(mcp: FastMCP):
                 account = None
                 if state.get("account_db_id"):
                     account = (
-                        db.query(Account)
-                        .filter(Account.id == state["account_db_id"])
+                        db.query(OrmAccount)
+                        .filter(OrmAccount.id == state["account_db_id"])
                         .first()
                     )
                 lines.append(
@@ -162,8 +168,9 @@ def register_collection_tools(mcp: FastMCP):
             from doc_search.presentation.upload.collection_maintenance_runner import (
                 CollectionMaintenanceRunner,
             )
+            from doc_search.infrastructure.data import Collection as OrmCollection
 
-            col = _resolve_collection(db, collection_id)
+            col = db.query(OrmCollection).filter(OrmCollection.collection_id == collection_id).first()
             if not col:
                 return f"Collection not found: {collection_id}"
             result = CollectionMaintenanceRunner(db).run(col)

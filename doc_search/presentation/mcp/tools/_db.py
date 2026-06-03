@@ -1,9 +1,9 @@
 """Database access helpers for MCP tools."""
 
 from doc_search.infrastructure.data import (
+    Collection as OrmCollection,
+    Account as OrmAccount,
     SessionLocal,
-    Collection,
-    Account,
 )
 
 
@@ -11,11 +11,17 @@ def _get_db():
     return SessionLocal()
 
 
-def _resolve_collection(db, collection_id: str) -> Collection | None:
+def _resolve_collection(db, collection_id: str):
     return (
-        db.query(Collection).filter(Collection.collection_id == collection_id).first()
+        db.query(OrmCollection)
+        .filter(OrmCollection.collection_id == collection_id)
+        .first()
     )
 
 
-def _resolve_account(db, account_id: str) -> Account | None:
-    return db.query(Account).filter(Account.account_id == account_id).first()
+def _resolve_account(db, account_id: str):
+    return (
+        db.query(OrmAccount)
+        .filter(OrmAccount.account_id == account_id)
+        .first()
+    )

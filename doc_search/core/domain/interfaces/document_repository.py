@@ -22,6 +22,14 @@ class DocumentRepository(ABC):
         """Return the domain Collection with the given GUID, or None."""
 
     @abstractmethod
+    def list_all(self, db) -> list[Document]:
+        """Return all documents ordered by creation date descending."""
+
+    @abstractmethod
+    def list_by_collection(self, db, collection_guid: str) -> list[Document]:
+        """Return documents in a collection ordered by creation date descending."""
+
+    @abstractmethod
     def save_document(self, db, document: Document) -> None:
         """Persist a new domain Document and flush its identity."""
 

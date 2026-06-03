@@ -3,10 +3,24 @@
 from fastmcp import FastMCP
 
 from doc_search.infrastructure.data import (
-    LibraryCard,
-    Collection,
+    LibraryCard as OrmLibraryCard,
+    Collection as OrmCollection,
 )
-from ._shared import _get_db, _resolve_collection, _resolve_account
+from doc_search.infrastructure.repositories.data.sql_account_repository import (
+    SqlAccountRepository,
+)
+from doc_search.infrastructure.repositories.data.sql_collection_repository import (
+    SqlCollectionRepository,
+)
+from doc_search.infrastructure.repositories.data.sql_document_repository import (
+    SqlDocumentRepository,
+)
+from ._shared import _get_db
+
+
+_account_repo = SqlAccountRepository()
+_collection_repo = SqlCollectionRepository()
+_doc_repo = SqlDocumentRepository()
 
 
 def register_export_tools(mcp: FastMCP):
@@ -17,7 +31,7 @@ def register_export_tools(mcp: FastMCP):
     def export_account(account_id: str) -> str:
         db = _get_db()
         try:
-            acc = _resolve_account(db, account_id)
+            acc = _account_repo.find_by_account_id(db, account_id)
             if not acc:
                 return f"Account not found: {account_id}"
 
@@ -30,25 +44,26 @@ def register_export_tools(mcp: FastMCP):
             ]
             for col in acc.collections:
                 lines.append(f"## Collection: {col.name} ({col.collection_id})")
-                lines.append(f"  Documents: {len(col.documents)}")
-                for doc in col.documents:
-                    chunks = len(doc.chunks) if doc.chunks else 0
-                    cards = (
-                        db.query(LibraryCard)
+                docs = _doc_repo.list_by_collection(db, col.collection_id)
+                lines.append(f"  Documents: {len(docs)}")
+                for doc in docs:
+                    cards_count = (
+                        db.query(OrmLibraryCard)
                         .filter(
-                            LibraryCard.document_id == doc.id,
-                            LibraryCard.collection_id.is_(None),
+                            OrmLibraryCard.document_id == doc.id,
+                            OrmLibraryCard.collection_id.is_(None),
                         )
                         .count()
                     )
                     lines.append(
-                        f"  - {doc.filename} [{doc.status}] — {chunks} chunks, {cards} library cards — job_id={doc.job_id}"
+                        f"  - {doc.filename} [{doc.status}] — "
+                        f"{len(doc.chunks)} chunks, {cards_count} cards — job_id={doc.job_id}"
                     )
                 col_cards = (
-                    db.query(LibraryCard)
+                    db.query(OrmLibraryCard)
                     .filter(
-                        LibraryCard.collection_id == col.id,
-                        LibraryCard.document_id.is_(None),
+                        OrmLibraryCard.collection_id == col.id,
+                        OrmLibraryCard.document_id.is_(None),
                     )
                     .all()
                 )
@@ -70,7 +85,7 @@ def register_export_tools(mcp: FastMCP):
     def export_collection(collection_id: str) -> str:
         db = _get_db()
         try:
-            col = _resolve_collection(db, collection_id)
+            col = _collection_repo.find_by_collection_id(db, collection_id)
             if not col:
                 return f"Collection not found: {collection_id}"
 
@@ -81,19 +96,19 @@ def register_export_tools(mcp: FastMCP):
                 f"Created: {col.created_at.isoformat() if col.created_at else '?'}",
                 "",
             ]
-            for doc in col.documents:
-                chunks = len(doc.chunks) if doc.chunks else 0
+            docs = _doc_repo.list_by_collection(db, collection_id)
+            for doc in docs:
                 cards = (
-                    db.query(LibraryCard)
+                    db.query(OrmLibraryCard)
                     .filter(
-                        LibraryCard.document_id == doc.id,
-                        LibraryCard.collection_id.is_(None),
+                        OrmLibraryCard.document_id == doc.id,
+                        OrmLibraryCard.collection_id.is_(None),
                     )
                     .all()
                 )
                 lines.append(f"## Document: {doc.filename}")
                 lines.append(
-                    f"  Status: {doc.status}  |  Size: {doc.size} bytes  |  Chunks: {chunks}"
+                    f"  Status: {doc.status}  |  Size: {doc.size} bytes  |  Chunks: {len(doc.chunks)}"
                 )
                 lines.append(f"  job_id: {doc.job_id}")
                 if cards:
@@ -103,10 +118,10 @@ def register_export_tools(mcp: FastMCP):
                 lines.append("")
 
             col_cards = (
-                db.query(LibraryCard)
+                db.query(OrmLibraryCard)
                 .filter(
-                    LibraryCard.collection_id == col.id,
-                    LibraryCard.document_id.is_(None),
+                    OrmLibraryCard.collection_id == col.id,
+                    OrmLibraryCard.document_id.is_(None),
                 )
                 .all()
             )
