@@ -6,6 +6,7 @@ collection so that collection-scoped queries can use a single search pass.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pickle
@@ -16,14 +17,15 @@ import numpy as np
 from rank_bm25 import BM25Plus
 from sqlalchemy.orm import Session
 
+from doc_search.core.application.dto.collection_index_paths import (
+    CollectionIndexPaths,
+)
 from doc_search.core.domain.interfaces.embedder import Embedder
 from doc_search.core.domain.text_processing import tokenize
 from doc_search.infrastructure.data.tables.document import Document
 from doc_search.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
-
-_AGGREGATE_INDEX_FILENAME = "collection_aggregate"
 
 
 class AggregateIndexBuilder:
@@ -60,7 +62,10 @@ class AggregateIndexBuilder:
             )
             return None, None
 
-        indexes_dir = self._indexes_dir(account_id, collection_guid)
+        indexes_dir = CollectionIndexPaths.from_parts(
+            self._data_dir, account_id, collection_guid
+        ).indexes_dir
+        os.makedirs(indexes_dir, exist_ok=True)
         texts, mapping = self._collect_texts_and_mapping(docs)
         if not texts:
             return None, None
@@ -73,9 +78,10 @@ class AggregateIndexBuilder:
         )
 
         embeddings = self._embedder.embed(texts)
-        faiss_path = self._build_aggregate_faiss(embeddings, indexes_dir)
-        bm25_path = self._build_aggregate_bm25(texts, indexes_dir)
-        self._save_chunk_mapping(mapping, indexes_dir)
+        paths = CollectionIndexPaths(indexes_dir=indexes_dir)
+        faiss_path = self._build_aggregate_faiss(embeddings, paths)
+        bm25_path = self._build_aggregate_bm25(texts, paths)
+        self._save_chunk_mapping(mapping, paths)
 
         logger.info(
             "Aggregate indexes built for collection %s: faiss=%s bm25=%s chunks=%s",
@@ -102,7 +108,7 @@ class AggregateIndexBuilder:
             for chunk in chunks:
                 content = getattr(chunk, "content", "") or ""
                 content = content.strip()
-                chunk_hash = str(hash(content))
+                chunk_hash = hashlib.sha256(content.encode()).hexdigest()
                 if chunk_hash in seen_hashes:
                     continue
                 seen_hashes.add(chunk_hash)
@@ -127,55 +133,38 @@ class AggregateIndexBuilder:
                 )
         return texts, mapping
 
-    def _indexes_dir(self, account_id: str | None, collection_guid: str | None) -> str:
-        parts = [p for p in (account_id, collection_guid) if p]
-        path = (
-            os.path.join(self._data_dir, "indexes", *parts)
-            if parts
-            else os.path.join(self._data_dir, "indexes")
-        )
-        os.makedirs(path, exist_ok=True)
-        return path
-
     @staticmethod
-    def _build_aggregate_faiss(embeddings: np.ndarray, indexes_dir: str) -> str:
+    def _build_aggregate_faiss(
+        embeddings: np.ndarray, paths: CollectionIndexPaths
+    ) -> str:
         normalized = embeddings.astype("float32")
         faiss.normalize_L2(normalized)
         index = faiss.IndexFlatIP(normalized.shape[1])
         index.add(normalized)
-
-        path = os.path.join(indexes_dir, f"{_AGGREGATE_INDEX_FILENAME}_faiss.index")
-        faiss.write_index(index, path)
+        faiss.write_index(index, paths.faiss)
         logger.info("Aggregate FAISS index saved: %s vectors", index.ntotal)
-        return path
+        return paths.faiss
 
     @staticmethod
-    def _build_aggregate_bm25(texts: list[str], indexes_dir: str) -> str:
+    def _build_aggregate_bm25(texts: list[str], paths: CollectionIndexPaths) -> str:
         corpus = [tokenize(text) for text in texts]
         bm25 = BM25Plus(corpus)
-        path = os.path.join(indexes_dir, f"{_AGGREGATE_INDEX_FILENAME}_bm25.pkl")
-        with open(path, "wb") as handle:
+        with open(paths.bm25, "wb") as handle:
             pickle.dump({"bm25": bm25, "texts": texts}, handle)
         logger.info("Aggregate BM25 index saved: %s documents", len(corpus))
-        return path
+        return paths.bm25
 
     @staticmethod
-    def _save_chunk_mapping(mapping: list[dict[str, Any]], indexes_dir: str) -> None:
-        path = os.path.join(indexes_dir, f"{_AGGREGATE_INDEX_FILENAME}_mapping.json")
-        with open(path, "w", encoding="utf-8") as handle:
+    def _save_chunk_mapping(
+        mapping: list[dict[str, Any]], paths: CollectionIndexPaths
+    ) -> None:
+        with open(paths.mapping, "w", encoding="utf-8") as handle:
             json.dump(mapping, handle)
         logger.info("Aggregate chunk mapping saved: %s entries", len(mapping))
 
 
-def load_aggregate_chunk_mapping(indexes_dir: str) -> list[dict[str, Any]]:
-    path = os.path.join(indexes_dir, f"{_AGGREGATE_INDEX_FILENAME}_mapping.json")
-    if not os.path.exists(path):
+def load_aggregate_chunk_mapping(paths: CollectionIndexPaths) -> list[dict[str, Any]]:
+    if not os.path.exists(paths.mapping):
         return []
-    with open(path, "r", encoding="utf-8") as handle:
+    with open(paths.mapping, "r", encoding="utf-8") as handle:
         return json.load(handle)
-
-
-def aggregate_index_exists(indexes_dir: str) -> bool:
-    faiss_path = os.path.join(indexes_dir, f"{_AGGREGATE_INDEX_FILENAME}_faiss.index")
-    bm25_path = os.path.join(indexes_dir, f"{_AGGREGATE_INDEX_FILENAME}_bm25.pkl")
-    return os.path.exists(faiss_path) and os.path.exists(bm25_path)

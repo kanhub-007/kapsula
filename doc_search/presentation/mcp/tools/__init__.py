@@ -215,7 +215,6 @@ async def _execute_intelligent_search_job(job: SearchJob) -> None:
     _search_job_manager.update(
         job, status="running", progress="Intelligent search running"
     )
-    db = _get_db()
     try:
         result = await _run_intelligent_collection_search(
             query=job.params["query"],
@@ -225,7 +224,6 @@ async def _execute_intelligent_search_job(job: SearchJob) -> None:
             enable_planning=job.params.get("enable_planning", True),
             rerank=job.params.get("rerank", False),
             node_type_filter=job.params.get("node_type_filter"),
-            db=db,
         )
         _search_job_manager.update(
             job,
@@ -246,8 +244,6 @@ async def _execute_intelligent_search_job(job: SearchJob) -> None:
             progress="Intelligent search failed",
             error=str(exc),
         )
-    finally:
-        db.close()
 
 
 # ── reused intelligent‑search helper ──────────────────────────
@@ -261,13 +257,16 @@ async def _run_intelligent_collection_search(
     enable_planning: bool,
     rerank: bool,
     node_type_filter: str | None,
-    db,
+    db=None,
 ) -> str:
     from doc_search.core.application.dto.collection_search import CollectionSearch
     from doc_search.core.application.use_cases.selectors.collection_selector import (
         CollectionSelector,
     )
 
+    own_db = db is None
+    if own_db:
+        db = _get_db()
     token = _hf_token()
     if not token:
         return "Error: HF_TOKEN not set."
@@ -377,7 +376,10 @@ async def _run_intelligent_collection_search(
         parts.append(f"Sub-questions: {len(plan_info.get('queries', []))}")
         parts.append("")
     parts.append(result.get("answer", "No answer generated."))
-    return "\n".join(parts)
+    result_text = "\n".join(parts)
+    if own_db:
+        db.close()
+    return result_text
 
 
 # ── tool registration ─────────────────────────────────────────

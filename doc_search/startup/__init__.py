@@ -128,4 +128,15 @@ def create_multi_index_searcher(
         reranker=reranker,
         chat_client=chat_client,
         make_searcher=make_searcher,
+        aggregate_strategy=create_aggregate_search_strategy(embedder),
     )
+
+
+def create_aggregate_search_strategy(embedder=None):
+    from doc_search.infrastructure.data.connection import DATA_DIR
+    from doc_search.infrastructure.repositories.indexing.aggregate_index_search_strategy import (
+        AggregateIndexSearchStrategy,
+    )
+
+    embedder = embedder or create_embedder()
+    return AggregateIndexSearchStrategy(data_dir=DATA_DIR, embedder=embedder)
