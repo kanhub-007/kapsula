@@ -16,8 +16,10 @@ from doc_search.infrastructure.data import (
     Account,
     LibraryCard,
     SubDocument,
+    SubDocumentPage,
     DocumentStructure,
     Chunk,
+    DATA_DIR,
 )
 from doc_search.infrastructure.logging_config import get_logger
 from doc_search.presentation.mcp.search_jobs import SearchJob, SearchJobManager
@@ -395,7 +397,7 @@ def register_tools(mcp: FastMCP):
 
     @mcp.tool(
         name="create_account",
-        description="Create a new account (tenant). Returns the account GUID.",
+        description="Create a new account — the top-level memory container (think: a brain or tenant). An account holds collections (knowledge domains), which hold documents (topics). Returns the account GUID.",
     )
     def create_account(name: str) -> str:
         db = _get_db()
@@ -457,7 +459,7 @@ def register_tools(mcp: FastMCP):
 
     @mcp.tool(
         name="create_collection",
-        description="Create a new collection within an account. Returns the collection GUID.",
+        description="Create a new collection — a knowledge domain within an account (e.g., 'Dog Training', 'Project X', 'API Docs'). Collections group related documents so searches can be scoped to one domain for precision. Returns the collection GUID.",
     )
     def create_collection(name: str, account_id: str | None = None) -> str:
         db = _get_db()
@@ -486,7 +488,7 @@ def register_tools(mcp: FastMCP):
 
     @mcp.tool(
         name="get_collection",
-        description="Get collection details including document list and library card summary.",
+        description="Get collection details: name, library card summary, and a list of all documents with their filenames, statuses, chunk counts, and job_ids. Use the returned job_id values to target specific documents for deletion (delete_document) or detailed inspection (get_document_info).",
     )
     def get_collection(collection_id: str) -> str:
         db = _get_db()
@@ -731,7 +733,16 @@ def register_tools(mcp: FastMCP):
 
     @mcp.tool(
         name="upload_document",
-        description="Upload a markdown (.md) file to a collection. ingestion_mode can be fast, indexed (default), or full. Returns a job_id for progress tracking.",
+        description=(
+            "Upload a markdown (.md) file to a collection as a memory document. "
+            "Use well-structured markdown with H2/H3 headings — the chunker splits on headings for sub-document granularity. "
+            "Sizing guidance: stable interconnected knowledge = medium doc (1-5 pages); "
+            "frequently changing facts = small doc (1-3 paragraphs); "
+            "reference tables/dosages/configs = separate small doc. "
+            "ingestion_mode: fast (no indexes), indexed (default, FAISS+BM25), or full (indexes + aggregates + summary). "
+            "Returns a job_id for progress tracking. "
+            "To update knowledge later: get the old document's job_id from get_collection(), delete it, then re-upload."
+        ),
     )
     def upload_document(
         file_path: str,
@@ -813,6 +824,159 @@ def register_tools(mcp: FastMCP):
                 f"  Status: processing\n"
                 f"  Ingestion mode: {ingestion_mode}"
             )
+        finally:
+            db.close()
+
+    @mcp.tool(
+        name="delete_document",
+        description=(
+            "Soft-delete a document from a collection by job_id. "
+            "Archives the document, removes all its chunks from the database, "
+            "deletes document-level and aggregate index files, and rebuilds "
+            "collection and account aggregate indexes. "
+            "Use get_collection() first to find the job_id for the document you want to remove. "
+            "This is the intended path for updating knowledge: delete old version, then re-upload."
+        ),
+    )
+    def delete_document(job_id: str) -> str:
+        import os
+
+        db = _get_db()
+        try:
+            doc = db.query(Document).filter(Document.job_id == job_id).first()
+            if not doc:
+                return f"Document not found: {job_id}"
+
+            filename = doc.filename
+            collection = doc.collection
+            collection_name = collection.name if collection else "?"
+            account = collection.account if collection else None
+
+            # 1. Delete document-level index files
+            for path_attr in ("faiss_index_path", "bm25_index_path"):
+                path = getattr(doc, path_attr, None)
+                if path and os.path.exists(path):
+                    os.remove(path)
+
+            # Also sub-document indexes
+            subdocs = (
+                db.query(SubDocument)
+                .filter(SubDocument.document_id == doc.id)
+                .all()
+            )
+            for sd in subdocs:
+                for path_attr in ("faiss_index_path", "bm25_index_path"):
+                    path = getattr(sd, path_attr, None)
+                    if path and os.path.exists(path):
+                        os.remove(path)
+
+            # 2. Delete aggregate cache files
+            if collection:
+                from doc_search.core.application.dto.aggregate_index_paths import (
+                    AggregateIndexPaths,
+                )
+
+                account_guid = account.account_id if account else None
+                coll_paths = AggregateIndexPaths.for_collection(
+                    DATA_DIR, account_guid, collection.collection_id
+                )
+                for cache_path in (
+                    coll_paths.faiss,
+                    coll_paths.bm25,
+                    coll_paths.mapping,
+                    coll_paths.faiss_npy,
+                ):
+                    if cache_path and os.path.exists(cache_path):
+                        os.remove(cache_path)
+
+                if account_guid:
+                    acct_paths = AggregateIndexPaths.for_account(
+                        DATA_DIR, account_guid
+                    )
+                    for cache_path in (
+                        acct_paths.faiss,
+                        acct_paths.bm25,
+                        acct_paths.mapping,
+                        acct_paths.faiss_npy,
+                    ):
+                        if cache_path and os.path.exists(cache_path):
+                            os.remove(cache_path)
+
+            # 3. Delete chunks and related records
+            chunks_deleted = (
+                db.query(Chunk)
+                .filter(Chunk.document_id == doc.id)
+                .delete()
+            )
+            subdoc_page_ids = (
+                db.query(SubDocumentPage.id)
+                .join(SubDocument)
+                .filter(SubDocument.document_id == doc.id)
+                .all()
+            )
+            for (pid,) in subdoc_page_ids:
+                db.query(SubDocumentPage).filter(
+                    SubDocumentPage.id == pid
+                ).delete()
+            db.query(SubDocument).filter(
+                SubDocument.document_id == doc.id
+            ).delete()
+            db.query(LibraryCard).filter(
+                LibraryCard.document_id == doc.id
+            ).delete()
+            db.query(DocumentStructure).filter(
+                DocumentStructure.document_id == doc.id
+            ).delete()
+
+            # 4. Archive the document (soft delete)
+            doc.doc_state = "archived"
+            doc.status = "archived"
+            db.commit()
+
+            # 5. Rebuild aggregate indexes
+            rebuild_lines = []
+            if collection:
+                try:
+                    embedder = _get_embedder()
+                    from doc_search.infrastructure.repositories.indexing.aggregate_index_builder import (
+                        AggregateIndexBuilder,
+                    )
+
+                    builder = AggregateIndexBuilder(embedder, DATA_DIR)
+                    coll_faiss, coll_bm25 = builder.build(
+                        db,
+                        collection.id,
+                        account_id=account_guid,
+                        collection_guid=collection.collection_id,
+                    )
+                    rebuild_lines.append(
+                        f"Collection aggregate: "
+                        f"faiss={'rebuilt' if coll_faiss else 'empty'}, "
+                        f"bm25={'rebuilt' if coll_bm25 else 'empty'}"
+                    )
+
+                    if account:
+                        acct_faiss, acct_bm25 = builder.build_account(
+                            db, account.id, account.account_id
+                        )
+                        rebuild_lines.append(
+                            f"Account aggregate: "
+                            f"faiss={'rebuilt' if acct_faiss else 'empty'}, "
+                            f"bm25={'rebuilt' if acct_bm25 else 'empty'}"
+                        )
+                except Exception as exc:
+                    rebuild_lines.append(f"Aggregate rebuild failed: {exc}")
+
+            result = (
+                f"Document deleted: {filename}\n"
+                f"  job_id: {job_id}\n"
+                f"  Collection: {collection_name}\n"
+                f"  Chunks removed: {chunks_deleted}\n"
+                f"  State: archived (soft delete)"
+            )
+            if rebuild_lines:
+                result += "\n  " + "\n  ".join(rebuild_lines)
+            return result
         finally:
             db.close()
 
@@ -1658,4 +1822,4 @@ def register_tools(mcp: FastMCP):
         finally:
             db.close()
 
-    logger.info("Registered 18 MCP tools")
+    logger.info("Registered 19 MCP tools")

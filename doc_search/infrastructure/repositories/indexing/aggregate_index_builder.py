@@ -44,6 +44,7 @@ class AggregateIndexBuilder:
             .filter(
                 Document.collection_id == collection_id,
                 Document.status == "completed",
+                Document.doc_state == "active",
             )
             .all()
         )
@@ -81,6 +82,7 @@ class AggregateIndexBuilder:
             .filter(
                 Document.collection_id.in_(cids),
                 Document.status == "completed",
+                Document.doc_state == "active",
             )
             .all()
         )

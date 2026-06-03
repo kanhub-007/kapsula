@@ -28,10 +28,29 @@ def create_server() -> FastMCP:
     server = FastMCP(
         name="doc-search",
         instructions=(
-            "Document search engine with hybrid dense+sparse retrieval, "
-            "LLM-powered intelligent search, and semantic markdown chunking. "
-            "Use the available tools to search documents, manage collections, "
-            "and upload content."
+            "Document search engine designed as a memory system for AI agents. "
+            "Knowledge is organized in a 3-level hierarchy: "
+            "Account (tenant/brain) → Collection (knowledge domain) → Document (topic/fact-cluster). "
+            "\n\n"
+            "MEMORY MODEL — how to structure knowledge:\n"
+            "• Stable, interconnected knowledge → one medium document (1-5 pages). "
+            "  The Russian Doll chunker splits by H2 headings, preserving cross-section context for search.\n"
+            "• Frequently changing facts → separate small document (1-3 paragraphs). "
+            "  Isolate volatile information so updates touch minimal chunks.\n"
+            "• Independent reference tables (prices, dosages, configs) → separate small document.\n"
+            "• Use descriptive H2/H3 headings to define sub-document boundaries.\n"
+            "\n"
+            "UPDATING KNOWLEDGE — to modify facts:\n"
+            "1. Use get_collection() to find the document by filename and get its job_id.\n"
+            "2. Delete the old document with delete_document(job_id).\n"
+            "3. Re-upload the updated file.\n"
+            "The system is append-optimized: deleting + re-uploading is the intended update path. "
+            "Aggregate indexes rebuild automatically after delete, so searches reflect current knowledge.\n"
+            "\n"
+            "SEARCH — three scopes available:\n"
+            "• search_collection() — scoped to one knowledge domain, fastest and most precise.\n"
+            "• search_documents() — across all collections in an account.\n"
+            "• intelligent_search() — LLM plans sub-questions, searches, and synthesizes a grounded answer."
         ),
     )
 

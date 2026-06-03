@@ -29,6 +29,7 @@ class Document(Base):
     duration = Column(Float, nullable=True)
     content = Column(Text, nullable=False)
     status = Column(String, default="processing")
+    doc_state = Column(String, default="active")  # active | archived
     faiss_index_path = Column(String, nullable=True)
     bm25_index_path = Column(String, nullable=True)
 
