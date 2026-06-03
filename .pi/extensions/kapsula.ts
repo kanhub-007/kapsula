@@ -1,11 +1,11 @@
 /**
- * Pi extension that bridges to the doc-search MCP server via HTTP.
+ * Pi extension that bridges to the kapsula MCP server via HTTP.
  *
  * Expects the MCP server to be already running (e.g. started with
- * ``DOCSEARCH_TRANSPORT=http python -m doc_search.presentation.mcp``).
+ * ``KAPSULA_TRANSPORT=http python -m kapsula.presentation.mcp``).
  * Discovers MCP tools and registers them as pi custom tools.
  *
- * Set DOCSEARCH_DEBUG=true to enable verbose request/response logging.
+ * Set KAPSULA_DEBUG=true to enable verbose request/response logging.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -13,7 +13,7 @@ import { Type } from "typebox";
 
 // ── debug toggle ──────────────────────────────────────────
 
-const DEBUG = process.env.DOCSEARCH_DEBUG === "true";
+const DEBUG = process.env.KAPSULA_DEBUG === "true";
 
 function debugLog(...args: unknown[]): void {
   if (DEBUG) console.error(...args);
@@ -86,7 +86,7 @@ class McpHttpClient {
         params: {
           protocolVersion: "2024-11-05",
           capabilities: {},
-          clientInfo: { name: "pi-doc-search", version: "1.0.0" },
+          clientInfo: { name: "pi-kapsula", version: "1.0.0" },
         },
       }),
     });
@@ -100,7 +100,7 @@ class McpHttpClient {
     const sid = initResponse.headers.get("mcp-session-id");
     if (sid) {
       this.sessionId = sid;
-      debugLog(`doc-search: captured session ID ${sid.slice(0, 8)}…`);
+      debugLog(`kapsula: captured session ID ${sid.slice(0, 8)}…`);
     }
 
     // Drain the initialize response body to free the connection
@@ -201,7 +201,7 @@ class McpHttpClient {
       });
 
       debugLog(
-        `doc-search MCP ${method} started (timeout ${timeoutMs}ms)`
+        `kapsula MCP ${method} started (timeout ${timeoutMs}ms)`
       );
 
       this.sendHttp(id, method, params)
@@ -210,7 +210,7 @@ class McpHttpClient {
           if (pending) {
             const elapsed = Date.now() - pending.startedAt;
             debugLog(
-              `doc-search MCP ${pending.method} completed in ${elapsed}ms`
+              `kapsula MCP ${pending.method} completed in ${elapsed}ms`
             );
             pending.resolve(response);
           }
@@ -294,7 +294,7 @@ class McpHttpClient {
     });
     if (!response.ok && response.status !== 202) {
       debugLog(
-        `doc-search: notification ${method} got HTTP ${response.status}`
+        `kapsula: notification ${method} got HTTP ${response.status}`
       );
     }
   }
@@ -333,13 +333,13 @@ function jsonSchemaToTypeBox(schema: McpToolDef["inputSchema"]) {
 // ── Extension entry point ──────────────────────────────────────
 
 export default async function (pi: ExtensionAPI) {
-  const baseUrl = process.env.DOCSEARCH_MCP_URL || "http://127.0.0.1:8002/mcp";
+  const baseUrl = process.env.KAPSULA_MCP_URL || "http://127.0.0.1:8002/mcp";
   const client = new McpHttpClient(baseUrl);
 
   pi.on("session_start", async (_event, ctx) => {
     try {
       ctx.ui.notify(
-        `doc-search: Connecting to MCP server at ${baseUrl}...`,
+        `kapsula: Connecting to MCP server at ${baseUrl}...`,
         "info"
       );
       if (!client.isConnected()) {
@@ -347,7 +347,7 @@ export default async function (pi: ExtensionAPI) {
       }
       const tools = await client.listTools();
       ctx.ui.notify(
-        `doc-search: Connected, ${tools.length} tools discovered`,
+        `kapsula: Connected, ${tools.length} tools discovered`,
         "success"
       );
 
@@ -357,7 +357,7 @@ export default async function (pi: ExtensionAPI) {
         pi.registerTool({
           name: tool.name,
           label: tool.name,
-          description: tool.description ?? `doc-search tool: ${tool.name}`,
+          description: tool.description ?? `kapsula tool: ${tool.name}`,
           parameters: paramsSchema,
           async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
             try {
@@ -375,7 +375,7 @@ export default async function (pi: ExtensionAPI) {
                 content: [
                   {
                     type: "text" as const,
-                    text: `doc-search error: ${
+                    text: `kapsula error: ${
                       err instanceof Error ? err.message : String(err)
                     }`,
                   },
@@ -386,14 +386,14 @@ export default async function (pi: ExtensionAPI) {
           },
         });
 
-        ctx.ui.notify(`doc-search: Registered tool '${tool.name}'`, "info");
+        ctx.ui.notify(`kapsula: Registered tool '${tool.name}'`, "info");
       }
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : String(err);
       ctx.ui.notify(
-        `doc-search: ${msg}. Is the server running? Start it with:\n` +
-          `  .venv\\Scripts\\python.exe -m doc_search.presentation.mcp`,
+        `kapsula: ${msg}. Is the server running? Start it with:\n` +
+          `  .venv\\Scripts\\python.exe -m kapsula.presentation.mcp`,
         "error"
       );
     }

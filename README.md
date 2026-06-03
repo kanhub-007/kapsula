@@ -1,4 +1,4 @@
-# Doc-Search
+# Kapsula
 
 Hybrid document search engine — FAISS vector search + BM25 keyword retrieval with LLM-powered intelligent question answering, built on a **Russian Doll** hierarchical architecture.
 
@@ -166,7 +166,7 @@ Markdown → Chunking → FAISS + BM25 Indexes → Hybrid Search → Rerank → 
 
 ```bash
 git clone <repo-url>
-cd doc-search
+cd kapsula
 
 # Create and activate a virtual environment
 #   Linux / macOS:
@@ -181,13 +181,13 @@ cp .env.example .env
 # Edit .env and add your HF_TOKEN
 
 # REST API (port 8001)
-python -m doc_search.presentation.api
+python -m kapsula.presentation.api
 
 # MCP server (stdio)
-python -m doc_search.presentation.mcp
+python -m kapsula.presentation.mcp
 ```
 
-> **Pi extension note:** The `.pi/extensions/doc-search.ts` plugin spawns the MCP server from
+> **Pi extension note:** The `.pi/extensions/kapsula.ts` plugin spawns the MCP server from
 > `.venv/Scripts/python.exe` (Windows). If you are on Linux/macOS, update the path to
 > `.venv/bin/python` in the extension before using it with pi.
 
@@ -211,8 +211,8 @@ API docs at `http://localhost:8001/docs`
 ## Project Structure
 
 ```
-doc-search/
-├── doc_search/
+kapsula/
+├── kapsula/
 │   ├── core/
 │   │   ├── domain/            # Pure business logic
 │   │   │   ├── entities/       # Canonical domain models (dataclasses)

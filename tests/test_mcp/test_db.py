@@ -2,7 +2,7 @@
 
 import pytest
 from sqlalchemy import text
-from doc_search.presentation.mcp.db import get_db_session
+from kapsula.presentation.mcp.db import get_db_session
 
 
 class TestGetDbSession:

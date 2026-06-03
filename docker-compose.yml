@@ -1,11 +1,11 @@
 version: '3.8'
 
 services:
-  doc-search-api:
+  kapsula-api:
     build: .
-    container_name: doc-search-api
+    container_name: kapsula-api
     networks:
-      - doc-search-network
+      - kapsula-network
     expose:
       - "8000"
     environment:
@@ -21,16 +21,16 @@ services:
       retries: 3
       start_period: 40s
 
-  doc-search-mcp:
+  kapsula-mcp:
     build:
       context: .
       dockerfile: Dockerfile.mcp
-    container_name: doc-search-mcp
+    container_name: kapsula-mcp
     environment:
       - PYTHONUNBUFFERED=1
       - HF_TOKEN=${HF_TOKEN}
-      - DOCSEARCH_TRANSPORT=${DOCSEARCH_TRANSPORT:-stdio}
-      - DOCSEARCH_PORT=8002
+      - KAPSULA_TRANSPORT=${KAPSULA_TRANSPORT:-stdio}
+      - KAPSULA_PORT=8002
     volumes:
       - mcp_data:/app/data
       - ./.env:/app/.env:ro
@@ -41,7 +41,7 @@ services:
     #   - "8002:8002"
 
 networks:
-  doc-search-network:
+  kapsula-network:
     driver: bridge
 
 volumes:

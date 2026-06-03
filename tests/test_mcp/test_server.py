@@ -3,16 +3,16 @@
 import os
 from unittest.mock import patch
 
-from doc_search.startup.mcp import create_server, get_transport_config
-from doc_search.startup import bootstrap
+from kapsula.startup.mcp import create_server, get_transport_config
+from kapsula.startup import bootstrap
 
 
 class TestCreateServer:
     def test_creates_server_with_correct_name(self):
-        """Server should be created with the doc-search name."""
+        """Server should be created with the kapsula name."""
         server = create_server()
         assert server is not None
-        assert server.name == "doc-search"
+        assert server.name == "kapsula"
 
     def test_creates_server_with_instructions(self):
         """Server should include usage instructions."""
@@ -40,8 +40,8 @@ class TestCreateServer:
 
 class TestBootstrap:
     def test_creates_default_account_on_fresh_db(self):
-        """Should create a default 'doc-search' account if none exists."""
-        from doc_search.infrastructure.data import SessionLocal, Account
+        """Should create a default 'kapsula' account if none exists."""
+        from kapsula.infrastructure.data import SessionLocal, Account
 
         db = SessionLocal()
         try:
@@ -52,7 +52,7 @@ class TestBootstrap:
             # Bootstrap should create the default account
             bootstrap()
 
-            account = db.query(Account).filter(Account.name == "doc-search").first()
+            account = db.query(Account).filter(Account.name == "kapsula").first()
             assert account is not None
             assert account.account_id is not None
             assert len(account.account_id) > 0
@@ -61,7 +61,7 @@ class TestBootstrap:
 
     def test_skips_account_creation_if_exists(self):
         """Should not create a duplicate account if one already exists."""
-        from doc_search.infrastructure.data import SessionLocal, Account
+        from kapsula.infrastructure.data import SessionLocal, Account
 
         db = SessionLocal()
         try:
@@ -71,13 +71,13 @@ class TestBootstrap:
             bootstrap()
 
             count_before = (
-                db.query(Account).filter(Account.name == "doc-search").count()
+                db.query(Account).filter(Account.name == "kapsula").count()
             )
 
             # Bootstrap again
             bootstrap()
 
-            count_after = db.query(Account).filter(Account.name == "doc-search").count()
+            count_after = db.query(Account).filter(Account.name == "kapsula").count()
             assert count_before == count_after == 1
         finally:
             db.close()
@@ -85,15 +85,15 @@ class TestBootstrap:
 
 class TestTransportSelection:
     def test_default_transport_is_stdio(self):
-        """Without DOCSEARCH_TRANSPORT env var, transport should default to stdio."""
+        """Without KAPSULA_TRANSPORT env var, transport should default to stdio."""
         with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("DOCSEARCH_TRANSPORT", None)
+            os.environ.pop("KAPSULA_TRANSPORT", None)
             config = get_transport_config()
             assert config["transport"] == "stdio"
 
     def test_http_transport_when_configured(self):
-        """When DOCSEARCH_TRANSPORT=http, should return http config."""
-        with patch.dict(os.environ, {"DOCSEARCH_TRANSPORT": "http"}):
+        """When KAPSULA_TRANSPORT=http, should return http config."""
+        with patch.dict(os.environ, {"KAPSULA_TRANSPORT": "http"}):
             config = get_transport_config()
             assert config["transport"] == "http"
             assert config["host"] == "127.0.0.1"
@@ -104,9 +104,9 @@ class TestTransportSelection:
         with patch.dict(
             os.environ,
             {
-                "DOCSEARCH_TRANSPORT": "http",
-                "DOCSEARCH_HOST": "0.0.0.0",
-                "DOCSEARCH_PORT": "9000",
+                "KAPSULA_TRANSPORT": "http",
+                "KAPSULA_HOST": "0.0.0.0",
+                "KAPSULA_PORT": "9000",
             },
         ):
             config = get_transport_config()

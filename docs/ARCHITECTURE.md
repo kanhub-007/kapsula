@@ -1,6 +1,6 @@
 # Architecture
 
-Doc-Search follows **Clean Architecture** with a clear separation between domain logic, application use cases, infrastructure, and presentation.
+Kapsula follows **Clean Architecture** with a clear separation between domain logic, application use cases, infrastructure, and presentation.
 
 ---
 

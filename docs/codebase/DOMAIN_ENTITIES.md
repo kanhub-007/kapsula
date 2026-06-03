@@ -2,7 +2,7 @@
 
 Canonical domain models. Pure dataclasses — no ORM, no framework dependencies.
 
-Location: `doc_search/core/domain/entities/`
+Location: `kapsula/core/domain/entities/`
 
 ## Entity Reference
 

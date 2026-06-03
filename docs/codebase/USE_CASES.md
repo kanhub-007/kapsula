@@ -1,6 +1,6 @@
 # Use Cases
 
-Application-layer orchestration. Location: `doc_search/core/application/use_cases/`
+Application-layer orchestration. Location: `kapsula/core/application/use_cases/`
 
 ## DeleteDocumentUseCase
 

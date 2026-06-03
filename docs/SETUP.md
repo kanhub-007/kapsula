@@ -11,7 +11,7 @@
 
 ```bash
 git clone <repo-url>
-cd doc-search
+cd kapsula
 
 # Create virtual environment with Python 3.12
 #   Windows (use py launcher to select 3.12 explicitly):
@@ -58,9 +58,9 @@ See `.env.example` for a complete annotated list. At minimum:
 | `INTELLIGENT_SEARCH_MODEL` | No | LLM model (default: `deepseek-ai/DeepSeek-V3.2-Exp`) |
 | `EMBEDDING_MODEL_URL` | No | Embedding model (default: `Qwen/Qwen3-Embedding-8B`) |
 | `RERANKER_MODEL` | No | Reranker model (default: `mixedbread-ai/mxbai-rerank-large-v1`) |
-| `DOCSEARCH_TRANSPORT` | No | MCP transport: `stdio` (default) or `http` |
-| `DOCSEARCH_HOST` | No | MCP HTTP host (default: `127.0.0.1`) |
-| `DOCSEARCH_PORT` | No | MCP HTTP port (default: `8002`) |
+| `KAPSULA_TRANSPORT` | No | MCP transport: `stdio` (default) or `http` |
+| `KAPSULA_HOST` | No | MCP HTTP host (default: `127.0.0.1`) |
+| `KAPSULA_PORT` | No | MCP HTTP port (default: `8002`) |
 | `API_HOST` | No | REST API host (default: `0.0.0.0`) |
 | `API_PORT` | No | REST API port (default: `8001`) |
 | `API_RELOAD` | No | Hot reload: `true` or `false` (default: `false`) |
@@ -79,7 +79,7 @@ See `.env.example` for a complete annotated list. At minimum:
 ### REST API
 
 ```bash
-python -m doc_search.presentation.api
+python -m kapsula.presentation.api
 # → http://localhost:8001
 # → Swagger: http://localhost:8001/docs
 # → ReDoc: http://localhost:8001/redoc
@@ -89,10 +89,10 @@ python -m doc_search.presentation.api
 
 ```bash
 # Stdio (Claude Desktop, Cursor)
-python -m doc_search.presentation.mcp
+python -m kapsula.presentation.mcp
 
 # HTTP
-DOCSEARCH_TRANSPORT=http DOCSEARCH_PORT=8002 python -m doc_search.presentation.mcp
+KAPSULA_TRANSPORT=http KAPSULA_PORT=8002 python -m kapsula.presentation.mcp
 ```
 
 ### Claude Desktop Config
@@ -100,10 +100,10 @@ DOCSEARCH_TRANSPORT=http DOCSEARCH_PORT=8002 python -m doc_search.presentation.m
 ```json
 {
   "mcpServers": {
-    "doc-search": {
+    "kapsula": {
       "command": "python",
-      "args": ["-m", "doc_search.presentation.mcp"],
-      "cwd": "/path/to/doc-search"
+      "args": ["-m", "kapsula.presentation.mcp"],
+      "cwd": "/path/to/kapsula"
     }
   }
 }
@@ -115,10 +115,10 @@ DOCSEARCH_TRANSPORT=http DOCSEARCH_PORT=8002 python -m doc_search.presentation.m
 
 ```bash
 # REST API
-docker compose up doc-search-api
+docker compose up kapsula-api
 
 # MCP (stdio)
-docker compose up doc-search-mcp
+docker compose up kapsula-mcp
 ```
 
 Both containers mount `.env` as read-only volume.

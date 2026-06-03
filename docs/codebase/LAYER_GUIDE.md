@@ -1,6 +1,6 @@
 # Layer Guide
 
-Doc-Search follows **Clean Architecture** with strict dependency rules.
+Kapsula follows **Clean Architecture** with strict dependency rules.
 
 ## Dependency Rule
 
@@ -15,7 +15,7 @@ PRESENTATION  →  APPLICATION  →  DOMAIN  ←  INFRASTRUCTURE
 ## Layer Map
 
 ```
-doc_search/
+kapsula/
 ├── presentation/          # API + MCP routes, tools
 │   ├── api/               # FastAPI routes, background tasks
 │   │   └── routes/        # accounts, collections, documents, search, health
@@ -85,15 +85,15 @@ doc_search/
 **Pattern for ORM usage:**
 ```python
 # Correct — aliased ORM import, explicit about what's infrastructure
-from doc_search.infrastructure.data.tables.document import Document as OrmDocument
+from kapsula.infrastructure.data.tables.document import Document as OrmDocument
 
 # Wrong — bare import confusing ORM with domain entity
-from doc_search.infrastructure.data import Document
+from kapsula.infrastructure.data import Document
 ```
 
 **Write operations use repositories:**
 ```python
-from doc_search.infrastructure.repositories.data.sql_account_repository import SqlAccountRepository
+from kapsula.infrastructure.repositories.data.sql_account_repository import SqlAccountRepository
 _repo = SqlAccountRepository()
 _repo.save(db, domain_account)
 ```
