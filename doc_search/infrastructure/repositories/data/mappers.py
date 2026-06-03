@@ -28,8 +28,14 @@ def document_to_orm(domain):
 
 
 def document_from_orm(orm) -> "domain_doc.Document":
-    """Convert ORM Document to domain Document (flat, no nested collections)."""
+    """Convert ORM Document to domain Document (collection populated, no nested docs)."""
     from doc_search.core.domain.entities.document import Document
+    collection = None
+    try:
+        if orm.collection is not None:
+            collection = _collection_from_orm_safe(orm.collection)
+    except Exception:
+        pass
     return Document(
         id=orm.id,
         job_id=orm.job_id,
@@ -44,7 +50,7 @@ def document_from_orm(orm) -> "domain_doc.Document":
         doc_state=orm.doc_state,
         faiss_index_path=orm.faiss_index_path,
         bm25_index_path=orm.bm25_index_path,
-        collection=None,
+        collection=collection,
         chunks=[],
         sub_documents=[],
     )
@@ -65,8 +71,14 @@ def collection_to_orm(domain):
 
 
 def collection_from_orm(orm) -> "domain_coll.Collection":
-    """Convert ORM Collection to domain Collection (flat)."""
+    """Convert ORM Collection to domain Collection (account populated, no nested docs)."""
     from doc_search.core.domain.entities.collection import Collection
+    account = None
+    try:
+        if orm.account is not None:
+            account = _account_from_orm_safe(orm.account)
+    except Exception:
+        pass
     return Collection(
         id=orm.id,
         collection_id=orm.collection_id,
@@ -75,7 +87,7 @@ def collection_from_orm(orm) -> "domain_coll.Collection":
         logo_filename=orm.logo_filename,
         created_at=orm.created_at,
         ip_address=orm.ip_address,
-        account=None,
+        account=account,
         documents=[],
     )
 
@@ -93,15 +105,21 @@ def account_to_orm(domain):
 
 
 def account_from_orm(orm) -> "domain_acct.Account":
-    """Convert ORM Account to domain Account (flat)."""
+    """Convert ORM Account to domain Account (collections shallow, depth 2)."""
     from doc_search.core.domain.entities.account import Account
+    colls = []
+    try:
+        if orm.collections:
+            colls = [_collection_from_orm_shallow(c) for c in orm.collections]
+    except Exception:
+        pass
     return Account(
         id=orm.id,
         account_id=orm.account_id,
         name=orm.name,
         created_at=orm.created_at,
         ip_address=orm.ip_address,
-        collections=[],
+        collections=colls,
     )
 
 
@@ -132,4 +150,52 @@ def sub_document_from_orm(orm) -> "domain_sd.SubDocument":
         bm25_index_path=orm.bm25_index_path,
         page_count=orm.page_count,
         created_at=orm.created_at,
+    )
+
+
+# ── safe shallow mappers (no further nesting, break cycles) ──
+
+
+def _collection_from_orm_safe(orm) -> "domain_coll.Collection":
+    """Collection without account population (safe for Document→Collection path)."""
+    from doc_search.core.domain.entities.collection import Collection
+    return Collection(
+        id=orm.id,
+        collection_id=orm.collection_id,
+        account_id=orm.account_id,
+        name=orm.name,
+        logo_filename=orm.logo_filename,
+        created_at=orm.created_at,
+        ip_address=orm.ip_address,
+        account=None,
+        documents=[],
+    )
+
+
+def _account_from_orm_safe(orm) -> "domain_acct.Account":
+    """Account without collections (safe for Collection→Account path)."""
+    from doc_search.core.domain.entities.account import Account
+    return Account(
+        id=orm.id,
+        account_id=orm.account_id,
+        name=orm.name,
+        created_at=orm.created_at,
+        ip_address=orm.ip_address,
+        collections=[],
+    )
+
+
+def _collection_from_orm_shallow(orm) -> "domain_coll.Collection":
+    """Collection without account (safe for Account→Collection[] path)."""
+    from doc_search.core.domain.entities.collection import Collection
+    return Collection(
+        id=orm.id,
+        collection_id=orm.collection_id,
+        account_id=orm.account_id,
+        name=orm.name,
+        logo_filename=orm.logo_filename,
+        created_at=orm.created_at,
+        ip_address=orm.ip_address,
+        account=None,
+        documents=[],
     )
