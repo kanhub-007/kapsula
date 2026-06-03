@@ -17,8 +17,8 @@ build/
 *.swp
 *.swo
 
-# Data
-data/
+# Runtime data directory at repo root only
+/data/
 
 # OS
 .DS_Store

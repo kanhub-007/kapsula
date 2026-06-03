@@ -524,6 +524,73 @@ def register_tools(mcp: FastMCP):
         finally:
             db.close()
 
+    @mcp.tool(
+        name="list_stale_maintenance",
+        description="List collections with deferred summary or aggregate-index maintenance.",
+    )
+    def list_stale_maintenance() -> str:
+        db = _get_db()
+        try:
+            from doc_search.presentation.upload.maintenance_state_manager import (
+                MaintenanceStateManager,
+            )
+
+            stale_states = MaintenanceStateManager().list_stale()
+            if not stale_states:
+                return "No stale maintenance state found."
+
+            lines = [f"Stale maintenance states ({len(stale_states)}):\n"]
+            for state in stale_states:
+                account = None
+                if state.get("account_db_id"):
+                    account = (
+                        db.query(Account)
+                        .filter(Account.id == state["account_db_id"])
+                        .first()
+                    )
+                lines.append(
+                    "  • "
+                    f"collection={state.get('collection_name') or state.get('collection_db_id')} "
+                    f"({state.get('collection_id') or '?'}) "
+                    f"account={account.name if account else '—'} "
+                    f"summary_stale={state.get('summary_stale')} "
+                    f"collection_index_stale={state.get('collection_index_stale')} "
+                    f"account_index_stale={state.get('account_index_stale')} "
+                    f"updated={state.get('updated_at', '?')}"
+                )
+            return "\n".join(lines)
+        finally:
+            db.close()
+
+    @mcp.tool(
+        name="run_collection_maintenance",
+        description="Refresh a collection summary and rebuild collection/account aggregate indexes.",
+    )
+    def run_collection_maintenance(collection_id: str) -> str:
+        db = _get_db()
+        try:
+            from doc_search.presentation.upload.collection_maintenance_runner import (
+                CollectionMaintenanceRunner,
+            )
+
+            col = _resolve_collection(db, collection_id)
+            if not col:
+                return f"Collection not found: {collection_id}"
+            result = CollectionMaintenanceRunner(db).run(col)
+            return (
+                "Collection maintenance completed\n"
+                f"  Collection: {result['collection_name']}\n"
+                f"  collection_id: {result['collection_id']}\n"
+                f"  Summary updates: {result['summary_updates']}\n"
+                f"  Summary failures: {result['summary_failures']}\n"
+                f"  Collection FAISS: {result['collection_faiss'] or '—'}\n"
+                f"  Collection BM25: {result['collection_bm25'] or '—'}\n"
+                f"  Account FAISS: {result['account_faiss'] or '—'}\n"
+                f"  Account BM25: {result['account_bm25'] or '—'}"
+            )
+        finally:
+            db.close()
+
     # ═══════════════════════════════════════════════════════════
     #  DOCUMENTS
     # ═══════════════════════════════════════════════════════════

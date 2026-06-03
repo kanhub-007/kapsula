@@ -35,6 +35,9 @@ from doc_search.core.application.use_cases.collection_summary import (
 from doc_search.core.application.use_cases.upload.upload_ingestion_strategy_factory import (
     UploadIngestionStrategyFactory,
 )
+from doc_search.presentation.upload.maintenance_state_manager import (
+    MaintenanceStateManager,
+)
 from doc_search.presentation.upload.sub_document_batch_indexer import (
     SubDocumentBatchIndexer,
 )
@@ -572,6 +575,12 @@ def process_document(
             # Step 4: Rebuild collection aggregate index
             _rebuild_collection_aggregate_index(db, document, job_id, start_time)
         else:
+            MaintenanceStateManager().mark_collection_stale(
+                document.collection,
+                summary=False,
+                collection_index=True,
+                account_index=True,
+            )
             _upload_progress.set(
                 job_id,
                 status="processing",
@@ -584,6 +593,7 @@ def process_document(
                 chunk_count=len(chunks),
                 duration=duration,
                 ingestion_mode=ingestion_mode,
+                maintenance_deferred=True,
             )
 
         # Update progress: Completed
@@ -1016,6 +1026,12 @@ def process_document_with_subdocuments(
             # Step 5: Rebuild collection aggregate index
             _rebuild_collection_aggregate_index(db, document, job_id, start_time)
         else:
+            MaintenanceStateManager().mark_collection_stale(
+                document.collection,
+                summary=True,
+                collection_index=True,
+                account_index=True,
+            )
             _upload_progress.set(
                 job_id,
                 status="processing",
