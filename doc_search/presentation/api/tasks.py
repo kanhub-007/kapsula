@@ -41,6 +41,7 @@ from doc_search.presentation.upload.maintenance_state_manager import (
 from doc_search.presentation.upload.sub_document_batch_indexer import (
     SubDocumentBatchIndexer,
 )
+from doc_search.presentation.upload.upload_job_manager import UploadJobManager
 from doc_search.presentation.upload.upload_progress_tracker import UploadProgressTracker
 from doc_search.infrastructure.logging_config import get_logger
 
@@ -52,6 +53,7 @@ _embedder_singleton = None
 
 
 _upload_progress = UploadProgressTracker(processing_status, logger)
+_upload_job_manager = UploadJobManager(_upload_progress)
 
 
 def match_header_to_parents(header: str, parent_sections: dict) -> dict:
@@ -607,6 +609,14 @@ def process_document(
             duration=duration,
             ingestion_mode=ingestion_mode,
         )
+        _upload_job_manager.update(
+            job_id,
+            status="completed",
+            progress=100,
+            stage="completed",
+            chunk_count=len(chunks),
+            duration=duration,
+        )
         logger.info(f"Job {job_id}: SUCCESS - {len(chunks)} chunks in {duration:.2f}s")
 
     except Exception as e:
@@ -627,6 +637,13 @@ def process_document(
             "stage": "failed",
             "message": f"Processing failed: {str(e)}",
         }
+        _upload_job_manager.update(
+            job_id,
+            status="failed",
+            progress=0,
+            stage="failed",
+            error=str(e),
+        )
 
     finally:
         db.close()
@@ -1065,6 +1082,15 @@ def process_document_with_subdocuments(
             duration=duration,
             ingestion_mode=ingestion_mode,
         )
+        _upload_job_manager.update(
+            job_id,
+            status="completed",
+            progress=100,
+            stage="completed",
+            chunk_count=total_chunks,
+            subdocument_count=len(subdocs),
+            duration=duration,
+        )
         logger.info(
             f"Job {job_id}: SUCCESS - {len(subdocs)} sub-documents, {total_chunks} chunks in {duration:.2f}s"
         )
@@ -1087,6 +1113,13 @@ def process_document_with_subdocuments(
             "stage": "failed",
             "message": f"Russian Doll processing failed: {str(e)}",
         }
+        _upload_job_manager.update(
+            job_id,
+            status="failed",
+            progress=0,
+            stage="failed",
+            error=str(e),
+        )
 
     finally:
         db.close()

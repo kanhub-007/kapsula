@@ -8,6 +8,7 @@ from .tables import (
     SubDocumentPage,
     LibraryCard,
     Chunk,
+    UploadJob,
 )
 
 __all__ = [
@@ -25,4 +26,5 @@ __all__ = [
     "SubDocumentPage",
     "LibraryCard",
     "Chunk",
+    "UploadJob",
 ]

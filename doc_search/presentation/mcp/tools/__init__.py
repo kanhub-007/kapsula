@@ -591,6 +591,70 @@ def register_tools(mcp: FastMCP):
         finally:
             db.close()
 
+    @mcp.tool(
+        name="list_upload_jobs",
+        description="List recent upload jobs with status, progress, and timing.",
+    )
+    def list_upload_jobs(limit: int = 20) -> str:
+        from doc_search.presentation.upload.upload_job_manager import (
+            UploadJobManager,
+        )
+
+        manager = UploadJobManager()
+        jobs = manager.list_recent(limit)
+        if not jobs:
+            return "No upload jobs found."
+
+        lines = [f"Upload jobs ({len(jobs)}):\n"]
+        for job in jobs:
+            duration = f"{job['duration']:.1f}s" if job.get("duration") else "—"
+            lines.append(
+                f"  • {job['filename']} [{job['status']}] "
+                f"{job.get('progress', '?')}% "
+                f"stage={job.get('stage', '?')} "
+                f"chunks={job.get('chunk_count', '—')} "
+                f"duration={duration} "
+                f"ingestion={job.get('ingestion_mode', '?')}\n"
+                f"    job_id: {job['job_id']} "
+                f"collection: {job.get('collection_name', '—')}"
+            )
+            if job.get("error"):
+                lines.append(f"    error: {job['error'][:200]}")
+        return "\n".join(lines)
+
+    @mcp.tool(
+        name="get_upload_job",
+        description="Get detailed information about a specific upload job.",
+    )
+    def get_upload_job(job_id: str) -> str:
+        from doc_search.presentation.upload.upload_job_manager import (
+            UploadJobManager,
+        )
+
+        manager = UploadJobManager()
+        job = manager.get(job_id)
+        if not job:
+            return f"Upload job not found: {job_id}"
+
+        lines = [
+            f"Upload Job: {job['filename']}",
+            f"  job_id: {job['job_id']}",
+            f"  Status: {job['status']}",
+            f"  Progress: {job.get('progress', '?')}%",
+            f"  Stage: {job.get('stage', '?')}",
+            f"  Message: {job.get('message', '')}",
+            f"  Collection: {job.get('collection_name', '—')}",
+            f"  Ingestion mode: {job.get('ingestion_mode', '?')}",
+            f"  Chunks: {job.get('chunk_count', '—')}",
+            f"  Sub-documents: {job.get('subdocument_count', '—')}",
+            f"  Duration: {job.get('duration') or '—'}",
+            f"  Created: {job.get('created_at', '?')}",
+            f"  Updated: {job.get('updated_at', '?')}",
+        ]
+        if job.get("error"):
+            lines.append(f"  Error: {job['error']}")
+        return "\n".join(lines)
+
     # ═══════════════════════════════════════════════════════════
     #  DOCUMENTS
     # ═══════════════════════════════════════════════════════════
@@ -654,6 +718,17 @@ def register_tools(mcp: FastMCP):
                 "message": f"Document queued for {ingestion_mode} ingestion...",
                 "ingestion_mode": ingestion_mode,
             }
+            from doc_search.presentation.upload.upload_job_manager import (
+                UploadJobManager,
+            )
+
+            UploadJobManager().create(
+                job_id,
+                filename=p.name,
+                collection_id=col.id,
+                collection_name=col.name,
+                ingestion_mode=ingestion_mode,
+            )
 
             threading.Thread(
                 target=process_document_with_subdocuments,

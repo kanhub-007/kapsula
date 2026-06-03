@@ -33,6 +33,7 @@ from ..models import (
 )
 from doc_search.core.application.dto.upload_ingestion_mode import UploadIngestionMode
 from doc_search.presentation.upload.stale_progress_guard import StaleProgressGuard
+from doc_search.presentation.upload.upload_job_manager import UploadJobManager
 from ..tasks import (
     process_document_with_subdocuments,
     get_processing_status,
@@ -130,6 +131,13 @@ async def upload_document(
         "message": f"Document queued for {ingestion_mode} ingestion...",
         "ingestion_mode": ingestion_mode,
     }
+    UploadJobManager().create(
+        job_id,
+        filename=file.filename,
+        collection_id=collection.id,
+        collection_name=collection.name,
+        ingestion_mode=ingestion_mode,
+    )
 
     # Process document in background using Russian Doll architecture
     background_tasks.add_task(
