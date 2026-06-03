@@ -39,7 +39,8 @@ class MarkdownChunker(Chunker):
         state = ChunkState()
         pipe = ChunkPipeline(self._max_tokens, self._hard_limit, self._encoding, state)
 
-        for state.i in range(len(elements)):
+        state.i = 0
+        while state.i < len(elements):
             el = elements[state.i]
             handler = self._registry.get(el.type)
             handler.handle(state.i, elements, pipe)
