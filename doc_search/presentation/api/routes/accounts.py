@@ -1,40 +1,21 @@
 """Account management routes."""
 
 import uuid
-from typing import List
-
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from doc_search.infrastructure.data import get_db, Account, LibraryCard
 from doc_search.infrastructure.logging_config import get_logger
 from ..models import (
+    AccountCreate,
     AccountExportResponse,
+    AccountListResponse,
+    AccountResponse,
     CollectionListResponse,
 )
 
 logger = get_logger(__name__)
 router = APIRouter()
-
-
-# Pydantic models for request/response
-
-
-class AccountCreate(BaseModel):
-    name: str
-
-
-class AccountResponse(BaseModel):
-    account_id: str
-    name: str
-    created_at: str
-    collection_count: int
-
-
-class AccountListResponse(BaseModel):
-    accounts: List[AccountResponse]
-    total: int
 
 
 @router.post("/", response_model=AccountResponse)

@@ -5,15 +5,8 @@ combinations of optional IDs throughout the application layer.
 """
 
 from dataclasses import dataclass
-from enum import Enum
 
-
-class SearchScopeKind(str, Enum):
-    """Supported collection-search scopes."""
-
-    GLOBAL = "global"
-    ACCOUNT = "account"
-    COLLECTION = "collection"
+from doc_search.core.application.dto.search_scope_kind import SearchScopeKind
 
 
 @dataclass(frozen=True)

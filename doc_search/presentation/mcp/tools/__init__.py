@@ -22,6 +22,7 @@ from doc_search.infrastructure.data import (
 from doc_search.infrastructure.logging_config import get_logger
 from doc_search.presentation.mcp.search_jobs import SearchJob, SearchJobManager
 from doc_search.presentation.mcp.search_presenter import format_search_results
+from doc_search.presentation.upload.stale_progress_guard import StaleProgressGuard
 
 logger = get_logger(__name__)
 
@@ -529,11 +530,23 @@ def register_tools(mcp: FastMCP):
 
     @mcp.tool(
         name="upload_document",
-        description="Upload a markdown (.md) file to a collection. Returns a job_id for progress tracking.",
+        description="Upload a markdown (.md) file to a collection. ingestion_mode can be fast, indexed (default), or full. Returns a job_id for progress tracking.",
     )
     def upload_document(
-        file_path: str, collection_id: str, max_tokens: int = 512
+        file_path: str,
+        collection_id: str,
+        max_tokens: int = 512,
+        ingestion_mode: str = "indexed",
     ) -> str:
+        from doc_search.core.application.dto.upload_ingestion_mode import (
+            UploadIngestionMode,
+        )
+
+        try:
+            ingestion_mode = UploadIngestionMode.normalize(ingestion_mode)
+        except ValueError as exc:
+            return f"Error: {exc}"
+
         p = Path(file_path)
         if not p.exists():
             return f"Error: file not found — {file_path}"
@@ -564,11 +577,20 @@ def register_tools(mcp: FastMCP):
 
             from doc_search.presentation.api.tasks import (
                 process_document_with_subdocuments,
+                processing_status,
             )
+
+            processing_status[job_id] = {
+                "status": "processing",
+                "progress": 0,
+                "stage": "queued",
+                "message": f"Document queued for {ingestion_mode} ingestion...",
+                "ingestion_mode": ingestion_mode,
+            }
 
             threading.Thread(
                 target=process_document_with_subdocuments,
-                args=(job_id, content, max_tokens, SessionLocal()),
+                args=(job_id, content, max_tokens, SessionLocal(), ingestion_mode),
                 daemon=True,
             ).start()
 
@@ -576,7 +598,8 @@ def register_tools(mcp: FastMCP):
                 f"Uploaded: {p.name}\n"
                 f"  Collection: {col.name}\n"
                 f"  job_id: {job_id}\n"
-                f"  Status: processing"
+                f"  Status: processing\n"
+                f"  Ingestion mode: {ingestion_mode}"
             )
         finally:
             db.close()
@@ -703,12 +726,34 @@ def register_tools(mcp: FastMCP):
             status = get_processing_status(job_id)
 
             if status:
+                live_progress = int(status.get("progress", 0) or 0)
+                live_status = status.get("status")
+                live_stage = status.get("stage")
+                terminal_override = StaleProgressGuard.terminal_override(
+                    document_status=doc.status,
+                    live_status=live_status,
+                    live_stage=live_stage,
+                    live_progress=live_progress,
+                    chunk_count=len(doc.chunks),
+                    duration=doc.duration,
+                )
+                if terminal_override:
+                    return (
+                        f"Document: {doc.filename}\n"
+                        f"Status: {terminal_override['status']}\n"
+                        f"Progress: {terminal_override['progress']}%\n"
+                        f"Stage: {terminal_override['stage']}\n"
+                        f"Message: {terminal_override['message']}\n"
+                        f"Chunks: {terminal_override.get('chunk_count', '—')}\n"
+                        f"Duration: {terminal_override.get('duration') or '—'}"
+                    )
                 return (
                     f"Document: {doc.filename}\n"
                     f"Status: {status.get('status', '?')}\n"
                     f"Progress: {status.get('progress', 0)}%\n"
                     f"Stage: {status.get('stage', '?')}\n"
                     f"Message: {status.get('message', '')}\n"
+                    f"Ingestion mode: {status.get('ingestion_mode', '—')}\n"
                     f"Chunks: {status.get('chunk_count', '—')}\n"
                     f"Duration: {status.get('duration', '—')}"
                 )

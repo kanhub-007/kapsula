@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from doc_search.infrastructure.data import (
     get_db,
+    SessionLocal,
     Document,
     DocumentStructure,
     Chunk,
@@ -30,6 +31,8 @@ from ..models import (
     DocumentDetailResponse,
     DocumentListItem,
 )
+from doc_search.core.application.dto.upload_ingestion_mode import UploadIngestionMode
+from doc_search.presentation.upload.stale_progress_guard import StaleProgressGuard
 from ..tasks import (
     process_document_with_subdocuments,
     get_processing_status,
@@ -47,6 +50,7 @@ async def upload_document(
     collection_id: str,
     file: UploadFile = File(...),
     max_tokens: int = 512,
+    ingestion_mode: str = "indexed",
     db: Session = Depends(get_db),
 ):
     """
@@ -55,11 +59,21 @@ async def upload_document(
     - **collection_id**: Collection ID (GUID) to upload document to
     - **file**: Markdown file to upload
     - **max_tokens**: Maximum token length for embedding model (default: 512)
+    - **ingestion_mode**: Upload intent: fast, indexed (default), or full
 
     Returns job ID and processing status.
     """
+    try:
+        ingestion_mode = UploadIngestionMode.normalize(ingestion_mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     logger.info(
-        f"Received upload request: collection_id={collection_id}, filename={file.filename}, max_tokens={max_tokens}"
+        "Received upload request: collection_id=%s, filename=%s, max_tokens=%s, ingestion_mode=%s",
+        collection_id,
+        file.filename,
+        max_tokens,
+        ingestion_mode,
     )
 
     # Verify collection exists
@@ -113,7 +127,8 @@ async def upload_document(
         "status": "processing",
         "progress": 0,
         "stage": "queued",
-        "message": "Document queued for processing...",
+        "message": f"Document queued for {ingestion_mode} ingestion...",
+        "ingestion_mode": ingestion_mode,
     }
 
     # Process document in background using Russian Doll architecture
@@ -122,14 +137,16 @@ async def upload_document(
         job_id=job_id,
         markdown_content=markdown_content,
         max_tokens=max_tokens,
-        db=db,
+        db=SessionLocal(),
+        ingestion_mode=ingestion_mode,
     )
 
     return UploadResponse(
         job_id=job_id,
         collection_id=collection_id,
         status="processing",
-        message="Document uploaded successfully. Processing started.",
+        message=f"Document uploaded successfully. Processing started with ingestion_mode={ingestion_mode}.",
+        ingestion_mode=ingestion_mode,
     )
 
 
@@ -150,9 +167,23 @@ async def get_progress(job_id: str, db: Session = Depends(get_db)):
         logger.warning(f"Job not found: {job_id}")
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Get progress from in-memory status
+    # Get progress from in-memory status. If the database already reached a
+    # terminal state, never let stale in-memory progress look stuck forever.
     status = get_processing_status(job_id)
     if status:
+        live_progress = int(status.get("progress", 0) or 0)
+        live_status = status.get("status")
+        live_stage = status.get("stage")
+        terminal_override = StaleProgressGuard.terminal_override(
+            document_status=document.status,
+            live_status=live_status,
+            live_stage=live_stage,
+            live_progress=live_progress,
+            chunk_count=len(document.chunks),
+            duration=document.duration,
+        )
+        if terminal_override:
+            return ProgressResponse(**terminal_override)
         return ProgressResponse(**status)
 
     # If not in memory, return database status

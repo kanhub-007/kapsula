@@ -142,8 +142,13 @@ curl -X POST http://localhost:8001/collections/ \
   -d '{"name": "Knowledge Base", "account_id": "<account_id>"}'
 
 # Upload a markdown file
-curl -X POST "http://localhost:8001/documents/upload?collection_id=<collection_id>" \
+# ingestion_mode defaults to indexed: per-document/sub-document indexes are built,
+# while collection summary and aggregate maintenance are deferred for speed.
+curl -X POST "http://localhost:8001/documents/upload?collection_id=<collection_id>&ingestion_mode=indexed" \
   -F "file=@document.md"
+
+# Use ingestion_mode=full when collection/account aggregate indexes and summaries
+# must be current before the upload is considered done.
 
 # Check progress
 curl http://localhost:8001/documents/progress/<job_id>

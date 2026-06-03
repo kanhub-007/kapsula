@@ -50,7 +50,7 @@ def create_server() -> FastMCP:
 def get_transport_config() -> dict:
     """Read transport configuration from environment variables."""
     return {
-        "transport": os.getenv("DOCSEARCH_TRANSPORT", "http").lower(),
+        "transport": os.getenv("DOCSEARCH_TRANSPORT", "stdio").lower(),
         "host": os.getenv("DOCSEARCH_HOST", "127.0.0.1"),
         "port": int(os.getenv("DOCSEARCH_PORT", "8002")),
     }

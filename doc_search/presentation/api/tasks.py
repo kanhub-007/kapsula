@@ -32,6 +32,10 @@ from doc_search.infrastructure.external.llm.chat_client import HuggingFaceChatCl
 from doc_search.core.application.use_cases.collection_summary import (
     CollectionSummaryGenerator,
 )
+from doc_search.core.application.use_cases.upload.upload_ingestion_strategy_factory import (
+    UploadIngestionStrategyFactory,
+)
+from doc_search.presentation.upload.upload_progress_tracker import UploadProgressTracker
 from doc_search.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -39,6 +43,9 @@ logger = get_logger(__name__)
 # Global dictionary to track processing progress
 processing_status = {}
 _embedder_singleton = None
+
+
+_upload_progress = UploadProgressTracker(processing_status, logger)
 
 
 def match_header_to_parents(header: str, parent_sections: dict) -> dict:
@@ -231,7 +238,13 @@ def add_citation_metadata_to_chunks(
     return chunks
 
 
-def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Session):
+def process_document(
+    job_id: str,
+    markdown_content: str,
+    max_tokens: int,
+    db: Session,
+    ingestion_mode: str = "indexed",
+):
     """
     Background task to process document.
 
@@ -241,7 +254,13 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
         max_tokens: Maximum tokens per chunk
         db: Database session
     """
-    logger.info(f"Starting background processing for job {job_id}")
+    ingestion_strategy = UploadIngestionStrategyFactory.create(ingestion_mode)
+    ingestion_mode = ingestion_strategy.mode
+    logger.info(
+        "Starting background processing for job %s ingestion_mode=%s",
+        job_id,
+        ingestion_mode,
+    )
     start_time = time.time()
 
     try:
@@ -475,46 +494,65 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
                 f"Job {job_id}: {link_stats['chunks_no_match']} chunks failed to link to parents - context expansion will fail for these!"
             )
 
-        # Update progress: Building indexes
-        processing_status[job_id] = {
-            "status": "processing",
-            "progress": 85,
-            "stage": "building_indexes",
-            "message": "Building search indexes (FAISS and BM25)...",
-        }
-        logger.debug(f"Job {job_id}: Building search indexes")
-
-        # Build FAISS and BM25 indexes
-        try:
-            # Get account_id and collection_id for organized storage
-            account_id = (
-                document.collection.account.account_id
-                if document.collection.account
-                else None
+        if ingestion_strategy.build_document_indexes:
+            # Update progress: Building indexes
+            index_stage_start = time.time()
+            _upload_progress.set(
+                job_id,
+                status="processing",
+                progress=85,
+                stage="building_indexes",
+                message="Building search indexes (FAISS and BM25)...",
+                ingestion_mode=ingestion_mode,
             )
-            collection_id = document.collection.collection_id
+            logger.debug(f"Job {job_id}: Building search indexes")
 
-            embedder = HuggingFaceEmbedder(
-                endpoint_url=os.getenv(
-                    "EMBEDDING_MODEL_URL", "Qwen/Qwen3-Embedding-8B"
-                ),
-                token=os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN", ""),
+            # Build FAISS and BM25 indexes
+            try:
+                # Get account_id and collection_id for organized storage
+                account_id = (
+                    document.collection.account.account_id
+                    if document.collection.account
+                    else None
+                )
+                collection_id = document.collection.collection_id
+
+                embedder = HuggingFaceEmbedder(
+                    endpoint_url=os.getenv(
+                        "EMBEDDING_MODEL_URL", "Qwen/Qwen3-Embedding-8B"
+                    ),
+                    token=os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN", ""),
+                )
+                builder = DocumentIndexBuilder(embedder, DATA_DIR)
+
+                index_paths = builder.build(
+                    chunks, job_id, account_id=account_id, collection_id=collection_id
+                )
+
+                # Update document with index paths
+                document.faiss_index_path = index_paths.faiss
+                document.bm25_index_path = index_paths.bm25
+                db.commit()
+
+                logger.info(f"Job {job_id}: Search indexes created successfully")
+            except Exception as e:
+                logger.error(
+                    f"Job {job_id}: Failed to build indexes: {e}", exc_info=True
+                )
+                # Continue without indexes - not critical for completion
+            finally:
+                _upload_progress.log_stage(
+                    job_id,
+                    "document_indexing",
+                    index_stage_start,
+                    chunks=len(chunks),
+                    ingestion_mode=ingestion_mode,
+                )
+        else:
+            logger.info(
+                "Job %s: Skipping document index build for ingestion_mode=fast",
+                job_id,
             )
-            builder = DocumentIndexBuilder(embedder, DATA_DIR)
-
-            index_paths = builder.build(
-                chunks, job_id, account_id=account_id, collection_id=collection_id
-            )
-
-            # Update document with index paths
-            document.faiss_index_path = index_paths.faiss
-            document.bm25_index_path = index_paths.bm25
-            db.commit()
-
-            logger.info(f"Job {job_id}: Search indexes created successfully")
-        except Exception as e:
-            logger.error(f"Job {job_id}: Failed to build indexes: {e}", exc_info=True)
-            # Continue without indexes - not critical for completion
 
         # Calculate duration
         duration = time.time() - start_time
@@ -527,18 +565,35 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
         db.commit()
         logger.debug(f"Job {job_id}: Database updated with completion status")
 
-        # Step 4: Rebuild collection aggregate index
-        _rebuild_collection_aggregate_index(db, document, job_id)
+        if ingestion_strategy.rebuild_aggregate_indexes:
+            # Step 4: Rebuild collection aggregate index
+            _rebuild_collection_aggregate_index(db, document, job_id, start_time)
+        else:
+            _upload_progress.set(
+                job_id,
+                status="processing",
+                progress=98,
+                stage="finalizing",
+                message=(
+                    f"Skipping aggregate index maintenance for ingestion_mode={ingestion_mode}; "
+                    "finalizing upload."
+                ),
+                chunk_count=len(chunks),
+                duration=duration,
+                ingestion_mode=ingestion_mode,
+            )
 
         # Update progress: Completed
-        processing_status[job_id] = {
-            "status": "completed",
-            "progress": 100,
-            "stage": "completed",
-            "message": f"Processing completed successfully. Created {len(chunks)} chunks in {duration:.2f} seconds.",
-            "chunk_count": len(chunks),
-            "duration": duration,
-        }
+        _upload_progress.set(
+            job_id,
+            status="completed",
+            progress=100,
+            stage="completed",
+            message=f"Processing completed successfully. Created {len(chunks)} chunks in {duration:.2f} seconds.",
+            chunk_count=len(chunks),
+            duration=duration,
+            ingestion_mode=ingestion_mode,
+        )
         logger.info(f"Job {job_id}: SUCCESS - {len(chunks)} chunks in {duration:.2f}s")
 
     except Exception as e:
@@ -565,7 +620,11 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
 
 
 def process_document_with_subdocuments(
-    job_id: str, markdown_content: str, max_tokens: int, db: Session
+    job_id: str,
+    markdown_content: str,
+    max_tokens: int,
+    db: Session,
+    ingestion_mode: str = "indexed",
 ):
     """
     Process document with breadcrumb-based sub-document architecture.
@@ -576,17 +635,25 @@ def process_document_with_subdocuments(
         max_tokens: Maximum tokens per chunk
         db: Database session
     """
-    logger.info(f"Starting Russian Doll multi-index processing for job {job_id}")
+    ingestion_strategy = UploadIngestionStrategyFactory.create(ingestion_mode)
+    ingestion_mode = ingestion_strategy.mode
+    logger.info(
+        "Starting Russian Doll multi-index processing for job %s ingestion_mode=%s",
+        job_id,
+        ingestion_mode,
+    )
     start_time = time.time()
 
     try:
         # Update progress
-        processing_status[job_id] = {
-            "status": "processing",
-            "progress": 5,
-            "stage": "parsing_breadcrumbs",
-            "message": "Parsing document breadcrumbs...",
-        }
+        _upload_progress.set(
+            job_id,
+            status="processing",
+            progress=5,
+            stage="parsing_breadcrumbs",
+            message="Parsing document breadcrumbs...",
+            ingestion_mode=ingestion_mode,
+        )
 
         # Get document from database
         document = db.query(Document).filter(Document.job_id == job_id).first()
@@ -601,27 +668,35 @@ def process_document_with_subdocuments(
             logger.warning(
                 f"Job {job_id}: No valid sub-documents found, falling back to legacy processing"
             )
-            return process_document(job_id, markdown_content, max_tokens, db)
+            return process_document(
+                job_id, markdown_content, max_tokens, db, ingestion_mode=ingestion_mode
+            )
 
         logger.info(f"Job {job_id}: Found {len(subdocs)} sub-documents")
 
         # Update progress
-        processing_status[job_id] = {
-            "status": "processing",
-            "progress": 10,
-            "stage": "processing_subdocuments",
-            "message": f"Processing {len(subdocs)} sub-documents...",
-        }
+        _upload_progress.set(
+            job_id,
+            status="processing",
+            progress=10,
+            stage="processing_subdocuments",
+            message=f"Processing {len(subdocs)} sub-documents...",
+            ingestion_mode=ingestion_mode,
+        )
 
         # Step 2: Process each sub-document
         total_chunks = 0
         subdoc_count = 0
 
-        embedder = HuggingFaceEmbedder(
-            endpoint_url=os.getenv("EMBEDDING_MODEL_URL", "Qwen/Qwen3-Embedding-8B"),
-            token=os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN", ""),
-        )
-        builder = DocumentIndexBuilder(embedder, DATA_DIR)
+        builder = None
+        if ingestion_strategy.build_document_indexes:
+            embedder = HuggingFaceEmbedder(
+                endpoint_url=os.getenv(
+                    "EMBEDDING_MODEL_URL", "Qwen/Qwen3-Embedding-8B"
+                ),
+                token=os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN", ""),
+            )
+            builder = DocumentIndexBuilder(embedder, DATA_DIR)
 
         for breadcrumb_key, pages in subdocs.items():
             subdoc_count += 1
@@ -631,12 +706,18 @@ def process_document_with_subdocuments(
                 f"Job {job_id}: Processing sub-document '{breadcrumb_key}' ({len(pages)} pages)"
             )
 
-            processing_status[job_id] = {
-                "status": "processing",
-                "progress": progress,
-                "stage": "processing_subdocuments",
-                "message": f"Processing sub-document {subdoc_count}/{len(subdocs)}: '{breadcrumb_key}'",
-            }
+            subdoc_stage_start = time.time()
+            _upload_progress.set(
+                job_id,
+                status="processing",
+                progress=progress,
+                stage="processing_subdocuments",
+                message=(
+                    f"Processing sub-document {subdoc_count}/{len(subdocs)}: "
+                    f"'{breadcrumb_key}' ({_upload_progress.elapsed_message(start_time)})"
+                ),
+                ingestion_mode=ingestion_mode,
+            )
 
             # Create sub-document record
             subdoc = SubDocument(
@@ -689,36 +770,53 @@ def process_document_with_subdocuments(
 
             total_chunks += len(chunks)
 
-            # Build indexes for this sub-document
-            try:
-                # Get account_id and collection_id for organized storage
-                account_id = (
-                    document.collection.account.account_id
-                    if document.collection.account
-                    else None
+            # Build indexes for this sub-document unless upload is DB-only.
+            if ingestion_strategy.build_document_indexes and builder is not None:
+                index_stage_start = time.time()
+                try:
+                    # Get account_id and collection_id for organized storage
+                    account_id = (
+                        document.collection.account.account_id
+                        if document.collection.account
+                        else None
+                    )
+                    collection_id = document.collection.collection_id
+
+                    index_paths = builder.build(
+                        chunks,
+                        job_id=f"{job_id}_subdoc_{subdoc.id}",
+                        account_id=account_id,
+                        collection_id=collection_id,
+                    )
+
+                    # Update sub-document with index paths
+                    subdoc.faiss_index_path = index_paths.faiss
+                    subdoc.bm25_index_path = index_paths.bm25
+
+                    logger.info(f"Job {job_id}: Built indexes for '{breadcrumb_key}'")
+                    logger.debug(f"  FAISS: {index_paths.faiss}")
+                    logger.debug(f"  BM25: {index_paths.bm25}")
+
+                except Exception as e:
+                    logger.error(
+                        f"Job {job_id}: Failed to build indexes for '{breadcrumb_key}': {e}"
+                    )
+                    # Continue without indexes
+                finally:
+                    _upload_progress.log_stage(
+                        job_id,
+                        "subdocument_indexing",
+                        index_stage_start,
+                        subdocument=subdoc_count,
+                        chunks=len(chunks),
+                        ingestion_mode=ingestion_mode,
+                    )
+            else:
+                logger.info(
+                    "Job %s: Skipping indexes for sub-document '%s' because ingestion_mode=fast",
+                    job_id,
+                    breadcrumb_key,
                 )
-                collection_id = document.collection.collection_id
-
-                index_paths = builder.build(
-                    chunks,
-                    job_id=f"{job_id}_subdoc_{subdoc.id}",
-                    account_id=account_id,
-                    collection_id=collection_id,
-                )
-
-                # Update sub-document with index paths
-                subdoc.faiss_index_path = index_paths.faiss
-                subdoc.bm25_index_path = index_paths.bm25
-
-                logger.info(f"Job {job_id}: Built indexes for '{breadcrumb_key}'")
-                logger.debug(f"  FAISS: {index_paths.faiss}")
-                logger.debug(f"  BM25: {index_paths.bm25}")
-
-            except Exception as e:
-                logger.error(
-                    f"Job {job_id}: Failed to build indexes for '{breadcrumb_key}': {e}"
-                )
-                # Continue without indexes
 
             # Save chunks linked to sub-document
             subdoc_link_stats = {
@@ -833,9 +931,31 @@ def process_document_with_subdocuments(
                         )
 
             db.commit()
+            _upload_progress.log_stage(
+                job_id,
+                "subdocument_processing",
+                subdoc_stage_start,
+                subdocument=subdoc_count,
+                chunks=len(chunks),
+                ingestion_mode=ingestion_mode,
+            )
             logger.info(f"Job {job_id}: Completed processing '{breadcrumb_key}'")
 
         # Step 3: Create main document LibraryCard
+        document_card_stage_start = time.time()
+        _upload_progress.set(
+            job_id,
+            status="processing",
+            progress=83,
+            stage="document_card",
+            message=(
+                f"Creating document library card after {len(subdocs)} sub-documents "
+                f"and {total_chunks} chunks ({_upload_progress.elapsed_message(start_time)})."
+            ),
+            subdocument_count=len(subdocs),
+            chunk_count=total_chunks,
+            ingestion_mode=ingestion_mode,
+        )
         logger.info(f"Job {job_id}: Creating main document LibraryCard")
 
         subdoc_summary = {key: len(pages) for key, pages in subdocs.items()}
@@ -867,27 +987,83 @@ def process_document_with_subdocuments(
         document.duration = duration
 
         db.commit()
+        _upload_progress.log_stage(
+            job_id,
+            "document_card",
+            document_card_stage_start,
+            subdocuments=len(subdocs),
+            chunks=total_chunks,
+            ingestion_mode=ingestion_mode,
+        )
 
-        # Step 4: Update collection library card
-        logger.info(f"Job {job_id}: Updating collection library card")
-        try:
-            update_collection_library_card(document.id, db)
-        except Exception as e:
-            logger.error(f"Job {job_id}: Failed to update collection library card: {e}")
+        if ingestion_strategy.update_collection_summary:
+            # Step 4: Update collection library card
+            summary_stage_start = time.time()
+            _upload_progress.set(
+                job_id,
+                status="processing",
+                progress=86,
+                stage="collection_summary",
+                message=(
+                    f"Updating collection summary ({_upload_progress.elapsed_message(start_time)})."
+                ),
+                subdocument_count=len(subdocs),
+                chunk_count=total_chunks,
+                duration=duration,
+                ingestion_mode=ingestion_mode,
+            )
+            logger.info(f"Job {job_id}: Updating collection library card")
+            try:
+                update_collection_library_card(document.id, db)
+            except Exception as e:
+                logger.error(
+                    f"Job {job_id}: Failed to update collection library card: {e}"
+                )
+            finally:
+                _upload_progress.log_stage(
+                    job_id,
+                    "collection_summary",
+                    summary_stage_start,
+                    ingestion_mode=ingestion_mode,
+                )
 
-        # Step 5: Rebuild collection aggregate index
-        _rebuild_collection_aggregate_index(db, document, job_id)
+        if ingestion_strategy.rebuild_aggregate_indexes:
+            # Step 5: Rebuild collection aggregate index
+            _rebuild_collection_aggregate_index(db, document, job_id, start_time)
+        else:
+            _upload_progress.set(
+                job_id,
+                status="processing",
+                progress=98,
+                stage="finalizing",
+                message=(
+                    f"Skipping collection summary and aggregate maintenance for ingestion_mode={ingestion_mode}; "
+                    "finalizing upload."
+                ),
+                subdocument_count=len(subdocs),
+                chunk_count=total_chunks,
+                duration=duration,
+                ingestion_mode=ingestion_mode,
+                maintenance_deferred=True,
+            )
+            logger.info(
+                "Job %s: Deferred collection summary and aggregate index maintenance for ingestion_mode=%s",
+                job_id,
+                ingestion_mode,
+            )
 
         # Update progress: Completed
-        processing_status[job_id] = {
-            "status": "completed",
-            "progress": 100,
-            "stage": "completed",
-            "message": f"Russian Doll processing completed. Created {len(subdocs)} sub-documents with {total_chunks} total chunks in {duration:.2f}s.",
-            "subdocument_count": len(subdocs),
-            "chunk_count": total_chunks,
-            "duration": duration,
-        }
+        _upload_progress.set(
+            job_id,
+            status="completed",
+            progress=100,
+            stage="completed",
+            message=f"Russian Doll processing completed. Created {len(subdocs)} sub-documents with {total_chunks} total chunks in {duration:.2f}s.",
+            subdocument_count=len(subdocs),
+            chunk_count=total_chunks,
+            duration=duration,
+            ingestion_mode=ingestion_mode,
+        )
         logger.info(
             f"Job {job_id}: SUCCESS - {len(subdocs)} sub-documents, {total_chunks} chunks in {duration:.2f}s"
         )
@@ -1088,8 +1264,9 @@ def _rebuild_collection_aggregate_index(
     db: Session,
     document: Document,
     job_id: str,
+    upload_start_time: float | None = None,
 ) -> None:
-    """Rebuild the collection aggregate index after a document is completed."""
+    """Rebuild collection/account aggregate indexes after a full ingestion."""
     global _embedder_singleton
     try:
         from doc_search.infrastructure.repositories.indexing.aggregate_index_builder import (
@@ -1109,11 +1286,40 @@ def _rebuild_collection_aggregate_index(
             _embedder_singleton = create_embedder()
 
         builder = AggregateIndexBuilder(_embedder_singleton, DATA_DIR)
+
+        completed_collection_chunks = (
+            db.query(Chunk)
+            .join(Document, Chunk.document_id == Document.id)
+            .filter(
+                Document.collection_id == collection.id,
+                Document.status == "completed",
+            )
+            .count()
+        )
+        collection_stage_start = time.time()
+        _upload_progress.set(
+            job_id,
+            status="processing",
+            progress=90,
+            stage="collection_aggregate_index",
+            message=(
+                f"Rebuilding collection aggregate index: {completed_collection_chunks} chunks "
+                f"from collection '{collection.name}' "
+                f"({_upload_progress.elapsed_message(upload_start_time or collection_stage_start)})."
+            ),
+        )
         builder.build(
             db,
             collection_id=collection.id,
             account_id=account_guid,
             collection_guid=collection.collection_id,
+        )
+        _upload_progress.log_stage(
+            job_id,
+            "aggregate_collection",
+            collection_stage_start,
+            chunks=completed_collection_chunks,
+            collection_id=collection.collection_id,
         )
         logger.info(
             "Job %s: Collection aggregate index rebuilt for collection '%s'",
@@ -1122,21 +1328,72 @@ def _rebuild_collection_aggregate_index(
         )
 
         if account:
+            from doc_search.infrastructure.data.tables.collection import (
+                Collection as CollectionTable,
+            )
+
+            completed_account_chunks = (
+                db.query(Chunk)
+                .join(Document, Chunk.document_id == Document.id)
+                .join(CollectionTable, Document.collection_id == CollectionTable.id)
+                .filter(
+                    CollectionTable.account_id == account.id,
+                    Document.status == "completed",
+                )
+                .count()
+            )
+            account_stage_start = time.time()
+            _upload_progress.set(
+                job_id,
+                status="processing",
+                progress=95,
+                stage="account_aggregate_index",
+                message=(
+                    f"Rebuilding account aggregate index: {completed_account_chunks} chunks "
+                    f"for account '{account.name}' "
+                    f"({_upload_progress.elapsed_message(upload_start_time or account_stage_start)})."
+                ),
+            )
             builder.build_account(
                 db,
                 account_id=account.id,
                 account_guid=account.account_id,
+            )
+            _upload_progress.log_stage(
+                job_id,
+                "aggregate_account",
+                account_stage_start,
+                chunks=completed_account_chunks,
+                account_id=account.account_id,
             )
             logger.info(
                 "Job %s: Account aggregate index rebuilt for account '%s'",
                 job_id,
                 account.name,
             )
+
+        _upload_progress.set(
+            job_id,
+            status="processing",
+            progress=98,
+            stage="finalizing",
+            message="Aggregate maintenance finished; finalizing upload.",
+        )
     except Exception as exc:
         logger.error(
             "Job %s: Failed to rebuild aggregate index: %s",
             job_id,
             exc,
+        )
+        _upload_progress.set(
+            job_id,
+            status="processing",
+            progress=98,
+            stage="finalizing",
+            message=(
+                "Aggregate maintenance failed but document indexing is complete; "
+                "finalizing upload."
+            ),
         )
 
 
@@ -1150,4 +1407,4 @@ def get_processing_status(job_id: str) -> dict:
     Returns:
         Dictionary with status information
     """
-    return processing_status.get(job_id)
+    return _upload_progress.get(job_id)
