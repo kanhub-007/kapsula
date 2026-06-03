@@ -8,12 +8,10 @@ from doc_search.infrastructure.data import (
     Document,
     DocumentStructure,
     Chunk,
-    Collection,
 )
 from ._shared import (
     _get_db,
     _resolve_collection,
-    _upload_markdown_file,
 )
 
 
@@ -37,7 +35,26 @@ def register_document_tools(mcp: FastMCP):
         max_tokens: int = 512,
         ingestion_mode: str = "indexed",
     ) -> str:
-        return _upload_markdown_file(file_path, collection_id, max_tokens, ingestion_mode)
+        from doc_search.core.application.use_cases.upload_document import (
+            UploadDocumentUseCase,
+        )
+
+        db = _get_db()
+        try:
+            use_case = UploadDocumentUseCase()
+            result = use_case.execute(db, file_path, collection_id, max_tokens, ingestion_mode)
+        except ValueError as exc:
+            return f"Error: {exc}"
+        finally:
+            db.close()
+
+        return (
+            f"Uploaded: {result.filename}\n"
+            f"  Collection: {result.collection_name}\n"
+            f"  job_id: {result.job_id}\n"
+            f"  Status: {result.status}\n"
+            f"  Ingestion mode: {result.ingestion_mode}"
+        )
 
     @mcp.tool(
         name="delete_document",
@@ -62,20 +79,6 @@ def register_document_tools(mcp: FastMCP):
         finally:
             db.close()
 
-        rebuild_lines = []
-        if result.rebuild.get("collection_faiss"):
-            rebuild_lines.append(
-                f"Collection aggregate: faiss=rebuilt, "
-                f"bm25={'rebuilt' if result.rebuild.get('collection_bm25') else 'empty'}"
-            )
-        if result.rebuild.get("account_faiss"):
-            rebuild_lines.append(
-                f"Account aggregate: faiss=rebuilt, "
-                f"bm25={'rebuilt' if result.rebuild.get('account_bm25') else 'empty'}"
-            )
-        if result.error:
-            rebuild_lines.append(f"Aggregate rebuild failed: {result.error}")
-
         msg = (
             f"Document deleted: {result.filename}\n"
             f"  job_id: {result.job_id}\n"
@@ -83,8 +86,8 @@ def register_document_tools(mcp: FastMCP):
             f"  Chunks removed: {result.chunks_deleted}\n"
             f"  State: archived (soft delete)"
         )
-        if rebuild_lines:
-            msg += "\n  " + "\n  ".join(rebuild_lines)
+        if result.rebuild_lines:
+            msg += "\n  " + "\n  ".join(result.rebuild_lines)
         return msg
 
     @mcp.tool(

@@ -1,9 +1,10 @@
 """Delete document use case — archives document, removes chunks, rebuilds indexes."""
 
-from dataclasses import dataclass
-
 from sqlalchemy.orm import Session
 
+from doc_search.core.application.dto.delete_document_result import (
+    DeleteDocumentResult,
+)
 from doc_search.core.domain.interfaces.index_manager import IndexManager
 from doc_search.infrastructure.data import (
     Document,
@@ -16,18 +17,6 @@ from doc_search.infrastructure.data import (
 from doc_search.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class DeleteDocumentResult:
-    """Result of a document deletion."""
-
-    job_id: str
-    filename: str
-    collection_name: str
-    chunks_deleted: int
-    rebuild: dict[str, str | None]
-    error: str | None = None
 
 
 class DeleteDocumentUseCase:

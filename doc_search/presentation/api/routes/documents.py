@@ -408,22 +408,10 @@ async def delete_document(job_id: str, db: Session = Depends(get_db)):
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    rebuild_msgs = []
-    if result.rebuild.get("collection_faiss"):
-        rebuild_msgs.append(
-            f"Collection aggregate rebuilt: faiss=yes, bm25={'yes' if result.rebuild.get('collection_bm25') else 'no'}"
-        )
-    if result.rebuild.get("account_faiss"):
-        rebuild_msgs.append(
-            f"Account aggregate rebuilt: faiss=yes, bm25={'yes' if result.rebuild.get('account_bm25') else 'no'}"
-        )
-    if result.error:
-        rebuild_msgs.append(f"Aggregate rebuild failed: {result.error}")
-
     return {
         "job_id": result.job_id,
         "filename": result.filename,
         "status": "archived",
         "chunks_deleted": result.chunks_deleted,
-        "rebuild": rebuild_msgs,
+        "rebuild": result.rebuild_lines,
     }

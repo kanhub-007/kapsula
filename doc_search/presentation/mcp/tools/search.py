@@ -22,6 +22,8 @@ from ._shared import (
     _get_reranker,
     _get_multi_index_searcher,
     _get_intelligent_searcher,
+    _resolve_collection,
+    _get_search_job_manager,
 )
 
 
@@ -44,7 +46,6 @@ async def _run_search_documents_text(
     db = _get_db()
     try:
         if collection_id:
-            from ._shared import _resolve_collection
             col = _resolve_collection(db, collection_id)
             if not col:
                 return f"Collection not found: {collection_id}"
@@ -202,11 +203,44 @@ async def _run_intelligent_collection_search(
 
 
 def register_search_tools(mcp: FastMCP):
-    from doc_search.presentation.mcp.search_jobs import SearchJob, SearchJobManager
+    from doc_search.presentation.mcp.search_jobs import SearchJob
     from doc_search.infrastructure.logging_config import get_logger
 
     logger = get_logger(__name__)
-    _search_job_manager = SearchJobManager()
+
+    async def _execute_search_job(job: SearchJob) -> None:
+        manager = _get_search_job_manager()
+        manager.update(job, status="running", progress="Search running")
+        try:
+            result = await _run_search_documents_text(**job.params)
+            manager.update(job, status="completed", progress="Search completed", result=result)
+        except asyncio.CancelledError:
+            manager.update(job, status="cancelled", progress="Search cancelled")
+            raise
+        except Exception as exc:
+            logger.error("Background search job failed: %s", exc, exc_info=True)
+            manager.update(job, status="failed", progress="Search failed", error=str(exc))
+
+    async def _execute_intelligent_search_job(job: SearchJob) -> None:
+        manager = _get_search_job_manager()
+        manager.update(job, status="running", progress="Intelligent search running")
+        try:
+            result = await _run_intelligent_collection_search(
+                query=job.params["query"],
+                top_k=job.params.get("top_k", 10),
+                context_mode=job.params.get("context_mode", "none"),
+                account_id=job.params.get("account_id"),
+                enable_planning=job.params.get("enable_planning", True),
+                rerank=job.params.get("rerank", False),
+                node_type_filter=job.params.get("node_type_filter"),
+            )
+            manager.update(job, status="completed", progress="Intelligent search completed", result=result)
+        except asyncio.CancelledError:
+            manager.update(job, status="cancelled", progress="Intelligent search cancelled")
+            raise
+        except Exception as exc:
+            logger.error("Background intelligent search job failed: %s", exc, exc_info=True)
+            manager.update(job, status="failed", progress="Intelligent search failed", error=str(exc))
 
     @mcp.tool(
         name="search_documents",
@@ -268,7 +302,7 @@ def register_search_tools(mcp: FastMCP):
         rerank: bool = False,
         node_type_filter: str | None = None,
     ) -> str:
-        job = _search_job_manager.start(
+        job = _get_search_job_manager().start(
             params={
                 "query": query,
                 "top_k": top_k,
@@ -293,7 +327,7 @@ def register_search_tools(mcp: FastMCP):
         description="Get status and progress for a background search job.",
     )
     def get_search_progress(search_job_id: str) -> str:
-        job = _search_job_manager.get(search_job_id)
+        job = _get_search_job_manager().get(search_job_id)
         if not job:
             return f"Search job not found: {search_job_id}"
         return (
@@ -349,7 +383,7 @@ def register_search_tools(mcp: FastMCP):
         rerank: bool = False,
         node_type_filter: str | None = None,
     ) -> str:
-        job = _search_job_manager.start(
+        job = _get_search_job_manager().start(
             params={
                 "query": query,
                 "top_k": top_k,
@@ -374,7 +408,7 @@ def register_search_tools(mcp: FastMCP):
         description="Get status and progress for a background intelligent search job.",
     )
     def get_intelligent_search_progress(search_job_id: str) -> str:
-        job = _search_job_manager.get(search_job_id)
+        job = _get_search_job_manager().get(search_job_id)
         if not job:
             return f"Search job not found: {search_job_id}"
         return (
@@ -646,57 +680,3 @@ def register_search_tools(mcp: FastMCP):
             return "\n".join(parts)
         finally:
             db.close()
-
-
-# ── background job runners (referenced by manager) ──────────
-
-
-async def _execute_search_job(job):
-    from doc_search.presentation.mcp.search_jobs import SearchJob
-    manager = _get_search_job_manager()
-    manager.update(job, status="running", progress="Search running")
-    try:
-        result = await _run_search_documents_text(**job.params)
-        manager.update(job, status="completed", progress="Search completed", result=result)
-    except asyncio.CancelledError:
-        manager.update(job, status="cancelled", progress="Search cancelled")
-        raise
-    except Exception as exc:
-        from doc_search.infrastructure.logging_config import get_logger
-        get_logger(__name__).error("Background search job failed: %s", exc, exc_info=True)
-        manager.update(job, status="failed", progress="Search failed", error=str(exc))
-
-
-async def _execute_intelligent_search_job(job):
-    manager = _get_search_job_manager()
-    manager.update(job, status="running", progress="Intelligent search running")
-    try:
-        result = await _run_intelligent_collection_search(
-            query=job.params["query"],
-            top_k=job.params.get("top_k", 10),
-            context_mode=job.params.get("context_mode", "none"),
-            account_id=job.params.get("account_id"),
-            enable_planning=job.params.get("enable_planning", True),
-            rerank=job.params.get("rerank", False),
-            node_type_filter=job.params.get("node_type_filter"),
-        )
-        manager.update(job, status="completed", progress="Intelligent search completed", result=result)
-    except asyncio.CancelledError:
-        manager.update(job, status="cancelled", progress="Intelligent search cancelled")
-        raise
-    except Exception as exc:
-        from doc_search.infrastructure.logging_config import get_logger
-        get_logger(__name__).error("Background intelligent search job failed: %s", exc, exc_info=True)
-        manager.update(job, status="failed", progress="Intelligent search failed", error=str(exc))
-
-
-# Module-level singleton for manager (reused across register_search_tools calls)
-_search_manager_instance = None
-
-
-def _get_search_job_manager():
-    global _search_manager_instance
-    if _search_manager_instance is None:
-        from doc_search.presentation.mcp.search_jobs import SearchJobManager
-        _search_manager_instance = SearchJobManager()
-    return _search_manager_instance

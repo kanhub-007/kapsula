@@ -1,15 +1,11 @@
 """Shared helpers and cached singletons for MCP tools."""
 
 import os
-import uuid
-import threading
-from pathlib import Path
 
 from doc_search.infrastructure.data import (
     SessionLocal,
     Collection,
     Account,
-    Document,
 )
 from doc_search.infrastructure.logging_config import get_logger
 
@@ -101,95 +97,15 @@ def _get_intelligent_searcher():
     return _cached("intelligent_searcher", _create)
 
 
+def _get_search_job_manager():
+    def _create():
+        from doc_search.presentation.mcp.search_jobs import SearchJobManager
+        return SearchJobManager()
+    return _cached("search_job_manager", _create)
+
+
 def _parse_node_type_filter(node_type_filter: str | None) -> list[str] | None:
     if not node_type_filter:
         return None
     parsed = [item.strip() for item in node_type_filter.split(",") if item.strip()]
     return parsed or None
-
-
-# ── upload helper ─────────────────────────────────────────
-
-def _upload_markdown_file(
-    file_path: str,
-    collection_id: str,
-    max_tokens: int = 512,
-    ingestion_mode: str = "indexed",
-) -> str:
-    """Upload a markdown file to a collection. Shared by API and MCP tools."""
-    from doc_search.core.application.dto.upload_ingestion_mode import (
-        UploadIngestionMode,
-    )
-
-    try:
-        ingestion_mode = UploadIngestionMode.normalize(ingestion_mode)
-    except ValueError as exc:
-        return f"Error: {exc}"
-
-    p = Path(file_path)
-    if not p.exists():
-        return f"Error: file not found — {file_path}"
-    if p.suffix.lower() != ".md":
-        return f"Error: only .md files accepted — got {p.suffix}"
-
-    db = _get_db()
-    try:
-        col = _resolve_collection(db, collection_id)
-        if not col:
-            return f"Error: collection not found — {collection_id}"
-
-        content = p.read_text(encoding="utf-8")
-        job_id = str(uuid.uuid4())
-
-        doc = Document(
-            job_id=job_id,
-            collection_id=col.id,
-            filename=p.name,
-            size=len(content.encode("utf-8")),
-            ip_address="127.0.0.1",
-            content=content,
-            status="processing",
-        )
-        db.add(doc)
-        db.commit()
-        db.refresh(doc)
-
-        from doc_search.presentation.api.tasks import (
-            process_document_with_subdocuments,
-            processing_status,
-        )
-
-        processing_status[job_id] = {
-            "status": "processing",
-            "progress": 0,
-            "stage": "queued",
-            "message": f"Document queued for {ingestion_mode} ingestion...",
-            "ingestion_mode": ingestion_mode,
-        }
-        from doc_search.presentation.upload.upload_job_manager import (
-            UploadJobManager,
-        )
-
-        UploadJobManager().create(
-            job_id,
-            filename=p.name,
-            collection_id=col.id,
-            collection_name=col.name,
-            ingestion_mode=ingestion_mode,
-        )
-
-        threading.Thread(
-            target=process_document_with_subdocuments,
-            args=(job_id, content, max_tokens, SessionLocal(), ingestion_mode),
-            daemon=True,
-        ).start()
-
-        return (
-            f"Uploaded: {p.name}\n"
-            f"  Collection: {col.name}\n"
-            f"  job_id: {job_id}\n"
-            f"  Status: processing\n"
-            f"  Ingestion mode: {ingestion_mode}"
-        )
-    finally:
-        db.close()

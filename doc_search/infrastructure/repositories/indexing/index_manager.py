@@ -22,7 +22,6 @@ class FileSystemIndexManager(IndexManager):
     """Manages index files on the local filesystem."""
 
     def __init__(self, embedder: Embedder, data_dir: str):
-        self._embedder = embedder
         self._data_dir = data_dir
         self._builder = AggregateIndexBuilder(embedder, data_dir)
 
