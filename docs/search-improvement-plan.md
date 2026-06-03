@@ -922,26 +922,26 @@ Then add confidence scoring and quotas to improve result quality.
 
 ## Phase 5
 
-- [ ] Preserve collection routing.
-- [ ] Add batched subdocument selector.
-- [ ] Add safe fallback behavior.
+- [x] Preserve collection routing.
+- [x] Add batched subdocument selector.
+- [x] Add safe fallback behavior.
 
 ## Phase 6
 
-- [ ] Add metadata preselector.
-- [ ] Rank subdocument candidates using metadata BM25.
-- [ ] Limit LLM candidate prompt size.
+- [x] Add metadata preselector.
+- [x] Rank subdocument candidates using metadata BM25.
+- [x] Limit LLM candidate prompt size.
 
 ## Phase 7
 
-- [ ] Return route confidence from selectors.
-- [ ] Attach confidence metadata to results.
-- [ ] Apply route-confidence weighted scoring.
+- [x] Return route confidence from selectors.
+- [x] Attach confidence metadata to results.
+- [x] Apply route-confidence weighted scoring.
 
 ## Phase 8
 
-- [ ] Add per-source quota logic.
-- [ ] Tune collection/document/subdocument limits.
+- [x] Add per-source quota logic.
+- [x] Tune collection/document/subdocument limits.
 
 ## Phase 9
 
@@ -951,9 +951,9 @@ Then add confidence scoring and quotas to improve result quality.
 
 ## Phase 10
 
-- [ ] Add `routing_mode` to API DTOs/routes.
-- [ ] Add `routing_mode` to MCP tools.
-- [ ] Implement `llm`, `fast`, and `auto` behavior.
+- [x] Add `routing_mode` to API DTOs/routes.
+- [x] Add `routing_mode` to MCP tools.
+- [x] Implement `llm`, `fast`, and `auto` behavior.
 
 ## Phase 11
 

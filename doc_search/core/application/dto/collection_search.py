@@ -17,6 +17,8 @@ class CollectionSearch:
     per_document_multiplier: int = 2
     node_type_filter: list[str] | None = None
     routing_mode: str = "auto"
+    max_subdocument_candidates_for_llm: int = 30
+    min_subdocument_candidates: int = 5
 
     @property
     def scope(self) -> SearchScope:

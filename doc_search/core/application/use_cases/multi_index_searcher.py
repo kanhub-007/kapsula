@@ -15,7 +15,19 @@ from doc_search.core.application.dto.sub_document_search import SubDocumentSearc
 from doc_search.core.application.use_cases.context_expansion import (
     expand_context_with_parents,
 )
-from doc_search.core.application.use_cases.selectors.routing_strategy import (
+from doc_search.core.application.use_cases.ranking.route_confidence_scorer import (
+    RouteConfidenceScorer,
+)
+from doc_search.core.application.use_cases.ranking.source_quota_policy import (
+    SourceQuotaPolicy,
+)
+from doc_search.core.application.use_cases.selectors.batched_sub_document_selector import (
+    BatchedSubDocumentSelector,
+)
+from doc_search.core.application.use_cases.selectors.metadata_preselector import (
+    MetadataPreselector,
+)
+from doc_search.core.application.use_cases.selectors.collection_routing_strategy import (
     make_collection_routing_strategy,
 )
 from doc_search.core.application.use_cases.selectors.sub_document_selector import (
@@ -27,6 +39,10 @@ from doc_search.core.domain.interfaces.reranker import Reranker
 from doc_search.core.domain.interfaces.search_data_access import SearchDataAccess
 
 logger = logging.getLogger(__name__)
+
+
+_quota_policy = SourceQuotaPolicy(per_subdocument_limit=3)
+_route_scorer = RouteConfidenceScorer()
 
 
 class MultiIndexSearcher:
@@ -180,42 +196,20 @@ class MultiIndexSearcher:
                 docs = self._data.get_completed_documents(cd["id"])
                 if not docs:
                     return []
-
-                async def _search_doc(doc: Any) -> list:
-                    async with document_semaphore:
-                        doc_started = perf_counter()
-                        doc_results = await self._search_document(
-                            doc,
-                            search.query,
-                            search.top_k * search.per_document_multiplier,
-                            search.hf_api_token,
-                            search.node_type_filter,
-                        )
-                        for r in doc_results:
-                            r.update(
-                                collection_id=cd["id"],
-                                collection_name=cd["name"],
-                                document_id=doc.id,
-                                document_filename=doc.filename,
-                            )
-                        logger.info(
-                            "Document search completed in %.3fs: collection='%s' document='%s' results=%s",
-                            perf_counter() - doc_started,
-                            cd["name"],
-                            doc.filename,
-                            len(doc_results),
-                        )
-                        return doc_results
-
-                all_doc = await _gather([_search_doc(doc) for doc in docs])
+                collection_results = await self._search_collection_documents(
+                    collection=cd,
+                    docs=docs,
+                    search=search,
+                    document_semaphore=document_semaphore,
+                )
                 logger.info(
                     "Collection document searches completed: collection='%s' documents=%s candidates=%s concurrency=%s",
                     cd["name"],
                     len(docs),
-                    len(all_doc),
+                    len(collection_results),
                     document_concurrency,
                 )
-                return all_doc
+                return collection_results
             except Exception as e:
                 logger.error(f"Failed to search collection '{cd['name']}': {e}")
                 return []
@@ -230,12 +224,17 @@ class MultiIndexSearcher:
         if not all_results:
             return []
 
+        _route_scorer.compute_weights(all_results)
         all_results.sort(key=lambda r: r.get("score", 0), reverse=True)
+        all_results = _quota_policy.apply(all_results, search.top_k)
 
         if search.rerank:
             all_results = await self._reranker.rerank(
                 search.query, all_results, len(all_results)
             )
+            _route_scorer.apply_to_scores(all_results)
+            all_results.sort(key=lambda r: r.get("score", 0), reverse=True)
+            all_results = _quota_policy.apply(all_results, search.top_k)
 
         top = all_results[: search.top_k]
         if search.context_mode != "none":
@@ -247,6 +246,200 @@ class MultiIndexSearcher:
             len(top),
         )
         return top
+
+    async def _search_collection_documents(
+        self,
+        collection: dict,
+        docs: list[Any],
+        search: CollectionSearch,
+        document_semaphore: asyncio.Semaphore,
+    ) -> list:
+        subdoc_candidates, single_index_docs = self._collect_collection_search_targets(
+            collection, docs
+        )
+        tasks = []
+        if subdoc_candidates:
+            selected_subdocs = self._select_batched_subdocuments(
+                search, subdoc_candidates
+            )
+            tasks.extend(
+                self._search_subdoc_candidate(
+                    candidate,
+                    search,
+                    document_semaphore,
+                )
+                for candidate in selected_subdocs
+            )
+        tasks.extend(
+            self._search_single_document_in_collection(
+                collection,
+                doc,
+                search,
+                document_semaphore,
+            )
+            for doc in single_index_docs
+        )
+        return await _gather(tasks)
+
+    def _collect_collection_search_targets(
+        self, collection: dict, docs: list[Any]
+    ) -> tuple[list[dict], list[Any]]:
+        subdoc_candidates = []
+        single_index_docs = []
+        for doc in docs:
+            subdocs = self._data.get_sub_documents(doc.id)
+            if subdocs:
+                for subdoc_meta in self._build_subdoc_metadata(subdocs):
+                    subdoc_meta.update(
+                        collection_id=collection["id"],
+                        collection_name=collection["name"],
+                        collection_route_confidence=collection.get(
+                            "collection_route_confidence", 1.0
+                        ),
+                        document_id=doc.id,
+                        document_filename=doc.filename,
+                    )
+                    subdoc_candidates.append(subdoc_meta)
+            elif doc.faiss_index_path and doc.bm25_index_path:
+                single_index_docs.append(doc)
+        return subdoc_candidates, single_index_docs
+
+    def _select_batched_subdocuments(
+        self, search: CollectionSearch, candidates: list[dict]
+    ) -> list[dict]:
+        preselector = MetadataPreselector(
+            max_candidates=search.max_subdocument_candidates_for_llm,
+            min_candidates=search.min_subdocument_candidates,
+        )
+        preselected = preselector.select(search.query, candidates)
+        routing_mode = (search.routing_mode or "auto").lower()
+        if routing_mode == "fast":
+            selected = preselected
+        else:
+            selector = BatchedSubDocumentSelector(self._chat_client)
+            decisions = selector.select(search.query, preselected)
+            selected = []
+            for candidate in preselected:
+                decision = decisions.get(candidate["id"])
+                if not decision:
+                    continue
+                routed = dict(candidate)
+                routed["subdocument_route_confidence"] = decision.confidence
+                routed["subdocument_route_reason"] = decision.reason
+                selected.append(routed)
+            if not selected:
+                selected = preselected
+
+        for candidate in selected:
+            candidate.setdefault(
+                "subdocument_route_confidence",
+                candidate.get("metadata_route_confidence", 0.7),
+            )
+        logger.info(
+            "Batched subdocument routing selected %s/%s candidates after metadata preselection %s/%s",
+            len(selected),
+            len(candidates),
+            len(preselected),
+            len(candidates),
+        )
+        return selected
+
+    async def _search_subdoc_candidate(
+        self,
+        candidate: dict,
+        search: CollectionSearch,
+        document_semaphore: asyncio.Semaphore,
+    ) -> list:
+        async with document_semaphore:
+            started = perf_counter()
+            try:
+                searcher = self._get_searcher(
+                    candidate["faiss_path"], candidate["bm25_path"]
+                )
+                results = await searcher.search(
+                    query=search.query,
+                    top_k=search.top_k * search.per_document_multiplier * 2,
+                    rerank=False,
+                    node_type_filter=search.node_type_filter,
+                    sub_document_id=candidate["id"],
+                )
+                for result in results:
+                    self._attach_route_metadata(result, candidate)
+                logger.info(
+                    "Subdocument candidate search completed in %.3fs: document='%s' subdoc='%s' results=%s",
+                    perf_counter() - started,
+                    candidate.get("document_filename", "?"),
+                    candidate.get("breadcrumb_key", "?"),
+                    len(results),
+                )
+                return results
+            except Exception as exc:
+                logger.error(
+                    "Failed to search sub-doc candidate '%s': %s",
+                    candidate.get("breadcrumb_key", "?"),
+                    exc,
+                )
+                return []
+
+    async def _search_single_document_in_collection(
+        self,
+        collection: dict,
+        doc: Any,
+        search: CollectionSearch,
+        document_semaphore: asyncio.Semaphore,
+    ) -> list:
+        async with document_semaphore:
+            started = perf_counter()
+            results = await self.search_single_index(
+                SingleIndexSearch(
+                    query=search.query,
+                    faiss_path=doc.faiss_index_path,
+                    bm25_path=doc.bm25_index_path,
+                    document_id=doc.id,
+                    top_k=search.top_k * search.per_document_multiplier,
+                    rerank=False,
+                    context_mode="none",
+                    node_type_filter=search.node_type_filter,
+                )
+            )
+            candidate = {
+                "collection_id": collection["id"],
+                "collection_name": collection["name"],
+                "collection_route_confidence": collection.get(
+                    "collection_route_confidence", 1.0
+                ),
+                "document_id": doc.id,
+                "document_filename": doc.filename,
+                "subdocument_route_confidence": 1.0,
+            }
+            for result in results:
+                self._attach_route_metadata(result, candidate)
+            logger.info(
+                "Single-index document search completed in %.3fs: collection='%s' document='%s' results=%s",
+                perf_counter() - started,
+                collection["name"],
+                doc.filename,
+                len(results),
+            )
+            return results
+
+    @staticmethod
+    def _attach_route_metadata(result: dict, candidate: dict) -> None:
+        result.update(
+            collection_id=candidate.get("collection_id"),
+            collection_name=candidate.get("collection_name"),
+            collection_route_confidence=candidate.get(
+                "collection_route_confidence", 1.0
+            ),
+            document_id=candidate.get("document_id"),
+            document_filename=candidate.get("document_filename"),
+            sub_document_id=candidate.get("id"),
+            sub_document_key=candidate.get("breadcrumb_key"),
+            subdocument_route_confidence=candidate.get(
+                "subdocument_route_confidence", 1.0
+            ),
+            metadata_route_confidence=candidate.get("metadata_route_confidence"),
+        )
 
     def _build_subdoc_metadata(self, subdocs: list[Any]) -> list[dict]:
         metadata = []
@@ -279,6 +472,7 @@ class MultiIndexSearcher:
                     "library_card_summary": summary,
                     "document_count": doc_count,
                     "document_list": doc_list,
+                    "collection_route_confidence": 1.0,
                 }
             )
         return metadata

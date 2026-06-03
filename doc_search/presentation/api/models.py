@@ -173,6 +173,10 @@ class SearchResult(BaseModel):
     document_filename: Optional[str] = (
         None  # Document filename (for collection-level search)
     )
+    retrieval_score: Optional[float] = None  # Original score before route weighting
+    collection_route_confidence: Optional[float] = None
+    subdocument_route_confidence: Optional[float] = None
+    metadata_route_confidence: Optional[float] = None
     citation: Optional[Citation] = None  # Citation information for tracing origin
 
 

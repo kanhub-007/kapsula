@@ -792,6 +792,7 @@ def register_tools(mcp: FastMCP):
         rerank: bool = False,
         context_mode: str = "none",
         node_type_filter: str | None = None,
+        routing_mode: str = "auto",
     ) -> str:
         return await _run_search_documents_text(
             query=query,
@@ -800,6 +801,7 @@ def register_tools(mcp: FastMCP):
             context_mode=context_mode,
             collection_id=collection_id,
             node_type_filter=node_type_filter,
+            routing_mode=routing_mode,
         )
 
     @mcp.tool(

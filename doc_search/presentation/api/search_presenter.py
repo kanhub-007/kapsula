@@ -42,6 +42,10 @@ def to_search_result(result: dict[str, Any], citation: Citation | None) -> Searc
         parent_hash=result.get("parent_hash"),
         collection_name=result.get("collection_name"),
         document_filename=result.get("document_filename"),
+        retrieval_score=result.get("retrieval_score"),
+        collection_route_confidence=result.get("collection_route_confidence"),
+        subdocument_route_confidence=result.get("subdocument_route_confidence"),
+        metadata_route_confidence=result.get("metadata_route_confidence"),
         citation=citation,
     )
 
