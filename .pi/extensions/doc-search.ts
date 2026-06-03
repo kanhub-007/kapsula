@@ -4,10 +4,20 @@
  * Expects the MCP server to be already running (e.g. started with
  * ``DOCSEARCH_TRANSPORT=http python -m doc_search.presentation.mcp``).
  * Discovers MCP tools and registers them as pi custom tools.
+ *
+ * Set DOCSEARCH_DEBUG=true to enable verbose request/response logging.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
+
+// ── debug toggle ──────────────────────────────────────────
+
+const DEBUG = process.env.DOCSEARCH_DEBUG === "true";
+
+function debugLog(...args: unknown[]): void {
+  if (DEBUG) console.error(...args);
+}
 
 // ── MCP JSON-RPC types ──────────────────────────────────────────
 
@@ -90,7 +100,7 @@ class McpHttpClient {
     const sid = initResponse.headers.get("mcp-session-id");
     if (sid) {
       this.sessionId = sid;
-      console.error(`doc-search: captured session ID ${sid.slice(0, 8)}…`);
+      debugLog(`doc-search: captured session ID ${sid.slice(0, 8)}…`);
     }
 
     // Drain the initialize response body to free the connection
@@ -190,7 +200,7 @@ class McpHttpClient {
         signal,
       });
 
-      console.error(
+      debugLog(
         `doc-search MCP ${method} started (timeout ${timeoutMs}ms)`
       );
 
@@ -199,7 +209,7 @@ class McpHttpClient {
           const pending = this.pending.get(id);
           if (pending) {
             const elapsed = Date.now() - pending.startedAt;
-            console.error(
+            debugLog(
               `doc-search MCP ${pending.method} completed in ${elapsed}ms`
             );
             pending.resolve(response);
@@ -283,7 +293,7 @@ class McpHttpClient {
       body: JSON.stringify(body),
     });
     if (!response.ok && response.status !== 202) {
-      console.error(
+      debugLog(
         `doc-search: notification ${method} got HTTP ${response.status}`
       );
     }
