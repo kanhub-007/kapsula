@@ -53,17 +53,49 @@ class McpHttpClient {
   private pending = new Map<number, PendingRequest>();
   private connected = false;
   private baseUrl: string;
+  private sessionId: string | null = null;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
   }
 
   async start(): Promise<void> {
-    await this.request("initialize", {
-      protocolVersion: "2024-11-05",
-      capabilities: {},
-      clientInfo: { name: "pi-doc-search", version: "1.0.0" },
+    // Send initialize directly (not via request()) so we can capture the
+    // mcp-session-id from response headers.  FastMCP 3.x streamable-http
+    // requires this header on every request after initialize.
+    const initResponse = await fetch(this.baseUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 0,
+        method: "initialize",
+        params: {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "pi-doc-search", version: "1.0.0" },
+        },
+      }),
     });
+
+    if (!initResponse.ok) {
+      throw new Error(
+        `MCP initialize failed: HTTP ${initResponse.status} ${initResponse.statusText}`
+      );
+    }
+
+    const sid = initResponse.headers.get("mcp-session-id");
+    if (sid) {
+      this.sessionId = sid;
+      console.error(`doc-search: captured session ID ${sid.slice(0, 8)}…`);
+    }
+
+    // Drain the initialize response body to free the connection
+    await initResponse.text();
+
     // MCP spec: server waits for initialized notification before processing requests
     await this.sendNotification("notifications/initialized", {});
     this.connected = true;
@@ -182,6 +214,17 @@ class McpHttpClient {
     });
   }
 
+  private requestHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+    };
+    if (this.sessionId) {
+      headers["mcp-session-id"] = this.sessionId;
+    }
+    return headers;
+  }
+
   private async sendHttp(
     id: number,
     method: string,
@@ -196,10 +239,7 @@ class McpHttpClient {
 
     const response = await fetch(this.baseUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json, text/event-stream",
-      },
+      headers: this.requestHeaders(),
       body: JSON.stringify(body),
     });
 
@@ -210,11 +250,11 @@ class McpHttpClient {
     }
 
     const text = await response.text();
-    const body = this.parseStreamableHttp(text);
-    if (!body) {
+    const sseBody = this.parseStreamableHttp(text);
+    if (!sseBody) {
       return { jsonrpc: "2.0", id, result: {} };
     }
-    return JSON.parse(body) as JsonRpcResponse;
+    return JSON.parse(sseBody) as JsonRpcResponse;
   }
 
   private parseStreamableHttp(text: string): string | null {
@@ -237,14 +277,16 @@ class McpHttpClient {
     params: Record<string, unknown>
   ): Promise<void> {
     const body = { jsonrpc: "2.0", method, params };
-    await fetch(this.baseUrl, {
+    const response = await fetch(this.baseUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json, text/event-stream",
-      },
+      headers: this.requestHeaders(),
       body: JSON.stringify(body),
     });
+    if (!response.ok && response.status !== 202) {
+      console.error(
+        `doc-search: notification ${method} got HTTP ${response.status}`
+      );
+    }
   }
 
   private timeoutFor(method: string): number {
