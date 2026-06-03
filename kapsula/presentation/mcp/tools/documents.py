@@ -24,7 +24,11 @@ def register_document_tools(mcp: FastMCP):
         name="upload_document",
         description=(
             "Upload a markdown (.md) file to a collection as a memory document. "
-            "Use well-structured markdown with H2/H3 headings — the chunker splits on headings for sub-document granularity. "
+            "Use well-structured markdown with H2/H3 headings — the chunker splits on headings, "
+            "and each heading becomes a library card for navigation and context expansion. "
+            "Without proper H2/H3 headings, the browse-before-search workflow breaks down: "
+            "get_library_cards() will have nothing to show, context expansion won't work, "
+            "and intelligent_search loses its section-level targeting. "
             "Sizing guidance: stable interconnected knowledge = medium doc (1-5 pages); "
             "frequently changing facts = small doc (1-3 paragraphs); "
             "reference tables/dosages/configs = separate small doc. "
