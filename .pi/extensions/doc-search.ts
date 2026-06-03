@@ -254,7 +254,9 @@ export default async function (pi: ExtensionAPI) {
         `doc-search: Connecting to MCP server at ${baseUrl}...`,
         "info"
       );
-      await client.start();
+      if (!client.isConnected()) {
+        await client.start();
+      }
       const tools = await client.listTools();
       ctx.ui.notify(
         `doc-search: Connected, ${tools.length} tools discovered`,
@@ -299,10 +301,11 @@ export default async function (pi: ExtensionAPI) {
         ctx.ui.notify(`doc-search: Registered tool '${tool.name}'`, "info");
       }
     } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : String(err);
       ctx.ui.notify(
-        `doc-search: Failed — ${
-          err instanceof Error ? err.message : String(err)
-        }`,
+        `doc-search: ${msg}. Is the server running? Start it with:\n` +
+          `  .venv\\Scripts\\python.exe -m doc_search.presentation.mcp`,
         "error"
       );
     }
