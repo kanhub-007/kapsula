@@ -102,9 +102,13 @@ def register_document_tools(mcp: FastMCP):
         db = _get_db()
         try:
             if collection_id:
+                from kapsula.infrastructure.data import Collection as OrmCollection
+                col = db.query(OrmCollection).filter(
+                    OrmCollection.collection_id == collection_id
+                ).first()
+                if not col:
+                    return f"Collection not found: {collection_id}"
                 docs = _doc_repo.list_by_collection(db, collection_id)
-                if docs and not any(True for _ in [docs]):
-                    pass  # list_by_collection returns empty on unknown collection
             else:
                 docs = _doc_repo.list_all(db)
             if not docs:

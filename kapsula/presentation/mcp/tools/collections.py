@@ -53,7 +53,7 @@ def register_collection_tools(mcp: FastMCP):
                 ip_address="127.0.0.1",
             )
             _collection_repo.save(db, col)
-            extra = f" (account: {account_id})" if account_id else " (no account)"
+            extra = f" (account: {acc.name})" if account_id and acc else " (no account)"
             return (
                 f"Collection created: {name}{extra}\n  collection_id: {collection_id}"
             )
