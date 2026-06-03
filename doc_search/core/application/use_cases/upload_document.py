@@ -1,17 +1,20 @@
 """Upload document use case — validates, persists, and starts background processing."""
 
 import uuid
-import threading
 from pathlib import Path
-from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from doc_search.core.application.dto.upload_document_result import (
+    UploadDocumentResult,
+)
 from doc_search.core.application.dto.upload_ingestion_mode import (
     UploadIngestionMode,
 )
+from doc_search.core.domain.interfaces.background_processor import (
+    BackgroundProcessor,
+)
 from doc_search.infrastructure.data import (
-    SessionLocal,
     Document,
     Collection,
 )
@@ -20,21 +23,12 @@ from doc_search.infrastructure.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-@dataclass
-class UploadDocumentResult:
-    """Result of an upload request."""
-
-    job_id: str
-    filename: str
-    collection_name: str
-    ingestion_mode: str
-    status: str = "processing"
-    error: str | None = None
-
-
 class UploadDocumentUseCase:
     """Validates a markdown file, persists a Document record, and starts
-    background processing via ``process_document_with_subdocuments``."""
+    background processing via a :class:`BackgroundProcessor`."""
+
+    def __init__(self, background_processor: BackgroundProcessor):
+        self._background_processor = background_processor
 
     def execute(
         self,
@@ -95,11 +89,8 @@ class UploadDocumentUseCase:
         db.commit()
         db.refresh(doc)
 
-        # Start background processing in a daemon thread
-        from doc_search.presentation.api.tasks import (
-            process_document_with_subdocuments,
-            processing_status,
-        )
+        # Start background processing via injected processor
+        from doc_search.presentation.api.tasks import processing_status
         from doc_search.presentation.upload.upload_job_manager import (
             UploadJobManager,
         )
@@ -119,11 +110,9 @@ class UploadDocumentUseCase:
             ingestion_mode=ingestion_mode,
         )
 
-        threading.Thread(
-            target=process_document_with_subdocuments,
-            args=(job_id, content, max_tokens, SessionLocal(), ingestion_mode),
-            daemon=True,
-        ).start()
+        self._background_processor.start_processing(
+            job_id, content, max_tokens, ingestion_mode
+        )
 
         logger.info(
             "Upload started: job_id=%s filename=%s collection=%s mode=%s",

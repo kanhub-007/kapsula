@@ -193,3 +193,16 @@ def create_delete_document_use_case():
     embedder = create_embedder()
     index_manager = FileSystemIndexManager(embedder, DATA_DIR)
     return DeleteDocumentUseCase(index_manager)
+
+
+def create_upload_document_use_case():
+    """Create an UploadDocumentUseCase with wired dependencies."""
+    from doc_search.infrastructure.repositories.processing.background_processor import (
+        ThreadPoolBackgroundProcessor,
+    )
+    from doc_search.core.application.use_cases.upload_document import (
+        UploadDocumentUseCase,
+    )
+
+    background_processor = ThreadPoolBackgroundProcessor()
+    return UploadDocumentUseCase(background_processor)

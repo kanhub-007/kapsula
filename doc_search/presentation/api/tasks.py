@@ -146,68 +146,10 @@ def match_header_to_parents(header: str, parent_sections: dict) -> dict:
     return parents
 
 
-def _strip_inline_formatting(text: str) -> str:
-    """Strip markdown inline formatting that unstructured removes from str(el).
-
-    The ``unstructured`` library strips these during parsing, so chunk text
-    produced by the MarkdownChunker lacks them.  When we search for chunk
-    text in the raw markdown we must strip the same formatting first.
-    """
-    import re
-
-    # Bold / italic (**bold**, __bold__, *italic*, _italic_)
-    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
-    text = re.sub(r"__(.+?)__", r"\1", text)
-    text = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"\1", text)
-    text = re.sub(r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)", r"\1", text)
-    # Inline code (`code`)
-    text = re.sub(r"`(.+?)`", r"\1", text)
-    # Strikethrough (~~text~~)
-    text = re.sub(r"~~(.+?)~~", r"\1", text)
-    # Blockquote prefix (> at line start)
-    text = re.sub(r"^> ?", "", text, flags=re.MULTILINE)
-    # Unordered list markers (- or * at line start)
-    text = re.sub(r"^(?:- |\* )(.*)$", r"\1", text, flags=re.MULTILINE)
-    # Ordered list markers (1. 2. etc at line start)
-    text = re.sub(r"^\d+\.\s+(.*)$", r"\1", text, flags=re.MULTILINE)
-
-    return text
-
-
-def _find_chunk_in_markdown(
-    search_text: str, markdown_content: str
-) -> int:
-    """Find chunk text position, with progressive fallbacks for formatting."""
-    # 1) Direct match
-    pos = markdown_content.find(search_text)
-    if pos != -1:
-        return pos
-
-    # 2) Match against formatting-stripped markdown
-    stripped_md = _strip_inline_formatting(markdown_content)
-    pos = stripped_md.find(search_text)
-    if pos == -1:
-        # 3) Progressive shortening: try shorter prefixes of the search
-        #    text (down to 30 chars) in the stripped markdown.
-        for length in range(len(search_text) - 10, 29, -5):
-            shorter = search_text[:length].strip()
-            pos = stripped_md.find(shorter)
-            if pos != -1:
-                break
-
-    if pos != -1:
-        # Map back from stripped position to raw position.
-        raw_pos = 0
-        stripped_pos = 0
-        while stripped_pos < pos and raw_pos < len(markdown_content):
-            if stripped_md[stripped_pos] == markdown_content[raw_pos]:
-                stripped_pos += 1
-                raw_pos += 1
-            else:
-                raw_pos += 1
-        return raw_pos
-
-    return -1
+from doc_search.core.domain.citation_matching import (
+    strip_inline_formatting,
+    find_chunk_in_markdown,
+)
 
 
 def add_citation_metadata_to_chunks(
@@ -244,7 +186,7 @@ def add_citation_metadata_to_chunks(
         search_text = chunk_content[:150].strip()
 
         try:
-            chunk_start_pos = _find_chunk_in_markdown(search_text, markdown_content)
+            chunk_start_pos = find_chunk_in_markdown(search_text, markdown_content)
 
             if chunk_start_pos == -1:
                 # Try without header if chunk has one
@@ -252,7 +194,7 @@ def add_citation_metadata_to_chunks(
                     parts = chunk_content.split("\n\n", 1)
                     if len(parts) > 1:
                         search_text = parts[1][:150].strip()
-                        chunk_start_pos = _find_chunk_in_markdown(
+                        chunk_start_pos = find_chunk_in_markdown(
                             search_text, markdown_content
                         )
 

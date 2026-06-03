@@ -109,14 +109,15 @@ class DeleteDocumentUseCase:
             db.query(Chunk).filter(Chunk.document_id == doc.id).delete()
         )
 
-        subdoc_page_ids = (
-            db.query(SubDocumentPage.id)
-            .join(SubDocument)
-            .filter(SubDocument.document_id == doc.id)
-            .all()
+        # Bulk-delete sub-document pages via subquery
+        from sqlalchemy import select
+        sub_doc_ids = (
+            select(SubDocument.id)
+            .where(SubDocument.document_id == doc.id)
         )
-        for (pid,) in subdoc_page_ids:
-            db.query(SubDocumentPage).filter(SubDocumentPage.id == pid).delete()
+        db.query(SubDocumentPage).filter(
+            SubDocumentPage.sub_document_id.in_(sub_doc_ids)
+        ).delete(synchronize_session=False)
 
         db.query(SubDocument).filter(SubDocument.document_id == doc.id).delete()
         db.query(LibraryCard).filter(LibraryCard.document_id == doc.id).delete()

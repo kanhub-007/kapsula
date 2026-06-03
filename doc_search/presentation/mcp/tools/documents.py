@@ -35,13 +35,11 @@ def register_document_tools(mcp: FastMCP):
         max_tokens: int = 512,
         ingestion_mode: str = "indexed",
     ) -> str:
-        from doc_search.core.application.use_cases.upload_document import (
-            UploadDocumentUseCase,
-        )
+        from doc_search.startup import create_upload_document_use_case
 
         db = _get_db()
         try:
-            use_case = UploadDocumentUseCase()
+            use_case = create_upload_document_use_case()
             result = use_case.execute(db, file_path, collection_id, max_tokens, ingestion_mode)
         except ValueError as exc:
             return f"Error: {exc}"
