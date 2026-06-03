@@ -23,3 +23,9 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Test data — temporary markdown files for upload testing
+/test-data/
+
+# Improvement plans — working documents, not code
+docs/plans/

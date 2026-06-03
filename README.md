@@ -199,9 +199,12 @@ API docs at `http://localhost:8001/docs`
 
 | Document | Covers |
 |----------|--------|
-| [Architecture](docs/ARCHITECTURE.md) | Clean architecture layers, database schema, entity relationships, project layout |
-| [Search Internals](docs/SEARCH.md) | FAISS, BM25, RRF/weighted fusion, quality filters, Library Cards, context expansion, intelligent search |
+| [Architecture](docs/ARCHITECTURE.md) | Clean architecture layers, database schema, entity relationships |
+| [Search Internals](docs/SEARCH.md) | FAISS, BM25, RRF/weighted fusion, quality filters, Library Cards, context expansion |
 | [Setup](docs/SETUP.md) | Installation, configuration, Docker, troubleshooting |
+| [Layer Guide](docs/codebase/LAYER_GUIDE.md) | Dependency rules, layer responsibilities, import conventions |
+| [Domain Entities](docs/codebase/DOMAIN_ENTITIES.md) | All 9 domain entities with field reference |
+| [Use Cases](docs/codebase/USE_CASES.md) | Use case orchestration, dependencies, return types |
 
 ---
 
@@ -210,13 +213,33 @@ API docs at `http://localhost:8001/docs`
 ```
 doc-search/
 ├── doc_search/
-│   ├── presentation/          # API + MCP routes, tools, models
-│   │   ├── api/               # FastAPI routes, background tasks, Pydantic models
-│   │   └── mcp/               # FastMCP server, tool registration, DB session
-│   ├── startup/               # Composition root, DI wiring, app factories
 │   ├── core/
-│   │   ├── domain/            # Entities, interfaces, fusion algorithms, quality filter
-│   │   └── application/       # Use cases: hybrid search, intelligent search, planning, routing, context expansion
-│   └── infrastructure/        # Concrete implementations: FAISS, BM25, embeddings, reranking, chunking, SQL data access
-└── tests/
+│   │   ├── domain/            # Pure business logic
+│   │   │   ├── entities/       # Canonical domain models (dataclasses)
+│   │   │   ├── interfaces/     # ABCs and Protocols (8 interfaces)
+│   │   │   ├── fusion/         # RRF, weighted fusion algorithms
+│   │   │   ├── citation_matching.py
+│   │   │   ├── text_processing.py
+│   │   │   └── quality_filter.py
+│   │   └── application/        # Use cases, DTOs, selectors
+│   │       ├── dto/            # Data transfer objects
+│   │       └── use_cases/      # DeleteDocument, UploadDocument, search, planning
+│   ├── infrastructure/         # Concrete implementations
+│   │   ├── data/               # ORM tables, mappers, SQL repositories
+│   │   ├── repositories/       # Embedding, indexing, retrieval, reranking, chunking, processing
+│   │   └── external/llm/       # HuggingFace chat client
+│   ├── presentation/           # API + MCP interfaces
+│   │   ├── api/                # FastAPI routes, background tasks
+│   │   └── mcp/                # FastMCP server, tool registration
+│   └── startup/                # Composition root, DI factories
+├── docs/
+│   ├── ARCHITECTURE.md         # Layer map, database schema, project layout
+│   ├── SEARCH.md               # FAISS, BM25, fusion, reranking, context
+│   ├── SETUP.md                # Installation, configuration
+│   └── codebase/               # Codebase reference docs
+│       ├── LAYER_GUIDE.md      # Dependency rules, layer responsibilities
+│       ├── DOMAIN_ENTITIES.md  # Entity reference
+│       └── USE_CASES.md        # Use case reference
+├── test-data/                  # Temp markdown files for testing (gitignored)
+└── tests/                      # Test suite
 ```

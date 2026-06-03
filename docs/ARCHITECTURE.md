@@ -23,39 +23,49 @@ Doc-Search follows **Clean Architecture** with a clear separation between domain
 ### `core/domain/` — Pure Business Logic
 
 No framework dependencies. Defines:
-- **Entities** — `Account`, `Collection`, `Document`, `SubDocument`, `SubDocumentPage`, `Chunk`, `LibraryCard`, `DocumentStructure`
-- **Interfaces (Protocols)** — `Embedder`, `Reranker`, `Retriever`, `Fusion`, `Chunker`, `ElementHandler`, `ChatClient`, `SearchDataAccess`
+- **Entities** — `Account`, `Collection`, `Document`, `SubDocument`, `SubDocumentPage`, `Chunk`, `LibraryCard`, `DocumentStructure` (pure dataclasses)
+- **Interfaces** — `Embedder`, `Reranker`, `Retriever`, `Fusion`, `Chunker`, `ElementHandler`, `ChatClient`, `SearchDataAccess`, `IndexManager`, `BackgroundProcessor`, `DocumentRepository`, `AccountRepository`, `CollectionRepository`, `ProgressTracker`, `ChunkRepository`, `SubDocumentRepository`, `LibraryCardRepository`
 - **Fusion algorithms** — `WeightedFusion`, `RRFFusion`
 - **Quality filter** — `passes_quality_filter()`
 - **Text processing** — `tokenize()`, `simple_stem()`, `is_meaningful_chunk()`
+- **Citation matching** — `strip_inline_formatting()`, `find_chunk_in_markdown()`
 
 ### `core/application/` — Use Cases
 
-Orchestrates domain objects to fulfill use cases:
+Orchestrates domain objects via interfaces:
+- `DeleteDocumentUseCase` — soft-delete → cascade cleanup → index rebuild
+- `UploadDocumentUseCase` — validate → persist → start background processing
 - `HybridSearcher` — Dense + sparse retrieval → fusion → rerank
-- `MultiIndexSearcher` — Multi-document/multi-collection aggregation with LLM routing
+- `MultiIndexSearcher` — Multi-document/collection aggregation with LLM routing
 - `IntelligentSearcher` — Query planning → parallel sub-searches → answer synthesis
 - `QueryPlanner` — LLM-driven query decomposition
 - `CollectionSummaryGenerator` — LLM summary maintenance
 - `ContextExpansion` — Library Card-based chunk expansion
 - `ResultFilter` — Node-type filtering (text/table/code)
 - **Selectors** — `CollectionSelector`, `SubDocumentSelector` (LLM routing)
-- **DTOs** — `CollectionSearch`, `SubDocumentSearch`, `SingleIndexSearch`, `IndexPaths`
+- **DTOs** — `CollectionSearch`, `DeleteDocumentResult`, `UploadDocumentResult`, `RebuildResult`, etc.
 
 ### `infrastructure/` — Concrete Implementations
 
-- **`data/`** — SQLAlchemy ORM tables (`connection.py`, `tables/*.py`), `SqlSearchDataAccess`
+- **`data/`** — ORM tables, `mappers.py` (domain↔ORM), SQL repositories (`SqlAccountRepository`, `SqlCollectionRepository`, `SqlDocumentRepository`, `SqlChunkRepository`, `SqlLibraryCardRepository`), `SqlSearchDataAccess`
 - **`repositories/retrieval/`** — `DenseRetriever` (FAISS), `SparseRetriever` (BM25Plus)
-- **`repositories/indexing/`** — `DocumentIndexBuilder` (FAISS `IndexFlatIP` + BM25Plus pickle)
-- **`repositories/embedding/`** — `HuggingFaceEmbedder` (Qwen3-Embedding-8B via InferenceClient)
-- **`repositories/reranking/`** — `LocalCrossEncoderReranker` (sentence-transformers), `HFEndpointReranker`
-- **`repositories/chunking/`** — Markdown parser, chunk pipeline, element handlers, breadcrumb parser
-- **`external/llm/`** — `HuggingFaceChatClient` (DeepSeek-V3.2-Exp via InferenceClient)
+- **`repositories/indexing/`** — `DocumentIndexBuilder`, `AggregateIndexBuilder`, `FileSystemIndexManager`
+- **`repositories/embedding/`** — `HuggingFaceEmbedder` (Qwen3-Embedding-8B)
+- **`repositories/reranking/`** — `LocalCrossEncoderReranker`, `HFEndpointReranker`
+- **`repositories/chunking/`** — Markdown parser, chunk pipeline, element handlers
+- **`repositories/processing/`** — `ThreadPoolBackgroundProcessor`, `InMemoryProgressTracker`
+- **`external/llm/`** — `HuggingFaceChatClient` (DeepSeek-V3.2-Exp)
 
 ### `presentation/` — Adapters
 
-- **`api/`** — FastAPI route handlers (`accounts`, `collections`, `documents`, `search`), Pydantic models, background tasks
-- **`mcp/`** — FastMCP server, tool registration, `get_db_session()` context manager
+- **`api/`** — FastAPI routes (`accounts`, `collections`, `documents`, `search`), Pydantic models, background tasks
+- **`mcp/`** — FastMCP server, tools split by domain (`accounts`, `collections`, `documents`, `export`, `search`)
+
+### `startup/` — Composition Root
+
+- DI factory functions: `create_delete_document_use_case()`, `create_upload_document_use_case()`,
+  `create_embedder()`, `create_chat_client()`, `create_reranker()`, etc.
+- App bootstrapping: `bootstrap()`
 
 ### `startup/` — Composition Root
 
