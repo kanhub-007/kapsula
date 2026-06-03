@@ -10,15 +10,16 @@ collection maintenance, calling the LLM to:
 5. Write results as new LibraryCard + CardReference rows
 """
 
-import json
 import logging
-import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
 
+from kapsula.core.application.use_cases.planning.query_planner import (
+    _parse_json_safely,
+)
 from kapsula.core.domain.interfaces.chat_client import ChatClient
 from kapsula.infrastructure.data import (
     CardReference,
@@ -77,22 +78,6 @@ If you detect conflicting information across sources, list each contradiction:
 importance: 0.0-1.0. Use 0.9+ for critical facts, 0.5 for background, 0.3 for trivia.
 """
 
-_EVOLUTION_CARD_SYSTEM = """You track how a knowledge collection has changed over time.
-Given the current set of topics and the previous consolidation state, produce a change summary.
-
-Output ONLY valid JSON:
-{
-  "summary": "One sentence summary of what changed...",
-  "changes": [
-    {
-      "type": "added|modified|removed",
-      "topic": "Topic Name",
-      "detail": "What changed specifically...",
-      "sources": ["auth-arch.md"]
-    }
-  ]
-}
-"""
 
 _GAP_CARD_SYSTEM = """You analyze search patterns to identify knowledge gaps.
 Given a list of searches that returned few or no results, identify patterns
@@ -118,25 +103,6 @@ Output ONLY valid JSON:
 # ── JSON parsing (shared with query_planner pattern) ────────
 
 
-def _parse_json(text: str) -> dict:
-    """Parse JSON from LLM output, handling code fences and prose."""
-    if not text:
-        raise ValueError("No text to parse")
-    s = text.strip()
-    m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", s, re.IGNORECASE)
-    if m:
-        s = m.group(1).strip()
-    else:
-        s = s.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    if not (s.startswith("{") and s.endswith("}")):
-        start, end = s.find("{"), s.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            s = s[start : end + 1]
-    s = s.replace("\u201c", '"').replace("\u201d", '"')
-    s = s.replace("\u2018", "'").replace("\u2019", "'")
-    return json.loads(s)
-
-
 # ── ConsolidationRunner ─────────────────────────────────────
 
 
@@ -156,10 +122,10 @@ class ConsolidationRunner:
         self._collection_guid = collection_guid
         self._run_id = str(uuid.uuid4())
 
-        self.cards_created = 0
-        self.cards_updated = 0
-        self.conflicts_found = 0
-        self.gaps_found = 0
+        self._cards_created = 0
+        self._cards_updated = 0
+        self._conflicts_found = 0
+        self._gaps_found = 0
 
     def run(self) -> dict[str, Any]:
         """Execute the full consolidation pipeline."""
@@ -184,10 +150,9 @@ class ConsolidationRunner:
                 return self._result()
 
             # Step 2: generate topic cards per cluster
-            card_id_map = {c.id: c for c in cards}
             for cluster in clusters:
                 try:
-                    self._generate_topic_card(cluster, card_id_map)
+                    self._generate_topic_card(cluster)
                 except Exception as exc:
                     logger.error(
                         "Topic card generation failed for '%s': %s",
@@ -211,10 +176,10 @@ class ConsolidationRunner:
             logger.info(
                 "Consolidation complete: %d created, %d updated, "
                 "%d conflicts, %d gaps",
-                self.cards_created,
-                self.cards_updated,
-                self.conflicts_found,
-                self.gaps_found,
+                self._cards_created,
+                self._cards_updated,
+                self._conflicts_found,
+                self._gaps_found,
             )
             return self._result()
 
@@ -231,6 +196,7 @@ class ConsolidationRunner:
             self._db.query(LibraryCard)
             .filter(
                 LibraryCard.collection_id == self._collection_id,
+                LibraryCard.card_type == "extractive",
                 LibraryCard.level.in_(["level_2", "level_3"]),
             )
             .order_by(LibraryCard.title)
@@ -249,10 +215,9 @@ class ConsolidationRunner:
                 f"(doc: {doc_name}) — {preview}"
             )
 
-        user_message = (
-            "Group these knowledge sections into topics:\n\n"
-            + "\n".join(card_entries[:100])  # limit to 100 cards
-        )
+        user_message = "Group these knowledge sections into topics:\n\n" + "\n".join(
+            card_entries[:100]
+        )  # limit to 100 cards
 
         response = self._chat_client.send(
             messages=[
@@ -263,7 +228,7 @@ class ConsolidationRunner:
             temperature=0.3,
         )
 
-        plan = _parse_json(response)
+        plan = _parse_json_safely(response)
         clusters = plan.get("topics", [])
 
         # Map LLM indices back to card objects
@@ -273,9 +238,7 @@ class ConsolidationRunner:
 
         return clusters
 
-    def _generate_topic_card(
-        self, cluster: dict, card_id_map: dict[int, LibraryCard]
-    ) -> None:
+    def _generate_topic_card(self, cluster: dict) -> None:
         """Generate a single topic card from a cluster of extractive cards."""
         source_cards = cluster.get("_cards", [])
         if not source_cards:
@@ -304,9 +267,9 @@ class ConsolidationRunner:
             temperature=0.3,
         )
 
-        result = _parse_json(response)
+        result = _parse_json_safely(response)
         contradictions = result.get("contradictions", [])
-        self.conflicts_found += len(contradictions)
+        self._conflicts_found += len(contradictions)
 
         # Upsert: find existing topic card for this label
         existing = (
@@ -325,7 +288,7 @@ class ConsolidationRunner:
             existing.updated_at = datetime.now(UTC)
             existing.consolidation_run_id = self._run_id
             card = existing
-            self.cards_updated += 1
+            self._cards_updated += 1
         else:
             card = LibraryCard(
                 collection_id=self._collection_id,
@@ -341,7 +304,7 @@ class ConsolidationRunner:
             )
             self._db.add(card)
             self._db.flush()  # get card.id
-            self.cards_created += 1
+            self._cards_created += 1
 
         # Link to source cards
         for source in source_cards:
@@ -352,15 +315,11 @@ class ConsolidationRunner:
             )
             self._db.add(ref)
 
-        # Record contradictions as card references
-        for contradiction in contradictions:
-            # Store contradiction info in a gap/conflict reference
-            ref = CardReference(
-                source_card_id=card.id,
-                target_card_id=card.id,  # self-reference for metadata
-                relation_type="contradicts",
-            )
-            self._db.add(ref)
+        # Store contradiction details
+        if contradictions:
+            import json as _json
+
+            card.extra_metadata = _json.dumps({"contradictions": contradictions})
 
     def _generate_evolution_card(self, clusters: list[dict]) -> None:
         """Generate an evolution card showing what changed since last run."""
@@ -406,11 +365,9 @@ class ConsolidationRunner:
             if removed:
                 changes.append(f"Removed: {', '.join(sorted(removed))}")
             if not changes:
-                changes.append(
-                    f"No topic changes. {len(kept)} topics re-evaluated."
-                )
+                changes.append(f"No topic changes. {len(kept)} topics re-evaluated.")
 
-            content = f"Consolidation update. " + "; ".join(changes)
+            content = "Consolidation update. " + "; ".join(changes)
 
         # Upsert evolution card
         existing = (
@@ -426,7 +383,7 @@ class ConsolidationRunner:
             existing.content = content
             existing.updated_at = datetime.now(UTC)
             existing.consolidation_run_id = self._run_id
-            self.cards_updated += 1
+            self._cards_updated += 1
         else:
             card = LibraryCard(
                 collection_id=self._collection_id,
@@ -441,7 +398,7 @@ class ConsolidationRunner:
                 updated_at=datetime.now(UTC),
             )
             self._db.add(card)
-            self.cards_created += 1
+            self._cards_created += 1
 
     def _generate_gap_cards(self) -> None:
         """Analyze search miss log and generate gap cards."""
@@ -458,7 +415,7 @@ class ConsolidationRunner:
 
         # Build query list for the LLM
         query_text = "\n".join(
-            f"- \"{m.query}\" ({m.result_count} results, score={m.top_score})"
+            f'- "{m.query}" ({m.result_count} results, score={m.top_score})'
             for m in misses[:50]
         )
 
@@ -477,9 +434,9 @@ class ConsolidationRunner:
             temperature=0.3,
         )
 
-        result = _parse_json(response)
+        result = _parse_json_safely(response)
         gaps = result.get("gaps", [])
-        self.gaps_found = len(gaps)
+        self._gaps_found = len(gaps)
 
         for gap in gaps:
             if gap.get("search_count", 0) < 2:
@@ -498,7 +455,7 @@ class ConsolidationRunner:
                 updated_at=datetime.now(UTC),
             )
             self._db.add(card)
-            self.cards_created += 1
+            self._cards_created += 1
 
     def _record_run(self, error: str | None) -> None:
         """Persist the consolidation_run row."""
@@ -506,10 +463,10 @@ class ConsolidationRunner:
             id=self._run_id,
             collection_id=self._collection_guid,
             triggered_by="manual",
-            cards_created=self.cards_created,
-            cards_updated=self.cards_updated,
-            conflicts_found=self.conflicts_found,
-            gaps_found=self.gaps_found,
+            cards_created=self._cards_created,
+            cards_updated=self._cards_updated,
+            conflicts_found=self._conflicts_found,
+            gaps_found=self._gaps_found,
             error=error,
             created_at=datetime.now(UTC),
         )
@@ -519,8 +476,8 @@ class ConsolidationRunner:
     def _result(self) -> dict[str, Any]:
         return {
             "run_id": self._run_id,
-            "cards_created": self.cards_created,
-            "cards_updated": self.cards_updated,
-            "conflicts_found": self.conflicts_found,
-            "gaps_found": self.gaps_found,
+            "cards_created": self._cards_created,
+            "cards_updated": self._cards_updated,
+            "conflicts_found": self._conflicts_found,
+            "gaps_found": self._gaps_found,
         }

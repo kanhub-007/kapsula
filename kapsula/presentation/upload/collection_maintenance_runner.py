@@ -25,51 +25,53 @@ class CollectionMaintenanceRunner:
 
     def run(self, collection: Collection) -> dict:
         """Run collection summary, aggregate-index, and consolidation maintenance."""
-        summary_updates, summary_failures = self._refresh_collection_summary(
-            collection
-        )
+        summary_updates, summary_failures = self._refresh_collection_summary(collection)
         aggregate_result = self._rebuild_aggregate_indexes(collection)
         state_mgr = MaintenanceStateManager()
+
+        # Phase 3: consolidation (check BEFORE marking fresh, runs if stale)
+        consolidation_result: dict = {}
+        if state_mgr.list_stale():
+            col_stale = [
+                s
+                for s in state_mgr.list_stale()
+                if s.get("collection_id") == collection.collection_id
+                and s.get("consolidation_stale")
+            ]
+            if col_stale:
+                try:
+                    from kapsula.infrastructure.repositories.processing.consolidation_runner import (
+                        ConsolidationRunner,
+                    )
+                    from kapsula.presentation.mcp.tools._shared import (
+                        _get_chat_client,
+                    )
+
+                    chat_client = _get_chat_client()
+                    runner = ConsolidationRunner(
+                        self._db,
+                        chat_client,
+                        collection.id,
+                        collection.collection_id,
+                    )
+                    consolidation_result = runner.run()
+                    state_mgr.mark_consolidated(collection.collection_id)
+                except Exception as exc:
+                    logger.error(
+                        "Consolidation failed for collection %s: %s",
+                        collection.collection_id,
+                        exc,
+                        exc_info=True,
+                    )
+                    consolidation_result = {"error": str(exc)}
+
+        # Mark fresh AFTER consolidation attempt
         state_mgr.mark_collection_fresh(
             collection,
             summary=summary_failures == 0,
             collection_index=aggregate_result["collection_index_updated"],
             account_index=aggregate_result["account_index_updated"],
         )
-
-        # Phase 3: consolidation (run if stale)
-        consolidation_result: dict = {}
-        stale = state_mgr.list_stale()
-        col_stale = [
-            s
-            for s in stale
-            if s.get("collection_id") == collection.collection_id
-            and s.get("consolidation_stale")
-        ]
-        if col_stale:
-            try:
-                from kapsula.infrastructure.repositories.processing.consolidation_runner import (
-                    ConsolidationRunner,
-                )
-                from kapsula.presentation.mcp.tools._infra import _get_chat_client
-
-                chat_client = _get_chat_client()
-                runner = ConsolidationRunner(
-                    self._db,
-                    chat_client,
-                    collection.id,
-                    collection.collection_id,
-                )
-                consolidation_result = runner.run()
-                state_mgr.mark_consolidated(collection.collection_id)
-            except Exception as exc:
-                logger.error(
-                    "Consolidation failed for collection %s: %s",
-                    collection.collection_id,
-                    exc,
-                    exc_info=True,
-                )
-                consolidation_result = {"error": str(exc)}
 
         return {
             "collection_id": collection.collection_id,
