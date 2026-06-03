@@ -5,7 +5,6 @@ import json
 from fastmcp import FastMCP
 
 from kapsula.infrastructure.data import (
-    Document as OrmDocument,
     DocumentStructure as OrmDocumentStructure,
 )
 from kapsula.infrastructure.repositories.data.sql_document_repository import (
@@ -15,7 +14,6 @@ from kapsula.infrastructure.repositories.data.sql_query_repositories import (
     SqlChunkRepository,
 )
 from ._shared import _get_db
-
 
 _doc_repo = SqlDocumentRepository()
 _chunk_repo = SqlChunkRepository()
@@ -46,7 +44,18 @@ def register_document_tools(mcp: FastMCP):
         db = _get_db()
         try:
             use_case = create_upload_document_use_case()
-            result = use_case.execute(db, file_path, collection_id, max_tokens, ingestion_mode)
+            result = use_case.execute(
+                db, file_path, collection_id, max_tokens, ingestion_mode
+            )
+            # Mark consolidation as stale after successful upload
+            try:
+                from kapsula.presentation.upload.maintenance_state_manager import (
+                    MaintenanceStateManager,
+                )
+
+                MaintenanceStateManager().increment_uploads(collection_id)
+            except Exception:
+                pass  # best-effort: don't break the tool on state-tracking failure
         except ValueError as exc:
             return f"Error: {exc}"
         finally:
@@ -76,8 +85,28 @@ def register_document_tools(mcp: FastMCP):
 
         db = _get_db()
         try:
+            # Look up collection_id before deletion so we can mark consolidation stale
+            from kapsula.infrastructure.data import Document as OrmDocument
+
+            orm_doc = db.query(OrmDocument).filter(OrmDocument.job_id == job_id).first()
+            collection_id = (
+                orm_doc.collection.collection_id
+                if orm_doc and orm_doc.collection
+                else None
+            )
+
             use_case = create_delete_document_use_case()
             result = use_case.execute(db, job_id)
+            # Mark consolidation as stale after successful deletion
+            if collection_id:
+                try:
+                    from kapsula.presentation.upload.maintenance_state_manager import (
+                        MaintenanceStateManager,
+                    )
+
+                    MaintenanceStateManager().increment_uploads(collection_id)
+                except Exception:
+                    pass  # best-effort
         except ValueError as exc:
             return str(exc)
         finally:
@@ -103,9 +132,12 @@ def register_document_tools(mcp: FastMCP):
         try:
             if collection_id:
                 from kapsula.infrastructure.data import Collection as OrmCollection
-                col = db.query(OrmCollection).filter(
-                    OrmCollection.collection_id == collection_id
-                ).first()
+
+                col = (
+                    db.query(OrmCollection)
+                    .filter(OrmCollection.collection_id == collection_id)
+                    .first()
+                )
                 if not col:
                     return f"Collection not found: {collection_id}"
                 docs = _doc_repo.list_by_collection(db, collection_id)
@@ -117,9 +149,7 @@ def register_document_tools(mcp: FastMCP):
             lines = [f"Documents ({len(docs)}):\n"]
             for d in docs:
                 chunks_count = _chunk_repo.count_by_document(db, d.id) if d.id else 0
-                lines.append(
-                    f"  • {d.filename} [{d.status}] — {chunks_count} chunks"
-                )
+                lines.append(f"  • {d.filename} [{d.status}] — {chunks_count} chunks")
                 lines.append(f"    job_id: {d.job_id}")
             return "\n".join(lines)
         finally:
@@ -201,7 +231,9 @@ def register_document_tools(mcp: FastMCP):
                 return f"Document not found: {job_id}"
 
             from kapsula.presentation.api.tasks import get_processing_status
-            from kapsula.presentation.upload.stale_progress_guard import StaleProgressGuard
+            from kapsula.presentation.upload.stale_progress_guard import (
+                StaleProgressGuard,
+            )
 
             status = get_processing_status(job_id)
             chunks_count = _chunk_repo.count_by_document(db, doc.id) if doc.id else 0
@@ -387,11 +419,17 @@ def register_document_tools(mcp: FastMCP):
                 return "No upload jobs recorded yet."
 
             completed = (
-                db.query(OrmUploadJob).filter(OrmUploadJob.status == "completed").count()
+                db.query(OrmUploadJob)
+                .filter(OrmUploadJob.status == "completed")
+                .count()
             )
-            failed = db.query(OrmUploadJob).filter(OrmUploadJob.status == "failed").count()
+            failed = (
+                db.query(OrmUploadJob).filter(OrmUploadJob.status == "failed").count()
+            )
             processing = (
-                db.query(OrmUploadJob).filter(OrmUploadJob.status == "processing").count()
+                db.query(OrmUploadJob)
+                .filter(OrmUploadJob.status == "processing")
+                .count()
             )
 
             durations = [

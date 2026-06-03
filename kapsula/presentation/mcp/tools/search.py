@@ -5,7 +5,6 @@ import asyncio
 from fastmcp import FastMCP
 
 from kapsula.infrastructure.data import (
-    SessionLocal,
     Document,
     Collection,
     Account,
@@ -18,8 +17,6 @@ from ._shared import (
     _parse_node_type_filter,
     _get_chat_client,
     _get_query_planner,
-    _get_embedder,
-    _get_reranker,
     _get_multi_index_searcher,
     _get_intelligent_searcher,
     _resolve_collection,

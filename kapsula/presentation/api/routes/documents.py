@@ -23,12 +23,6 @@ from kapsula.infrastructure.data.tables.document import Document as OrmDocument
 from kapsula.infrastructure.data.tables.document_structure import DocumentStructure as OrmDocumentStructure
 from kapsula.infrastructure.data.tables.chunk import Chunk as OrmChunk
 from kapsula.infrastructure.data.tables.collection import Collection as OrmCollection
-from kapsula.infrastructure.repositories.data.sql_document_repository import (
-    SqlDocumentRepository,
-)
-from kapsula.infrastructure.repositories.data.sql_query_repositories import (
-    SqlChunkRepository,
-)
 from kapsula.infrastructure.logging_config import get_logger
 from ..models import (
     UploadResponse,

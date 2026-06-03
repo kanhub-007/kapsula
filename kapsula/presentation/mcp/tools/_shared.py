@@ -3,6 +3,8 @@
 .. deprecated:: use ``_db`` and ``_infra`` directly in new code.
 """
 
+# ruff: noqa: F401  — this file is a re-export facade; all imports are public API
+
 from ._db import _get_db, _resolve_collection, _resolve_account
 from ._infra import (
     _cached,

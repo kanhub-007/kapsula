@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 
 from kapsula.infrastructure.data import get_db
 from kapsula.infrastructure.data.tables.account import Account as OrmAccount
-from kapsula.infrastructure.data.tables.collection import Collection as OrmCollection
 from kapsula.infrastructure.data import LibraryCard as OrmLibraryCard
 from kapsula.infrastructure.repositories.data.sql_account_repository import (
     SqlAccountRepository,

@@ -234,6 +234,24 @@ Sub-questions execute in parallel via `asyncio.gather`. Each:
 - Explicit rule: "Do NOT mention sub-question numbers"
 - `temperature=0.3` for consistent, factual output
 
+### Topic Card Overview (Knowledge Overview)
+
+Before generating the final answer, intelligent search queries the collection's topic cards
+(from the consolidation engine) and includes them as a **Knowledge Overview** section:
+
+```
+--- Knowledge Overview (synthesized) ---
+[Topic Name] (importance: 0.9): Synthesized topic summary...
+```
+
+This gives the LLM a high-level understanding of the knowledge domain before it
+synthesizes from raw chunks, resulting in more coherent cross-document answers.
+
+### Search Miss Logging
+
+Low-result searches (<3 results at collection scope) are logged to `search_miss_log`
+for later gap detection by the consolidation engine.
+
 ### Grounding
 
 Strict prompt rules prevent hallucination:

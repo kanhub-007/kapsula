@@ -165,19 +165,23 @@ Atomic search unit. One document has many chunks.
 | `created_at` | datetime | |
 
 ### `library_cards`
-Context storage for Russian Doll expansion.
+Context storage for Russian Doll expansion and consolidation.
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | PK (int) | |
-| `collection_id` | FK (nullable) | Collection summary |
-| `document_id` | FK (nullable) | Document overview |
-| `sub_document_id` | FK (nullable) | Sub-document summary |
+| `collection_id` | FK → collections.id (nullable) | Set on creation for collection-scoped queries |
+| `document_id` | FK → documents.id (nullable) | |
+| `sub_document_id` | FK → sub_documents.id (nullable) | |
 | `doc_id` | str (indexed) | SHA256 hash of section content |
 | `level` | str | `level_1` (H3), `level_2` (H2), `level_3` (H1), `subdocument`, `document`, `collection` |
 | `title` | str | Section heading |
 | `content` | str | Full section text |
-| `extra_metadata` | JSON str | Page titles, document summaries, counts |
+| `extra_metadata` | JSON str | Page titles, document summaries, contradiction details |
+| `card_type` | str | `extractive` (from documents), `topic` (from consolidation), `evolution`, `gap` |
+| `importance` | float | 0.0–1.0 relevance score (default 0.5) |
+| `updated_at` | datetime (nullable) | Last consolidation update |
+| `consolidation_run_id` | str (nullable) | Links to the consolidation run |
 | `created_at` | datetime | |
 
 ### `document_structures`
@@ -188,6 +192,65 @@ Context storage for Russian Doll expansion.
 | `id` | PK (int) | |
 | `document_id` | FK (unique) | |
 | `skeleton_structure` | str | Markdown heading tree |
+| `created_at` | datetime | |
+
+### `consolidation_runs`
+Tracks each consolidation execution.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | PK (str) | UUID run identifier |
+| `collection_id` | str | Collection GUID |
+| `triggered_by` | str | `manual`, `auto`, or `upload` |
+| `cards_created` | int | Topic cards generated |
+| `cards_updated` | int | Topic cards updated |
+| `conflicts_found` | int | Contradictions detected |
+| `gaps_found` | int | Knowledge gaps identified |
+| `error` | text (nullable) | Error message if run failed |
+| `created_at` | datetime | |
+
+### `upload_jobs`
+Tracks document upload progress and metrics.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | PK (int) | |
+| `job_id` | str (unique, indexed) | Job GUID |
+| `filename` | str | |
+| `collection_id` | int (nullable) | |
+| `collection_name` | str (nullable) | |
+| `status` | str | `queued`, `processing`, `completed`, `failed` |
+| `progress` | int | 0–100 |
+| `stage` | str (nullable) | Current pipeline stage |
+| `message` | text (nullable) | Human-readable status |
+| `ingestion_mode` | str (nullable) | `fast`, `indexed`, or `full` |
+| `chunk_count` | int (nullable) | |
+| `subdocument_count` | int (nullable) | |
+| `duration` | float (nullable) | Processing time in seconds |
+| `error` | text (nullable) | |
+| `created_at` | datetime | |
+| `updated_at` | datetime | Auto-updated on status change |
+
+### `search_miss_log`
+Records low-result searches for gap detection.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | PK (int) | |
+| `collection_id` | str (nullable) | |
+| `query` | text | The search query |
+| `result_count` | int | Number of results returned |
+| `top_score` | float (nullable) | Best score |
+| `created_at` | datetime | |
+
+### `card_references`
+Links between library cards (source → target).
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `source_card_id` | FK → library_cards.id | |
+| `target_card_id` | FK → library_cards.id | |
+| `relation_type` | str | Relationship type |
 | `created_at` | datetime | |
 
 ---

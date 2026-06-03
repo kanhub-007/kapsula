@@ -5,7 +5,6 @@ import uuid
 from fastmcp import FastMCP
 
 from kapsula.core.domain.entities.account import Account
-from kapsula.core.domain.entities.collection import Collection
 from kapsula.infrastructure.repositories.data.sql_account_repository import (
     SqlAccountRepository,
 )

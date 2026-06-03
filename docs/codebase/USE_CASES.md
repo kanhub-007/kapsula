@@ -47,6 +47,7 @@ Validates and persists a new markdown document:
 | `QueryPlanner` | `planning/query_planner.py` | LLM-driven query decomposition |
 | `CollectionSummaryGenerator` | `collection_summary.py` | LLM summary maintenance |
 | `ContextExpansion` | `context_expansion.py` | Library Card-based chunk expansion |
+| `ConsolidationRunner` | `repositories/processing/consolidation_runner.py` | Topic clustering, contradiction detection, gap analysis |
 
 ## Design Notes
 

@@ -116,10 +116,7 @@ class MaintenanceStateManager:
                     state["updated_at"] = datetime.utcnow().isoformat()
                     self._save_states(states)
                     return state
-            raise KeyError(
-                f"No maintenance state for collection {collection_id} -- "
-                f"call mark_collection_stale first"
-            )
+            # No existing state — create one with consolidation marked stale
             state = {
                 "collection_id": collection_id,
                 "collection_db_id": None,

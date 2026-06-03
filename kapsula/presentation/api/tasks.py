@@ -147,7 +147,6 @@ def match_header_to_parents(header: str, parent_sections: dict) -> dict:
 
 
 from kapsula.core.domain.citation_matching import (
-    strip_inline_formatting,
     find_chunk_in_markdown,
 )
 
@@ -405,6 +404,7 @@ def process_document(
         # Save parent sections to database
         for doc_id, section_data in parent_sections.items():
             library_card = LibraryCard(
+                collection_id=document.collection_id,
                 document_id=document.id,
                 doc_id=doc_id,
                 level=section_data["level"],
@@ -608,6 +608,10 @@ def process_document(
                 collection_index=True,
                 account_index=True,
             )
+            if document.collection:
+                MaintenanceStateManager().increment_uploads(
+                    document.collection.collection_id
+                )
             _upload_progress.set(
                 job_id,
                 status="processing",
@@ -888,6 +892,7 @@ def process_document_with_subdocuments(
             # Create LibraryCard for sub-document
             page_titles = [p["title"] for p in pages]
             library_card = LibraryCard(
+                collection_id=document.collection_id,
                 document_id=document.id,
                 sub_document_id=subdoc.id,
                 doc_id=f"subdoc_{subdoc.id}",
@@ -908,6 +913,7 @@ def process_document_with_subdocuments(
             # Save parent sections to library cards
             for doc_id, section_data in parent_sections.items():
                 parent_card = LibraryCard(
+                    collection_id=document.collection_id,
                     document_id=document.id,
                     sub_document_id=subdoc.id,
                     doc_id=doc_id,
@@ -997,6 +1003,7 @@ def process_document_with_subdocuments(
 
         subdoc_summary = {key: len(pages) for key, pages in subdocs.items()}
         main_card = LibraryCard(
+            collection_id=document.collection_id,
             document_id=document.id,
             doc_id=f"main_{document.id}",
             level="document",
@@ -1074,6 +1081,10 @@ def process_document_with_subdocuments(
                 collection_index=True,
                 account_index=True,
             )
+            if document.collection:
+                MaintenanceStateManager().increment_uploads(
+                    document.collection.collection_id
+                )
             _upload_progress.set(
                 job_id,
                 status="processing",

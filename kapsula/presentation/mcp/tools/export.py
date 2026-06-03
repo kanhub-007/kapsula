@@ -4,7 +4,6 @@ from fastmcp import FastMCP
 
 from kapsula.infrastructure.data import (
     LibraryCard as OrmLibraryCard,
-    Collection as OrmCollection,
 )
 from kapsula.infrastructure.repositories.data.sql_account_repository import (
     SqlAccountRepository,

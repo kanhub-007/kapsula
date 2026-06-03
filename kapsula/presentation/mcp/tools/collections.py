@@ -87,19 +87,17 @@ def register_collection_tools(mcp: FastMCP):
                     lines.append(f"Account: {acc.name} ({acc.account_id})")
             if card:
                 lines.append(f"\nSummary: {card.content[:300]}")
-            if col.documents:
-                lines.append("\nDocuments:")
-                # Domain collection has documents=[], need ORM for full load
-                from kapsula.infrastructure.data import Collection as OrmCollection
 
-                orm_col = (
-                    db.query(OrmCollection).filter(OrmCollection.id == col.id).first()
-                )
-                if orm_col:
-                    for d in orm_col.documents:
-                        lines.append(
-                            f"  • {d.filename} [{d.status}] — {len(d.chunks)} chunks — job_id={d.job_id}"
-                        )
+            # Domain entities carry documents=[], so always load ORM for full list
+            from kapsula.infrastructure.data import Collection as OrmCollection
+
+            orm_col = db.query(OrmCollection).filter(OrmCollection.id == col.id).first()
+            if orm_col and orm_col.documents:
+                lines.append("\nDocuments:")
+                for d in orm_col.documents:
+                    lines.append(
+                        f"  • {d.filename} [{d.status}] — {len(d.chunks)} chunks — job_id={d.job_id}"
+                    )
             return "\n".join(lines)
         finally:
             db.close()
@@ -118,12 +116,22 @@ def register_collection_tools(mcp: FastMCP):
             if not collections:
                 return "No collections found."
             lines = [f"Collections ({len(collections)}):\n"]
+            # Bulk-load document counts to avoid N+1 queries
+            from kapsula.infrastructure.data import Document as OrmDocument
+            from sqlalchemy import func
+
+            doc_counts = dict(
+                db.query(OrmDocument.collection_id, func.count(OrmDocument.id))
+                .filter(OrmDocument.collection_id.in_([c.id for c in collections]))
+                .filter(OrmDocument.status != "archived")
+                .group_by(OrmDocument.collection_id)
+                .all()
+            )
             for c in collections:
                 card = _card_repo.find_collection_card(db, c.id) if c.id else None
                 summary = card.content[:120] if card else "No summary"
-                lines.append(
-                    f"  • {c.name} ({len(c.documents)} docs) — {c.collection_id}"
-                )
+                doc_count = doc_counts.get(c.id, 0)
+                lines.append(f"  • {c.name} ({doc_count} docs) — {c.collection_id}")
                 lines.append(f"    {summary}")
             return "\n".join(lines)
         finally:
@@ -211,16 +219,16 @@ def register_collection_tools(mcp: FastMCP):
                 f"  Account FAISS: {result['account_faiss'] or '--'}",
                 f"  Account BM25: {result['account_bm25'] or '--'}",
             ]
-            if result.get('cards_created') or result.get('cards_updated'):
+            if result.get("cards_created") or result.get("cards_updated"):
                 lines.append(
                     f"  Consolidation: {result.get('cards_created', 0)} created, "
                     f"{result.get('cards_updated', 0)} updated, "
                     f"{result.get('conflicts_found', 0)} conflicts, "
                     f"{result.get('gaps_found', 0)} gaps"
                 )
-            if result.get('error'):
+            if result.get("error"):
                 lines.append(f"  Consolidation error: {result['error']}")
-            return '\n'.join(lines)
+            return "\n".join(lines)
         finally:
             db.close()
 
@@ -340,28 +348,45 @@ def register_collection_tools(mcp: FastMCP):
                 LibraryCard as OrmLibraryCard,
             )
 
-            col = db.query(OrmCollection).filter(
-                OrmCollection.collection_id == collection_id
-            ).first()
+            col = (
+                db.query(OrmCollection)
+                .filter(OrmCollection.collection_id == collection_id)
+                .first()
+            )
             if not col:
                 return f"Collection not found: {collection_id}"
 
-            topic_count = db.query(OrmLibraryCard).filter(
-                OrmLibraryCard.collection_id == col.id,
-                OrmLibraryCard.card_type == "topic",
-            ).count()
-            evolution_count = db.query(OrmLibraryCard).filter(
-                OrmLibraryCard.collection_id == col.id,
-                OrmLibraryCard.card_type == "evolution",
-            ).count()
-            gap_count = db.query(OrmLibraryCard).filter(
-                OrmLibraryCard.collection_id == col.id,
-                OrmLibraryCard.card_type == "gap",
-            ).count()
+            topic_count = (
+                db.query(OrmLibraryCard)
+                .filter(
+                    OrmLibraryCard.collection_id == col.id,
+                    OrmLibraryCard.card_type == "topic",
+                )
+                .count()
+            )
+            evolution_count = (
+                db.query(OrmLibraryCard)
+                .filter(
+                    OrmLibraryCard.collection_id == col.id,
+                    OrmLibraryCard.card_type == "evolution",
+                )
+                .count()
+            )
+            gap_count = (
+                db.query(OrmLibraryCard)
+                .filter(
+                    OrmLibraryCard.collection_id == col.id,
+                    OrmLibraryCard.card_type == "gap",
+                )
+                .count()
+            )
 
-            last_run = db.query(ConsolidationRun).filter(
-                ConsolidationRun.collection_id == collection_id
-            ).order_by(ConsolidationRun.created_at.desc()).first()
+            last_run = (
+                db.query(ConsolidationRun)
+                .filter(ConsolidationRun.collection_id == collection_id)
+                .order_by(ConsolidationRun.created_at.desc())
+                .first()
+            )
 
             lines = [
                 f"Consolidation Status -- {col.name}",

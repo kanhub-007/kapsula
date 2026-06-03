@@ -27,6 +27,7 @@ Key design decisions that make this a memory system, not just search:
 | **Structure** | Library Cards preserve full section context (Russian Doll architecture) — search hits expand to their parent H2/H3 section so the LLM sees complete context, not isolated fragments |
 | **Update** | Delete + re-upload pattern; aggregate indexes rebuild automatically |
 | **Organize** | Collection-level routing (LLM picks the right knowledge domain per query); account-level aggregate indexes |
+| **Synthesize** | Consolidation engine clusters extractive cards into topic cards with importance scores, contradiction detection, and evolution tracking — creating a synthesized knowledge overview for intelligent search |
 
 ## What It Does
 
@@ -41,7 +42,7 @@ Key design decisions that make this a memory system, not just search:
 
 ## Usage Guide for AI Assistants (MCP)
 
-Kapsula exposes 19+ tools via the MCP protocol. Here's the intended workflow:
+Kapsula exposes 36 tools via the MCP protocol across 6 domains (accounts, collections, documents, search, export, maintenance). Here's the intended workflow:
 
 ### First-Time Setup
 
@@ -89,6 +90,24 @@ Kapsula is **append-optimized** — there's no in-place edit. To update:
 2. delete_document(job_id)       → soft-delete, rebuild indexes
 3. Re-upload the updated file
 ```
+
+### Synthesizing Knowledge (Consolidation)
+
+After uploading documents, run consolidation to discover cross-document topics:
+
+```
+1. list_stale_maintenance() → check which collections need consolidation
+2. run_collection_maintenance(collection_id) → generate summary, rebuild indexes, run consolidation
+3. get_consolidation_status(collection_id) → see topic/evolution/gap card counts
+4. get_library_cards(collection_id) → browse extracted sections and synthesized topic cards
+```
+
+The consolidation engine:
+- **Clusters** extractive cards (H2/H3 sections) into topic groups via LLM
+- **Synthesizes** each cluster into a topic card with importance scores
+- **Detects** contradictions across sources
+- **Tracks** knowledge evolution across consolidation runs
+- **Integrates** topic cards into intelligent search as a Knowledge Overview
 
 ### Background Search
 
@@ -241,11 +260,12 @@ Markdown → Chunking → FAISS + BM25 Indexes → Hybrid Search → Rerank → 
 | API | FastAPI + Pydantic v2 |
 | MCP Server | FastMCP (stdio + HTTP transports) |
 | Database | SQLAlchemy 2.0 + SQLite |
-| Dense Search | FAISS `IndexFlatIP` + Qwen/Qwen3-Embedding-8B |
+| Dense Search | FAISS `IndexFlatIP` + Qwen3-Embedding-8B |
 | Sparse Search | BM25Plus (`rank-bm25`) |
 | Reranking | mixedbread-ai/mxbai-rerank-large-v1 (Cross-Encoder) |
 | LLM | DeepSeek-V3.2-Exp (HuggingFace InferenceClient) |
 | Chunking | unstructured[md] + tiktoken (cl100k_base) |
+| Consolidation | LLM-powered topic clustering, contradiction detection, evolution tracking |
 
 ---
 
@@ -286,8 +306,8 @@ API docs at `http://localhost:8001/docs`
 
 | Document | Covers |
 |----------|--------|
-| [Architecture](docs/ARCHITECTURE.md) | Clean architecture layers, database schema, entity relationships |
-| [Search Internals](docs/SEARCH.md) | FAISS, BM25, RRF/weighted fusion, quality filters, Library Cards, context expansion |
+| [Architecture](docs/ARCHITECTURE.md) | Clean architecture layers, database schema (14 tables), entity relationships, consolidation engine |
+| [Search Internals](docs/SEARCH.md) | FAISS, BM25, RRF/weighted fusion, quality filters, Library Cards, context expansion, intelligent search, topic card overview |
 | [Setup](docs/SETUP.md) | Installation, configuration, Docker, troubleshooting |
 | [Layer Guide](docs/codebase/LAYER_GUIDE.md) | Dependency rules, layer responsibilities, import conventions |
 | [Domain Entities](docs/codebase/DOMAIN_ENTITIES.md) | All 9 domain entities with field reference |
@@ -312,12 +332,13 @@ kapsula/
 │   │       ├── dto/            # Data transfer objects
 │   │       └── use_cases/      # DeleteDocument, UploadDocument, search, planning
 │   ├── infrastructure/         # Concrete implementations
-│   │   ├── data/               # ORM tables, mappers, SQL repositories
-│   │   ├── repositories/       # Embedding, indexing, retrieval, reranking, chunking, processing
+│   │   ├── data/               # 14 ORM tables, mappers, SQL repositories
+│   │   ├── repositories/       # Embedding, indexing, retrieval, reranking, chunking, processing, consolidation
 │   │   └── external/llm/       # HuggingFace chat client
 │   ├── presentation/           # API + MCP interfaces
 │   │   ├── api/                # FastAPI routes, background tasks
-│   │   └── mcp/                # FastMCP server, tool registration
+│   │   ├── mcp/                # FastMCP server, 36 tools across 6 domains
+│   │   └── upload/             # Upload job tracking, maintenance state, consolidation runner
 │   └── startup/                # Composition root, DI factories
 ├── docs/
 │   ├── ARCHITECTURE.md         # Layer map, database schema, project layout

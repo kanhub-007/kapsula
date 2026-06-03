@@ -1,6 +1,6 @@
 """DTO for document deletion results."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from kapsula.core.application.dto.rebuild_result import RebuildResult
 
