@@ -1,9 +1,16 @@
 """Interface for managing search index files on disk."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Protocol
+from typing import Protocol
 
 from sqlalchemy.orm import Session
+
+from doc_search.core.application.dto.rebuild_result import RebuildResult
+
+
+class HasAccountId(Protocol):
+    """Protocol for any object with an account_id attribute."""
+    account_id: str
 
 
 class IndexableSubDocument(Protocol):
@@ -23,7 +30,7 @@ class IndexableCollection(Protocol):
     """Protocol for collections with an account and GUID."""
     id: int
     collection_id: str
-    account: Any | None  # has .account_id
+    account: HasAccountId | None
 
 
 class IndexManager(ABC):
@@ -41,11 +48,8 @@ class IndexManager(ABC):
     @abstractmethod
     def rebuild_aggregates(
         self, db: Session, collection: IndexableCollection
-    ) -> dict[str, str | None]:
-        """Rebuild collection and account aggregate indexes.
-        
-        Returns a dict with keys: collection_faiss, collection_bm25,
-        account_faiss, account_bm25."""
+    ) -> RebuildResult:
+        """Rebuild collection and account aggregate indexes."""
 
     @abstractmethod
     def delete_sub_document_indexes(

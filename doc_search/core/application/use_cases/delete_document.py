@@ -5,14 +5,10 @@ from sqlalchemy.orm import Session
 from doc_search.core.application.dto.delete_document_result import (
     DeleteDocumentResult,
 )
+from doc_search.core.application.dto.rebuild_result import RebuildResult
 from doc_search.core.domain.interfaces.index_manager import IndexManager
-from doc_search.infrastructure.data import (
-    Document,
-    Chunk,
-    LibraryCard,
-    SubDocument,
-    SubDocumentPage,
-    DocumentStructure,
+from doc_search.core.domain.interfaces.document_repository import (
+    DocumentRepository,
 )
 from doc_search.infrastructure.logging_config import get_logger
 
@@ -23,8 +19,13 @@ class DeleteDocumentUseCase:
     """Soft-deletes a document: archives it, cascade-deletes related records,
     removes index files, and rebuilds aggregate indexes."""
 
-    def __init__(self, index_manager: IndexManager):
+    def __init__(
+        self,
+        index_manager: IndexManager,
+        document_repository: DocumentRepository,
+    ):
         self._index_manager = index_manager
+        self._document_repository = document_repository
 
     def execute(self, db: Session, job_id: str) -> DeleteDocumentResult:
         """Execute the delete operation.
@@ -39,7 +40,7 @@ class DeleteDocumentUseCase:
         Raises:
             ValueError: If the document is not found.
         """
-        doc = db.query(Document).filter(Document.job_id == job_id).first()
+        doc = self._document_repository.find_document_by_job_id(db, job_id)
         if not doc:
             raise ValueError(f"Document not found: {job_id}")
 
@@ -49,9 +50,7 @@ class DeleteDocumentUseCase:
 
         logger.info(
             "Deleting document: job_id=%s filename=%s collection=%s",
-            job_id,
-            filename,
-            collection_name,
+            job_id, filename, collection_name,
         )
 
         # 1. Delete index files from disk (before DB changes)
@@ -61,68 +60,30 @@ class DeleteDocumentUseCase:
         if collection:
             self._index_manager.invalidate_aggregate_cache(collection)
 
-        # 3. Cascade-delete related records from database
-        chunks_deleted = self._cascade_delete_records(db, doc)
+        # 3. Cascade-delete related records (via repository)
+        chunks_deleted = self._document_repository.cascade_delete_related(db, doc)
 
         # 4. Mark document as archived (soft delete)
-        doc.doc_state = "archived"
-        doc.status = "archived"
-        db.commit()
+        self._document_repository.mark_archived(db, doc)
 
         # 5. Rebuild aggregate indexes
-        rebuild_result: dict[str, str | None] = {}
+        rebuild: RebuildResult | None = None
         rebuild_error: str | None = None
 
         if collection:
             try:
-                rebuild_result = self._index_manager.rebuild_aggregates(db, collection)
+                rebuild = self._index_manager.rebuild_aggregates(db, collection)
             except Exception as exc:
                 logger.error("Aggregate rebuild failed after delete: %s", exc)
                 rebuild_error = str(exc)
-                # Populate with failure markers
-                rebuild_result = {
-                    "collection_faiss": None,
-                    "collection_bm25": None,
-                    "account_faiss": None,
-                    "account_bm25": None,
-                }
 
-        logger.info(
-            "Document deleted: job_id=%s chunks=%s", job_id, chunks_deleted
-        )
+        logger.info("Document deleted: job_id=%s chunks=%s", job_id, chunks_deleted)
 
         return DeleteDocumentResult(
             job_id=job_id,
             filename=filename,
             collection_name=collection_name,
             chunks_deleted=chunks_deleted,
-            rebuild=rebuild_result,
+            rebuild=rebuild,
             error=rebuild_error,
         )
-
-    # ── private helpers ─────────────────────────────────────────
-
-    @staticmethod
-    def _cascade_delete_records(db: Session, doc: Document) -> int:
-        """Delete all related records for a document. Returns count of deleted chunks."""
-        chunks_deleted = (
-            db.query(Chunk).filter(Chunk.document_id == doc.id).delete()
-        )
-
-        # Bulk-delete sub-document pages via subquery
-        from sqlalchemy import select
-        sub_doc_ids = (
-            select(SubDocument.id)
-            .where(SubDocument.document_id == doc.id)
-        )
-        db.query(SubDocumentPage).filter(
-            SubDocumentPage.sub_document_id.in_(sub_doc_ids)
-        ).delete(synchronize_session=False)
-
-        db.query(SubDocument).filter(SubDocument.document_id == doc.id).delete()
-        db.query(LibraryCard).filter(LibraryCard.document_id == doc.id).delete()
-        db.query(DocumentStructure).filter(
-            DocumentStructure.document_id == doc.id
-        ).delete()
-
-        return chunks_deleted

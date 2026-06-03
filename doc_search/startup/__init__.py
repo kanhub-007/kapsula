@@ -186,13 +186,17 @@ def create_delete_document_use_case():
     from doc_search.infrastructure.repositories.indexing.index_manager import (
         FileSystemIndexManager,
     )
+    from doc_search.infrastructure.repositories.data.sql_document_repository import (
+        SqlDocumentRepository,
+    )
     from doc_search.core.application.use_cases.delete_document import (
         DeleteDocumentUseCase,
     )
 
     embedder = create_embedder()
     index_manager = FileSystemIndexManager(embedder, DATA_DIR)
-    return DeleteDocumentUseCase(index_manager)
+    document_repository = SqlDocumentRepository()
+    return DeleteDocumentUseCase(index_manager, document_repository)
 
 
 def create_upload_document_use_case():
@@ -200,9 +204,17 @@ def create_upload_document_use_case():
     from doc_search.infrastructure.repositories.processing.background_processor import (
         ThreadPoolBackgroundProcessor,
     )
+    from doc_search.infrastructure.repositories.data.sql_document_repository import (
+        SqlDocumentRepository,
+    )
+    from doc_search.infrastructure.repositories.processing.progress_tracker import (
+        InMemoryProgressTracker,
+    )
     from doc_search.core.application.use_cases.upload_document import (
         UploadDocumentUseCase,
     )
 
     background_processor = ThreadPoolBackgroundProcessor()
-    return UploadDocumentUseCase(background_processor)
+    document_repository = SqlDocumentRepository()
+    progress_tracker = InMemoryProgressTracker()
+    return UploadDocumentUseCase(background_processor, document_repository, progress_tracker)

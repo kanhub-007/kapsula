@@ -14,10 +14,13 @@ from doc_search.core.application.dto.upload_ingestion_mode import (
 from doc_search.core.domain.interfaces.background_processor import (
     BackgroundProcessor,
 )
-from doc_search.infrastructure.data import (
-    Document,
-    Collection,
+from doc_search.core.domain.interfaces.document_repository import (
+    DocumentRepository,
 )
+from doc_search.core.domain.interfaces.progress_tracker import (
+    ProgressTracker,
+)
+from doc_search.infrastructure.data import Document
 from doc_search.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -25,10 +28,17 @@ logger = get_logger(__name__)
 
 class UploadDocumentUseCase:
     """Validates a markdown file, persists a Document record, and starts
-    background processing via a :class:`BackgroundProcessor`."""
+    background processing."""
 
-    def __init__(self, background_processor: BackgroundProcessor):
+    def __init__(
+        self,
+        background_processor: BackgroundProcessor,
+        document_repository: DocumentRepository,
+        progress_tracker: ProgressTracker,
+    ):
         self._background_processor = background_processor
+        self._document_repository = document_repository
+        self._progress_tracker = progress_tracker
 
     def execute(
         self,
@@ -51,28 +61,27 @@ class UploadDocumentUseCase:
             UploadDocumentResult.
 
         Raises:
-            ValueError: On validation failure (file not found, bad extension,
-                        collection missing, invalid ingestion mode).
+            ValueError: On validation failure.
         """
+        # Normalise and validate ingestion mode
         try:
             ingestion_mode = UploadIngestionMode.normalize(ingestion_mode)
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
 
+        # Validate file
         p = Path(file_path)
         if not p.exists():
             raise ValueError(f"File not found: {file_path}")
         if p.suffix.lower() != ".md":
             raise ValueError(f"Only .md files accepted, got: {p.suffix}")
 
-        col = (
-            db.query(Collection)
-            .filter(Collection.collection_id == collection_id)
-            .first()
-        )
+        # Validate collection
+        col = self._document_repository.find_collection_by_guid(db, collection_id)
         if not col:
             raise ValueError(f"Collection not found: {collection_id}")
 
+        # Read and persist
         content = p.read_text(encoding="utf-8")
         job_id = str(uuid.uuid4())
 
@@ -85,31 +94,15 @@ class UploadDocumentUseCase:
             content=content,
             status="processing",
         )
-        db.add(doc)
-        db.commit()
-        db.refresh(doc)
+        self._document_repository.save_document(db, doc)
 
-        # Start background processing via injected processor
-        from doc_search.presentation.api.tasks import processing_status
-        from doc_search.presentation.upload.upload_job_manager import (
-            UploadJobManager,
-        )
-
-        processing_status[job_id] = {
-            "status": "processing",
-            "progress": 0,
-            "stage": "queued",
-            "message": f"Document queued for {ingestion_mode} ingestion...",
-            "ingestion_mode": ingestion_mode,
-        }
-        UploadJobManager().create(
-            job_id,
+        # Register tracking and start background processing
+        self._progress_tracker.register_job(
+            job_id=job_id,
             filename=p.name,
-            collection_id=col.id,
             collection_name=col.name,
             ingestion_mode=ingestion_mode,
         )
-
         self._background_processor.start_processing(
             job_id, content, max_tokens, ingestion_mode
         )

@@ -14,6 +14,7 @@ from doc_search.core.domain.interfaces.index_manager import (
 from doc_search.core.application.dto.aggregate_index_paths import (
     AggregateIndexPaths,
 )
+from doc_search.core.application.dto.rebuild_result import RebuildResult
 from doc_search.infrastructure.repositories.indexing.aggregate_index_builder import (
     AggregateIndexBuilder,
 )
@@ -76,17 +77,12 @@ class FileSystemIndexManager(IndexManager):
 
     def rebuild_aggregates(
         self, db: Session, collection: IndexableCollection
-    ) -> dict[str, str | None]:
+    ) -> RebuildResult:
         """Rebuild collection and account aggregate indexes."""
         account = collection.account if collection.account else None
         account_guid = account.account_id if account else None
 
-        result: dict[str, str | None] = {
-            "collection_faiss": None,
-            "collection_bm25": None,
-            "account_faiss": None,
-            "account_bm25": None,
-        }
+        result = RebuildResult()
 
         coll_faiss, coll_bm25 = self._builder.build(
             db,
@@ -94,14 +90,14 @@ class FileSystemIndexManager(IndexManager):
             account_id=account_guid,
             collection_guid=collection.collection_id,
         )
-        result["collection_faiss"] = coll_faiss
-        result["collection_bm25"] = coll_bm25
+        result.collection_faiss = coll_faiss
+        result.collection_bm25 = coll_bm25
 
         if account:
             acct_faiss, acct_bm25 = self._builder.build_account(
                 db, account.id, account.account_id
             )
-            result["account_faiss"] = acct_faiss
-            result["account_bm25"] = acct_bm25
+            result.account_faiss = acct_faiss
+            result.account_bm25 = acct_bm25
 
         return result
