@@ -1,14 +1,13 @@
 /**
- * Pi extension that bridges to the doc-search MCP server via stdio.
+ * Pi extension that bridges to the doc-search MCP server via HTTP.
  *
- * Spawns `python -m doc_search.presentation.mcp` as a subprocess, discovers MCP tools,
- * and registers them as pi custom tools.
+ * Expects the MCP server to be already running (e.g. started with
+ * ``DOCSEARCH_TRANSPORT=http python -m doc_search.presentation.mcp``).
+ * Discovers MCP tools and registers them as pi custom tools.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
-import { spawn, type ChildProcess } from "node:child_process";
-import { createInterface } from "node:readline";
 
 // ── MCP JSON-RPC types ──────────────────────────────────────────
 
@@ -47,57 +46,29 @@ type PendingRequest = {
   signal?: AbortSignal;
 };
 
-// ── MCP Client over stdio ──────────────────────────────────────
+// ── MCP Client over HTTP ───────────────────────────────────────
 
-class McpStdioClient {
-  private proc: ChildProcess | null = null;
+class McpHttpClient {
   private requestId = 0;
   private pending = new Map<number, PendingRequest>();
+  private connected = false;
+  private baseUrl: string;
 
-  async start(cwd: string): Promise<void> {
-    this.proc = spawn(".venv/Scripts/python.exe", ["-m", "doc_search.presentation.mcp"], {
-      cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
-    });
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl.replace(/\/$/, "");
+  }
 
-    const rl = createInterface({ input: this.proc.stdout! });
-
-    rl.on("line", (line: string) => {
-      try {
-        const msg = JSON.parse(line) as JsonRpcResponse;
-        const pending = this.pending.get(msg.id);
-        if (pending) {
-          this.pending.delete(msg.id);
-          clearTimeout(pending.timer);
-          if (pending.abortHandler) {
-            // `AbortSignal` is an EventTarget in modern Node.
-            // Remove the handler defensively if this request was cancellable.
-            pending.signal?.removeEventListener("abort", pending.abortHandler);
-          }
-          const elapsed = Date.now() - pending.startedAt;
-          console.error(`doc-search MCP ${pending.method} completed in ${elapsed}ms`);
-          pending.resolve(msg);
-        }
-      } catch {
-        // skip non-JSON lines
-      }
-    });
-
-    this.proc.stderr?.on("data", (d) => {
-      // Forward backend timing/search logs to the Pi process log.
-      console.error(String(d));
-    });
-
-    // Send initialize
+  async start(): Promise<void> {
     await this.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
       clientInfo: { name: "pi-doc-search", version: "1.0.0" },
     });
+    this.connected = true;
+  }
 
-    // Send initialized notification
-    this.send({ jsonrpc: "2.0", method: "notifications/initialized" });
+  isConnected(): boolean {
+    return this.connected;
   }
 
   async listTools(): Promise<McpToolDef[]> {
@@ -105,9 +76,19 @@ class McpStdioClient {
     return (res.result as { tools: McpToolDef[] })?.tools ?? [];
   }
 
-  async callTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
-    const res = await this.request("tools/call", { name, arguments: args }, signal);
-    const content = (res.result as { content?: Array<{ type: string; text?: string }> })?.content;
+  async callTool(
+    name: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal
+  ): Promise<string> {
+    const res = await this.request(
+      "tools/call",
+      { name, arguments: args },
+      signal
+    );
+    const content = (
+      res.result as { content?: Array<{ type: string; text?: string }> }
+    )?.content;
     if (content && content.length > 0) {
       return content.map((c) => c.text ?? "").join("\n");
     }
@@ -124,27 +105,30 @@ class McpStdioClient {
     const startedAt = Date.now();
 
     return new Promise((resolve, reject) => {
-      const cleanup = () => {
-        const pending = this.pending.get(id);
-        if (!pending) return;
-        this.pending.delete(id);
-        clearTimeout(pending.timer);
-        if (pending.abortHandler && signal) {
-          signal.removeEventListener("abort", pending.abortHandler);
-        }
-      };
-
       const timer = setTimeout(() => {
         cleanup();
         const elapsed = Date.now() - startedAt;
-        reject(new Error(`MCP request timeout after ${elapsed}ms (configured ${timeoutMs}ms): ${method}`));
+        reject(
+          new Error(
+            `MCP request timeout after ${elapsed}ms (configured ${timeoutMs}ms): ${method}`
+          )
+        );
       }, timeoutMs);
 
       const abortHandler = () => {
         cleanup();
         const elapsed = Date.now() - startedAt;
-        this.send({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: id } });
-        reject(new Error(`MCP request cancelled after ${elapsed}ms: ${method}`));
+        reject(
+          new Error(`MCP request cancelled after ${elapsed}ms: ${method}`)
+        );
+      };
+
+      const cleanup = () => {
+        this.pending.delete(id);
+        clearTimeout(timer);
+        if (signal && abortHandler) {
+          signal.removeEventListener("abort", abortHandler);
+        }
       };
 
       if (signal?.aborted) {
@@ -159,6 +143,7 @@ class McpStdioClient {
 
       this.pending.set(id, {
         resolve: (res: JsonRpcResponse) => {
+          cleanup();
           if (res.error) reject(new Error(res.error.message));
           else resolve(res);
         },
@@ -171,24 +156,65 @@ class McpStdioClient {
         signal,
       });
 
-      console.error(`doc-search MCP ${method} started (timeout ${timeoutMs}ms)`);
-      this.send({ jsonrpc: "2.0", id, method, params });
+      console.error(
+        `doc-search MCP ${method} started (timeout ${timeoutMs}ms)`
+      );
+
+      this.sendHttp(id, method, params)
+        .then((response) => {
+          const pending = this.pending.get(id);
+          if (pending) {
+            const elapsed = Date.now() - pending.startedAt;
+            console.error(
+              `doc-search MCP ${pending.method} completed in ${elapsed}ms`
+            );
+            pending.resolve(response);
+          }
+        })
+        .catch((err) => {
+          const pending = this.pending.get(id);
+          if (pending) {
+            pending.reject(err);
+          }
+        });
     });
+  }
+
+  private async sendHttp(
+    id: number,
+    method: string,
+    params: Record<string, unknown>
+  ): Promise<JsonRpcResponse> {
+    const body: JsonRpcRequest = {
+      jsonrpc: "2.0",
+      id,
+      method,
+      params,
+    };
+
+    const response = await fetch(this.baseUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `MCP HTTP error ${response.status}: ${response.statusText}`
+      );
+    }
+
+    const text = await response.text();
+    if (!text.trim()) {
+      return { jsonrpc: "2.0", id, result: {} };
+    }
+    return JSON.parse(text) as JsonRpcResponse;
   }
 
   private timeoutFor(method: string): number {
     if (method === "tools/call") return 300000;
     if (method === "initialize" || method === "tools/list") return 30000;
     return 30000;
-  }
-
-  private send(msg: Record<string, unknown>): void {
-    if (!this.proc?.stdin) return;
-    this.proc.stdin.write(JSON.stringify(msg) + "\n");
-  }
-
-  stop(): void {
-    this.proc?.kill();
   }
 }
 
@@ -219,15 +245,21 @@ function jsonSchemaToTypeBox(schema: McpToolDef["inputSchema"]) {
 // ── Extension entry point ──────────────────────────────────────
 
 export default async function (pi: ExtensionAPI) {
-  const cwd = process.cwd();
-  const client = new McpStdioClient();
+  const baseUrl = process.env.DOCSEARCH_MCP_URL || "http://127.0.0.1:8002/mcp";
+  const client = new McpHttpClient(baseUrl);
 
   pi.on("session_start", async (_event, ctx) => {
     try {
-      ctx.ui.notify("doc-search: Connecting to MCP server...", "info");
-      await client.start(cwd);
+      ctx.ui.notify(
+        `doc-search: Connecting to MCP server at ${baseUrl}...`,
+        "info"
+      );
+      await client.start();
       const tools = await client.listTools();
-      ctx.ui.notify(`doc-search: Connected, ${tools.length} tools discovered`, "success");
+      ctx.ui.notify(
+        `doc-search: Connected, ${tools.length} tools discovered`,
+        "success"
+      );
 
       for (const tool of tools) {
         const paramsSchema = jsonSchemaToTypeBox(tool.inputSchema);
@@ -239,7 +271,11 @@ export default async function (pi: ExtensionAPI) {
           parameters: paramsSchema,
           async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
             try {
-              const result = await client.callTool(tool.name, params as Record<string, unknown>, signal);
+              const result = await client.callTool(
+                tool.name,
+                params as Record<string, unknown>,
+                signal
+              );
               return {
                 content: [{ type: "text" as const, text: result }],
                 details: {},
@@ -249,7 +285,9 @@ export default async function (pi: ExtensionAPI) {
                 content: [
                   {
                     type: "text" as const,
-                    text: `doc-search error: ${err instanceof Error ? err.message : String(err)}`,
+                    text: `doc-search error: ${
+                      err instanceof Error ? err.message : String(err)
+                    }`,
                   },
                 ],
                 details: {},
@@ -262,13 +300,11 @@ export default async function (pi: ExtensionAPI) {
       }
     } catch (err) {
       ctx.ui.notify(
-        `doc-search: Failed — ${err instanceof Error ? err.message : String(err)}`,
+        `doc-search: Failed — ${
+          err instanceof Error ? err.message : String(err)
+        }`,
         "error"
       );
     }
-  });
-
-  pi.on("session_shutdown", async () => {
-    client.stop();
   });
 }
