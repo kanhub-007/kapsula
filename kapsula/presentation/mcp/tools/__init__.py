@@ -112,4 +112,4 @@ def register_tools(mcp: FastMCP):
         return _memory_guide_text()
 
     from kapsula.infrastructure.logging_config import get_logger
-    get_logger(__name__).info("Registered 22 MCP tools across 5 modules")
+    get_logger(__name__).info("Registered 36 MCP tools across 6 modules")

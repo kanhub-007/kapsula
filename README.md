@@ -181,7 +181,7 @@ Dense and sparse scores are combined linearly after normalizing sparse scores ag
 
 ### Quality Gates
 
-After fusion (regardless of strategy), results must pass one of four quality gates:
+After fusion (regardless of strategy), results must pass one of four quality gates. This applies to **all searches** — `search_documents`, `search_collection`, `search_document`, and the hybrid retrieval layer that powers intelligent search:
 
 | Gate | Condition | Meaning |
 |------|-----------|---------|
@@ -194,19 +194,47 @@ Pure single-method results are discarded. This enforces that hybrid search requi
 
 ---
 
-## The Russian Doll: How Library Cards Solve Context Collapse
+## The Russian Doll: How Library Cards Navigate & Expand Knowledge
 
-### The Problem
+Library Cards serve a dual purpose: they are the **navigation system** for browsing your knowledge base, and the **context expansion engine** that gives search results full surrounding context.
 
-Traditional chunk-based search has a fundamental flaw: when you split a document into small chunks, each chunk loses its surrounding context. A search hit on "the function requires three parameters" tells you there's a function — but not what function, what parameters, or why you'd call it.
+### Card Hierarchy
 
-Returning all chunks from a section solves this but overwhelms the user. Returning just the hit chunk is too narrow. Neither is right.
+Library Cards exist at multiple levels, mirroring the memory hierarchy:
 
-### Our Approach: Library Cards
+| Level | Card Type | Created By | Examples |
+|-------|-----------|------------|----------|
+| Account | (no cards) | — | Account is a container, not a card source |
+| Collection | `extractive`, `collection` | Upload (`full`/`indexed` modes), Maintenance, Consolidation | Collection summary, synthesized topic cards |
+| Document | `extractive`, `subdocument`, `document` | Upload processing | Document overview, sub-document index |
+| Section | `extractive`, `level_1`–`level_3` | Upload processing | H1 pages, H2 chapters, H3 sections |
 
-During document ingestion, for every heading section (H1, H2, H3), we extract the **full section content** and store it as a Library Card — a database row containing the section title, all its text (including nested subsections), and a SHA256 hash for lookup.
+### Card Types (Two Sources)
 
-Each chunk stores a **parent reference** in its metadata — a hash pointing to the H3 section it belongs to, the H2 chapter above it, and the H1 page above that.
+**Extractive Cards** (from documents):
+- Created during document ingestion for every H1, H2, and H3 heading
+- Contain the **full section text** — the complete content under that heading
+- Each has a SHA256 hash (`doc_id`) for chunk-to-section linking
+- Levels: `level_3` (H1 pages), `level_2` (H2 chapters), `level_1` (H3 sections)
+
+**Synthesized Cards** (from consolidation):
+- Created when `run_collection_maintenance()` runs the consolidation engine
+- `topic` cards — cross-document topic synthesis with importance scores
+- `evolution` cards — track how topics change across consolidation runs
+- `gap` cards — identify missing knowledge from search patterns
+
+### Browsing Cards (Knowledge Navigation)
+
+```
+# Understand what knowledge exists BEFORE searching
+1. get_library_cards(collection_id)           → Browse structural cards (H1/H2/H3 sections)
+2. get_consolidation_status(collection_id)    → See how many topic/evolution/gap cards exist
+3. get_library_cards(collection_id, document_job_id=...) → Scope to one document
+```
+
+Filter cards by level: `level_3` (broad H1 topics), `level_2` (H2 chapters), `level_1` (H3 details).
+
+### How Chunks Link to Cards
 
 ### How It Works at Search Time
 
@@ -215,7 +243,7 @@ Each chunk stores a **parent reference** in its metadata — a hash pointing to 
 3. **Replace the chunk content** with the full parent section from the Library Card
 4. **Deduplicate** — multiple chunks from the same section collapse into one result
 
-The key insight: **the parent section already contains the chunk**. By expanding to the parent, we give the user surrounding context *without* returning duplicate content. They see the chunk embedded in its natural context.
+The key insight: **the parent section already contains the chunk**. By expanding to the parent, we give the user surrounding context without returning duplicate content.
 
 ### Context Modes
 

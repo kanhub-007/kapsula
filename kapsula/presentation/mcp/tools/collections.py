@@ -140,11 +140,12 @@ def register_collection_tools(mcp: FastMCP):
     @mcp.tool(
         name="list_stale_maintenance",
         description=(
-            "List collections that have stale (outdated) summaries or aggregate indexes. "
-            "Call this after deleting documents or uploading new ones — those operations "
-            "mark maintenance as needed but defer heavy work. If a collection appears here, "
-            "run run_collection_maintenance(collection_id) for that collection to refresh "
-            "its summary and rebuild its aggregate FAISS+BM25 indexes."
+            "List collections that have stale (outdated) summaries, aggregate indexes, "
+            "or consolidation state. Call this after deleting or uploading documents — "
+            "those operations mark maintenance/consolidation as needed but defer heavy work. "
+            "If a collection appears here, run run_collection_maintenance(collection_id) "
+            "for that collection to refresh its summary, rebuild aggregate FAISS+BM25 indexes, "
+            "and run the consolidation engine to generate topic cards."
         ),
     )
     def list_stale_maintenance() -> str:
@@ -186,10 +187,12 @@ def register_collection_tools(mcp: FastMCP):
     @mcp.tool(
         name="run_collection_maintenance",
         description=(
-            "Refresh a collection: regenerate its LLM summary and rebuild collection-level "
-            "and account-level aggregate FAISS+BM25 indexes. Use when list_stale_maintenance() "
-            "shows a collection needs maintenance, or when search results seem incomplete/outdated "
-            "after deleting or uploading documents. This is the repair tool for stale indexes."
+            "Refresh a collection: regenerate its LLM summary, rebuild collection-level "
+            "and account-level aggregate FAISS+BM25 indexes, and run the consolidation engine "
+            "to generate topic/evolution/gap cards from extracted knowledge. "
+            "Use when list_stale_maintenance() shows a collection needs maintenance, "
+            "or when search results seem incomplete/outdated after deleting or uploading documents. "
+            "This is the all-in-one repair and synthesis tool."
         ),
     )
     def run_collection_maintenance(collection_id: str) -> str:
@@ -236,12 +239,14 @@ def register_collection_tools(mcp: FastMCP):
         name="get_library_cards",
         description=(
             "Browse the knowledge structure of a collection or document. "
-            "Returns H1/H2/H3 section cards with titles and content previews — "
+            "Returns extractive H1/H2/H3 section cards with titles and content previews — "
             "like a table of contents with summaries. Use this BEFORE searching "
             "to understand what topics exist, then formulate a targeted search query. "
             "Filter by level ('level_1'=H3, 'level_2'=H2, 'level_3'=H1) or scope "
             "to one document via document_job_id. "
-            "Also use get_consolidation_status() to see topic/gap/evolution cards."
+            "For synthesized topic/evolution/gap cards from consolidation, "
+            "use get_consolidation_status(collection_id) to see what's available, "
+            "then intelligent_search to query with topic card context."
         ),
     )
     def get_library_cards(
