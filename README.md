@@ -223,29 +223,43 @@ Library Cards exist at multiple levels, mirroring the memory hierarchy:
 - `evolution` cards — track how topics change across consolidation runs
 - `gap` cards — identify missing knowledge from search patterns
 
-### Browsing Cards (Knowledge Navigation)
+### Browsing Cards (The Core Driver)
+
+Library cards are what make kapsula a **memory system**, not just search. Before you search, you browse the cards to understand what knowledge exists — then you formulate a precise query targeting what you actually need.
+
+This "browse-before-search" pattern is the intended workflow:
 
 ```
-# Understand what knowledge exists BEFORE searching
-1. get_library_cards(collection_id)           → Browse structural cards (H1/H2/H3 sections)
-2. get_consolidation_status(collection_id)    → See how many topic/evolution/gap cards exist
+# Step 1: Understand what knowledge exists
+1. get_library_cards(collection_id)           → Browse all H1/H2/H3 section cards
+2. get_consolidation_status(collection_id)    → See synthesized topic/evolution/gap cards
 3. get_library_cards(collection_id, document_job_id=...) → Scope to one document
+
+# Step 2: Formulate a targeted query based on what you see
+4. search_collection(collection_id, query="specific topic from cards")
+
+# Step 3: For complex questions, use the cards as context
+5. intelligent_search(query="compare X and Y", account_id=...)
+   → The LLM receives topic cards as Knowledge Overview before answering
 ```
 
-Filter cards by level: `level_3` (broad H1 topics), `level_2` (H2 chapters), `level_1` (H3 details).
+Filter cards by level: `level_3` (broad H1 pages), `level_2` (H2 chapters), `level_1` (H3 details).
+
+### Russian Doll: Context Expansion (Secondary Benefit)
+
+Once you've found relevant content via search, library cards also solve the context collapse problem.
 
 ### How Chunks Link to Cards
 
-### How It Works at Search Time
+During document ingestion, for every heading section (H1, H2, H3), we extract the **full section content** and store it as a Library Card. Each chunk stores a **parent reference** in its metadata — a hash pointing to the H3 section it belongs to, the H2 chapter above it, and the H1 page above that.
+
+### How Expansion Works at Search Time
 
 1. **Search returns a chunk** — a small fragment of text
 2. **Look up the chunk's parent hash** from its metadata
 3. **Replace the chunk content** with the full parent section from the Library Card
 4. **Deduplicate** — multiple chunks from the same section collapse into one result
-
-The key insight: **the parent section already contains the chunk**. By expanding to the parent, we give the user surrounding context without returning duplicate content.
-
-### Context Modes
+The key insight: **the parent section already contains the chunk**. By expanding to the parent, you get surrounding context without duplicate content.
 
 | Mode | Expands To | Use Case |
 |------|-----------|----------|
