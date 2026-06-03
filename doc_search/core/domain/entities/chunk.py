@@ -1,11 +1,16 @@
-"""Chunk domain entity."""
+"""Chunk domain entity — canonical model."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Optional
 
 
 @dataclass
 class Chunk:
+    """A token-bounded segment of document content."""
+
     id: int | None = None
     document_id: int | None = None
     sub_document_id: int | None = None

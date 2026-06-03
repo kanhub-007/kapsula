@@ -11,6 +11,7 @@ from doc_search.core.application.dto.upload_document_result import (
 from doc_search.core.application.dto.upload_ingestion_mode import (
     UploadIngestionMode,
 )
+from doc_search.core.domain.entities.document import Document
 from doc_search.core.domain.interfaces.background_processor import (
     BackgroundProcessor,
 )
@@ -20,7 +21,6 @@ from doc_search.core.domain.interfaces.document_repository import (
 from doc_search.core.domain.interfaces.progress_tracker import (
     ProgressTracker,
 )
-from doc_search.infrastructure.data import Document
 from doc_search.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
