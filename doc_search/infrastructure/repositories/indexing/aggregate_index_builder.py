@@ -101,40 +101,86 @@ class AggregateIndexBuilder:
         docs: list[Document],
         paths: AggregateIndexPaths,
         label: str,
+        *,
+        incremental: bool = True,
     ) -> tuple[str | None, str | None]:
         os.makedirs(paths.indexes_dir, exist_ok=True)
-        texts, mapping = self._collect_texts_and_mapping(docs)
-        if not texts:
-            return None, None
 
-        logger.info(
-            "Building aggregate indexes for %s: %s chunks from %s documents",
-            label,
-            len(texts),
-            len(docs),
+        existing_mapping, existing_hashes, existing_embeddings = (
+            self._load_existing_aggregate_state(paths, incremental)
         )
 
-        embeddings = self._embedder.embed(texts)
+        all_texts, all_mapping, new_texts, new_mapping = (
+            self._collect_texts_and_mapping(docs, existing_hashes)
+        )
+
+        if not all_texts:
+            return None, None
+
+        new_count = len(new_texts)
+        total_count = len(all_texts)
+        if (
+            new_count == 0
+            and existing_embeddings is not None
+            and len(existing_embeddings) > 0
+        ):
+            logger.info(
+                "All %s chunks for %s already indexed; no embedding needed",
+                total_count,
+                label,
+            )
+            embeddings = existing_embeddings
+        elif new_count > 0:
+            logger.info(
+                "Building aggregate indexes for %s: %s new chunks + %s cached = %s total from %s documents",
+                label,
+                new_count,
+                total_count - new_count,
+                total_count,
+                len(docs),
+            )
+            new_embeddings = self._embedder.embed(new_texts)
+            if existing_embeddings is not None and len(existing_embeddings) > 0:
+                embeddings = np.vstack([existing_embeddings, new_embeddings])
+            else:
+                embeddings = new_embeddings
+        else:
+            logger.info(
+                "Building aggregate indexes for %s: %s chunks from %s documents",
+                label,
+                total_count,
+                len(docs),
+            )
+            embeddings = self._embedder.embed(all_texts)
+
         faiss_path = self._build_faiss_at(embeddings, paths.faiss)
-        bm25_path = self._build_bm25_at(texts, paths.bm25)
-        self._save_mapping_at(mapping, paths.mapping)
+        bm25_path = self._build_bm25_at(all_texts, paths.bm25)
+        self._save_mapping_at(all_mapping, paths.mapping)
+
+        if paths.faiss_npy:
+            self._save_embeddings_at(embeddings, paths.faiss_npy)
 
         logger.info(
-            "Aggregate indexes built for %s: faiss=%s bm25=%s chunks=%s",
+            "Aggregate indexes built for %s: faiss=%s bm25=%s chunks=%s new=%s",
             label,
             os.path.basename(faiss_path) if faiss_path else "none",
             os.path.basename(bm25_path) if bm25_path else "none",
-            len(texts),
+            total_count,
+            new_count,
         )
         return faiss_path, bm25_path
 
     @staticmethod
     def _collect_texts_and_mapping(
         docs: list[Document],
-    ) -> tuple[list[str], list[dict[str, Any]]]:
-        texts: list[str] = []
-        mapping: list[dict[str, Any]] = []
-        seen_hashes: set[str] = set()
+        existing_hashes: set[str] | None = None,
+    ) -> tuple[list[str], list[dict[str, Any]], list[str], list[dict[str, Any]]]:
+        all_texts: list[str] = []
+        all_mapping: list[dict[str, Any]] = []
+        new_texts: list[str] = []
+        new_mapping: list[dict[str, Any]] = []
+        seen_hashes: set[str] = set(existing_hashes or set())
+        skip_hashes = existing_hashes or set()
 
         for doc in docs:
             subdocs = doc.sub_documents if hasattr(doc, "sub_documents") else []
@@ -151,23 +197,27 @@ class AggregateIndexBuilder:
                 if not content:
                     continue
 
-                texts.append(content)
                 subdoc_id = getattr(chunk, "sub_document_id", None)
                 subdoc = subdocs_by_id.get(subdoc_id) if subdoc_id else None
-                mapping.append(
-                    {
-                        "chunk_index": getattr(chunk, "chunk_index", 0),
-                        "document_id": doc.id,
-                        "document_filename": doc.filename,
-                        "sub_document_id": subdoc_id,
-                        "sub_document_key": subdoc.breadcrumb_key if subdoc else None,
-                        "collection_id": doc.collection_id,
-                        "collection_name": (
-                            doc.collection.name if doc.collection else None
-                        ),
-                    }
-                )
-        return texts, mapping
+                entry = {
+                    "chunk_hash": chunk_hash,
+                    "chunk_index": getattr(chunk, "chunk_index", 0),
+                    "document_id": doc.id,
+                    "document_filename": doc.filename,
+                    "sub_document_id": subdoc_id,
+                    "sub_document_key": subdoc.breadcrumb_key if subdoc else None,
+                    "collection_id": doc.collection_id,
+                    "collection_name": (
+                        doc.collection.name if doc.collection else None
+                    ),
+                }
+                all_texts.append(content)
+                all_mapping.append(entry)
+                if chunk_hash not in skip_hashes:
+                    new_texts.append(content)
+                    new_mapping.append(entry)
+
+        return all_texts, all_mapping, new_texts, new_mapping
 
     @staticmethod
     def _build_faiss_at(embeddings: np.ndarray, path: str) -> str:
@@ -193,3 +243,72 @@ class AggregateIndexBuilder:
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(mapping, handle)
         logger.info("Aggregate chunk mapping saved: %s entries", len(mapping))
+
+    @staticmethod
+    def _load_existing_aggregate_state(
+        paths: AggregateIndexPaths,
+        incremental: bool,
+    ) -> tuple[list[dict[str, Any]], set[str], np.ndarray | None]:
+        existing_mapping: list[dict[str, Any]] = []
+        existing_hashes: set[str] = set()
+        existing_embeddings: np.ndarray | None = None
+
+        if not incremental:
+            return existing_mapping, existing_hashes, existing_embeddings
+
+        npy_path = paths.faiss_npy
+        mapping_path = paths.mapping
+
+        if os.path.exists(mapping_path):
+            try:
+                with open(mapping_path, encoding="utf-8") as handle:
+                    existing_mapping = json.load(handle)
+                existing_hashes = {
+                    entry["chunk_hash"]
+                    for entry in existing_mapping
+                    if "chunk_hash" in entry
+                }
+                logger.debug(
+                    "Loaded %s existing mapping entries with %s known hashes",
+                    len(existing_mapping),
+                    len(existing_hashes),
+                )
+            except (json.JSONDecodeError, OSError, KeyError) as exc:
+                logger.warning(
+                    "Failed to load existing aggregate mapping: %s; rebuilding from scratch",
+                    exc,
+                )
+                existing_mapping = []
+                existing_hashes = set()
+
+        if os.path.exists(npy_path) and existing_hashes:
+            try:
+                existing_embeddings = np.load(npy_path)
+                expected = len(existing_mapping)
+                if len(existing_embeddings) != expected:
+                    logger.warning(
+                        "Embedding count mismatch: npy=%s mapping=%s; rebuilding from scratch",
+                        len(existing_embeddings),
+                        expected,
+                    )
+                    existing_embeddings = None
+                    existing_hashes = set()
+                    existing_mapping = []
+                else:
+                    logger.debug(
+                        "Loaded %s cached aggregate embeddings",
+                        len(existing_embeddings),
+                    )
+            except (OSError, ValueError) as exc:
+                logger.warning(
+                    "Failed to load aggregate embeddings: %s; rebuilding from scratch",
+                    exc,
+                )
+                existing_embeddings = None
+
+        return existing_mapping, existing_hashes, existing_embeddings
+
+    @staticmethod
+    def _save_embeddings_at(embeddings: np.ndarray, path: str) -> None:
+        np.save(path, embeddings)
+        logger.info("Aggregate embeddings saved: %s vectors", len(embeddings))

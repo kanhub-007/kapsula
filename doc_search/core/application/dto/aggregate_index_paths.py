@@ -48,5 +48,9 @@ class AggregateIndexPaths:
     def mapping(self) -> str:
         return os.path.join(self.indexes_dir, f"{self.filename_prefix}_mapping.json")
 
+    @property
+    def faiss_npy(self) -> str:
+        return os.path.join(self.indexes_dir, f"{self.filename_prefix}_faiss.index.npy")
+
     def exists(self) -> bool:
         return os.path.exists(self.faiss) and os.path.exists(self.bm25)
