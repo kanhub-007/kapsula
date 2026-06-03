@@ -188,6 +188,19 @@ class MultiIndexSearcher:
             search.account_id,
         )
 
+        # Fast path: use aggregate index when searching a single collection
+        if scope.kind == SearchScopeKind.COLLECTION and len(selected) == 1:
+            aggregate_results = await self._search_collection_via_aggregate(
+                selected[0], search
+            )
+            if aggregate_results is not None:
+                logger.info(
+                    "Collection search total time %.3fs: aggregate fast path returned=%s",
+                    perf_counter() - total_started,
+                    len(aggregate_results),
+                )
+                return aggregate_results
+
         document_concurrency = _document_concurrency()
         document_semaphore = asyncio.Semaphore(document_concurrency)
 
@@ -246,6 +259,102 @@ class MultiIndexSearcher:
             len(top),
         )
         return top
+
+    async def _search_collection_via_aggregate(
+        self,
+        collection: dict,
+        search: CollectionSearch,
+    ) -> list[dict] | None:
+        """Try to search using a collection-level aggregate index.
+
+        Returns results if an aggregate index exists, or None to fall
+        through to per-document search.
+        """
+        import os
+
+        from doc_search.infrastructure.repositories.indexing.aggregate_index_builder import (
+            aggregate_index_exists,
+            load_aggregate_chunk_mapping,
+        )
+        from doc_search.infrastructure.repositories.indexing import (
+            load_faiss_index,
+            load_bm25_index,
+        )
+        from doc_search.infrastructure.repositories.retrieval import (
+            DenseRetriever,
+            SparseRetriever,
+        )
+        from doc_search.core.domain.fusion.weighted_fusion import WeightedFusion
+        from doc_search.core.application.use_cases.hybrid_searcher import (
+            HybridSearcher,
+        )
+
+        account_guid = collection.get("account_guid")
+        collection_guid = collection.get("collection_guid")
+        indexes_dir = os.path.join(
+            *[p for p in ("data", "indexes", account_guid, collection_guid) if p]
+        )
+
+        if not aggregate_index_exists(indexes_dir):
+            logger.info(
+                "No aggregate index found for collection '%s'; falling back to per-document search",
+                collection.get("name"),
+            )
+            return None
+
+        logger.info(
+            "Using aggregate index for collection '%s'",
+            collection.get("name"),
+        )
+
+        faiss_path = os.path.join(indexes_dir, "collection_aggregate_faiss.index")
+        bm25_path = os.path.join(indexes_dir, "collection_aggregate_bm25.pkl")
+
+        faiss_index = load_faiss_index(faiss_path)
+        bm25_data = load_bm25_index(bm25_path)
+        bm25_index = bm25_data[0] if isinstance(bm25_data, tuple) else bm25_data
+        texts = bm25_data[1] if isinstance(bm25_data, tuple) else bm25_data
+
+        dense = DenseRetriever(faiss_index, texts, self._embedder)
+        sparse = SparseRetriever(bm25_index, texts)
+        searcher = HybridSearcher(
+            dense=dense,
+            sparse=sparse,
+            fusion=WeightedFusion(),
+            reranker=None,
+        )
+
+        results = await searcher.search(
+            query=search.query,
+            top_k=search.top_k * search.per_document_multiplier * 2,
+            rerank=False,
+            node_type_filter=search.node_type_filter,
+        )
+
+        mapping = load_aggregate_chunk_mapping(indexes_dir)
+        for result in results:
+            idx = result.get("index", -1)
+            if 0 <= idx < len(mapping):
+                source = mapping[idx]
+                result.update(
+                    collection_id=source.get("collection_id"),
+                    collection_name=source.get("collection_name"),
+                    collection_route_confidence=collection.get(
+                        "collection_route_confidence", 1.0
+                    ),
+                    document_id=source.get("document_id"),
+                    document_filename=source.get("document_filename"),
+                    sub_document_id=source.get("sub_document_id"),
+                    sub_document_key=source.get("sub_document_key"),
+                    subdocument_route_confidence=1.0,
+                )
+
+        logger.info(
+            "Aggregate index search returned %s results for collection '%s'",
+            len(results),
+            collection.get("name"),
+        )
+        return results
 
     async def _search_collection_documents(
         self,
@@ -473,6 +582,12 @@ class MultiIndexSearcher:
                     "document_count": doc_count,
                     "document_list": doc_list,
                     "collection_route_confidence": 1.0,
+                    "account_guid": (
+                        getattr(coll.account, "account_id", None)
+                        if hasattr(coll, "account") and coll.account
+                        else None
+                    ),
+                    "collection_guid": getattr(coll, "collection_id", None),
                 }
             )
         return metadata

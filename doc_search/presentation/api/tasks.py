@@ -526,6 +526,9 @@ def process_document(job_id: str, markdown_content: str, max_tokens: int, db: Se
         db.commit()
         logger.debug(f"Job {job_id}: Database updated with completion status")
 
+        # Step 4: Rebuild collection aggregate index
+        _rebuild_collection_aggregate_index(db, document, processing_status, job_id)
+
         # Update progress: Completed
         processing_status[job_id] = {
             "status": "completed",
@@ -871,6 +874,9 @@ def process_document_with_subdocuments(
         except Exception as e:
             logger.error(f"Job {job_id}: Failed to update collection library card: {e}")
 
+        # Step 5: Rebuild collection aggregate index
+        _rebuild_collection_aggregate_index(db, document, processing_status, job_id)
+
         # Update progress: Completed
         processing_status[job_id] = {
             "status": "completed",
@@ -1075,6 +1081,47 @@ def update_collection_library_card(document_id: int, db: Session):
 
         db.commit()
         logger.info(f"✓ Updated collection library card for collection {collection.id}")
+
+
+def _rebuild_collection_aggregate_index(
+    db: Session,
+    document: Document,
+    processing_status: dict,
+    job_id: str,
+) -> None:
+    """Rebuild the collection aggregate index after a document is completed."""
+    try:
+        from doc_search.infrastructure.repositories.indexing.aggregate_index_builder import (
+            AggregateIndexBuilder,
+        )
+        from doc_search.startup import create_embedder
+
+        collection = document.collection
+        if not collection:
+            return
+
+        account = collection.account
+        account_guid = account.account_id if account else None
+
+        embedder = create_embedder()
+        builder = AggregateIndexBuilder(embedder, DATA_DIR)
+        builder.build(
+            db,
+            collection_id=collection.id,
+            account_id=account_guid,
+            collection_guid=collection.collection_id,
+        )
+        logger.info(
+            "Job %s: Collection aggregate index rebuilt for collection '%s'",
+            job_id,
+            collection.name,
+        )
+    except Exception as exc:
+        logger.error(
+            "Job %s: Failed to rebuild aggregate index: %s",
+            job_id,
+            exc,
+        )
 
 
 def get_processing_status(job_id: str) -> dict:

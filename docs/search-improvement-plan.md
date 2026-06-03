@@ -912,7 +912,7 @@ Then add confidence scoring and quotas to improve result quality.
 - [x] Add `get_search_progress`.
 - [x] Add `get_search_results`.
 - [x] Add `cancel_search`.
-- [ ] Consider async intelligent-search job tools.
+- [x] Consider async intelligent-search job tools.
 
 ## Phase 4
 
@@ -957,7 +957,7 @@ Then add confidence scoring and quotas to improve result quality.
 
 ## Phase 11
 
-- [ ] Design aggregate index schema/storage.
-- [ ] Build collection-level indexes during ingestion.
+- [x] Design aggregate index schema/storage.
+- [x] Build collection-level indexes during ingestion.
 - [ ] Build account/global indexes if needed.
-- [ ] Update broad search to use aggregate indexes.
+- [x] Update broad search to use aggregate indexes.
