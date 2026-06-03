@@ -167,6 +167,8 @@ def register_collection_tools(mcp: FastMCP):
                     f"summary_stale={state.get('summary_stale')} "
                     f"collection_index_stale={state.get('collection_index_stale')} "
                     f"account_index_stale={state.get('account_index_stale')} "
+                    f"consolidation_stale={state.get('consolidation_stale')} "
+                    f"uploads_since_consolidation={state.get('uploads_since_consolidation', 0)} "
                     f"updated={state.get('updated_at', '?')}"
                 )
             return "\n".join(lines)

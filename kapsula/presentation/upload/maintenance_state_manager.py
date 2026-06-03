@@ -73,7 +73,7 @@ class MaintenanceStateManager:
             return state
 
     def list_stale(self) -> list[dict[str, Any]]:
-        """Return all states with pending maintenance."""
+        """Return all states with pending maintenance (including consolidation)."""
         with _STATE_LOCK:
             states = list(self._load_states().values())
         stale = [
@@ -82,8 +82,61 @@ class MaintenanceStateManager:
             if state.get("summary_stale")
             or state.get("collection_index_stale")
             or state.get("account_index_stale")
+            or state.get("consolidation_stale")
         ]
         return sorted(stale, key=lambda item: item.get("updated_at", ""), reverse=True)
+
+    # ── consolidation tracking (Phase 2) ──────────────────────
+
+    def increment_uploads(self, collection_id: str) -> dict[str, Any]:
+        """Increment the uploads-since-consolidation counter.
+
+        Called after every upload_document or delete_document on a collection.
+        """
+        with _STATE_LOCK:
+            states = self._load_states()
+            for _key, state in states.items():
+                if state.get("collection_id") == collection_id:
+                    state["uploads_since_consolidation"] = (
+                        state.get("uploads_since_consolidation", 0) + 1
+                    )
+                    state["consolidation_stale"] = True
+                    state["updated_at"] = datetime.utcnow().isoformat()
+                    self._save_states(states)
+                    return state
+            # No existing state — create one
+            state = {
+                "collection_id": collection_id,
+                "collection_db_id": None,
+                "collection_name": "?",
+                "account_db_id": None,
+                "summary_stale": False,
+                "collection_index_stale": False,
+                "account_index_stale": False,
+                "consolidation_stale": True,
+                "uploads_since_consolidation": 1,
+                "last_consolidation_at": None,
+                "updated_at": datetime.utcnow().isoformat(),
+            }
+            states[collection_id] = state
+            self._save_states(states)
+            return state
+
+    def mark_consolidated(self, collection_id: str) -> dict[str, Any]:
+        """Reset consolidation tracking after a successful consolidation run."""
+        with _STATE_LOCK:
+            states = self._load_states()
+            for _key, state in states.items():
+                if state.get("collection_id") == collection_id:
+                    state["consolidation_stale"] = False
+                    state["uploads_since_consolidation"] = 0
+                    state["last_consolidation_at"] = datetime.utcnow().isoformat()
+                    state["updated_at"] = datetime.utcnow().isoformat()
+                    self._save_states(states)
+                    return state
+            return {}
+
+    # ── internal helpers ──────────────────────────────────────
 
     @staticmethod
     def _new_state(collection: Collection) -> dict[str, Any]:
@@ -95,6 +148,9 @@ class MaintenanceStateManager:
             "summary_stale": False,
             "collection_index_stale": False,
             "account_index_stale": False,
+            "consolidation_stale": False,
+            "uploads_since_consolidation": 0,
+            "last_consolidation_at": None,
             "updated_at": datetime.utcnow().isoformat(),
         }
 

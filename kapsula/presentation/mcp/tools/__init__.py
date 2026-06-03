@@ -9,9 +9,17 @@ from fastmcp import FastMCP
 from .accounts import register_account_tools
 from .collections import register_collection_tools
 from .documents import register_document_tools
-from .search import register_search_tools
 from .export import register_export_tools
-from ._shared import _clear_cache
+from .search import register_search_tools
+from ._shared import (
+    _clear_cache,
+    _get_chat_client,
+    _get_embedder,
+    _get_intelligent_searcher,
+    _get_multi_index_searcher,
+    _get_query_planner,
+    _get_reranker,
+)
 
 
 def _memory_guide_text() -> str:

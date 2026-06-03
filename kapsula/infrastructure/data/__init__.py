@@ -1,13 +1,16 @@
-from .connection import Base, engine, SessionLocal, DATA_DIR, init_db, get_db
+from .connection import Base, DATA_DIR, SessionLocal, engine, get_db, init_db
 from .tables import (
     Account,
+    CardReference,
+    Chunk,
     Collection,
+    ConsolidationRun,
     Document,
     DocumentStructure,
+    LibraryCard,
+    SearchMissLog,
     SubDocument,
     SubDocumentPage,
-    LibraryCard,
-    Chunk,
     UploadJob,
 )
 
@@ -19,12 +22,15 @@ __all__ = [
     "init_db",
     "get_db",
     "Account",
+    "CardReference",
+    "Chunk",
     "Collection",
+    "ConsolidationRun",
     "Document",
     "DocumentStructure",
+    "LibraryCard",
+    "SearchMissLog",
     "SubDocument",
     "SubDocumentPage",
-    "LibraryCard",
-    "Chunk",
     "UploadJob",
 ]
