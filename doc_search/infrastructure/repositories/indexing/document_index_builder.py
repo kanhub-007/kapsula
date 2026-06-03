@@ -39,7 +39,7 @@ class DocumentIndexBuilder:
     ) -> IndexPaths:
         logger.info(f"Building indexes for document {job_id} with {len(chunks)} chunks")
 
-        filtered = self._filter(chunks, min_chunk_length)
+        filtered = self.filter_chunks(chunks, min_chunk_length)
         if not filtered:
             raise ValueError(
                 f"No valid chunks found after filtering "
@@ -49,14 +49,52 @@ class DocumentIndexBuilder:
         logger.debug(f"Processing {len(filtered)} chunks after filtering")
         texts = [c["content"] for c in filtered]
         indexes_dir = self._indexes_dir(account_id, collection_id)
+        embeddings = self.embed_texts(texts)
 
         return IndexPaths(
-            faiss=self._build_faiss(texts, job_id, indexes_dir),
+            faiss=self._build_faiss_from_embeddings(embeddings, job_id, indexes_dir),
             bm25=self._build_bm25(texts, job_id, indexes_dir),
         )
 
-    def _filter(
-        self, chunks: List[Dict[str, Any]], min_length: int
+    def build_from_embeddings(
+        self,
+        chunks: List[Dict[str, Any]],
+        embeddings,
+        job_id: str,
+        *,
+        account_id: str | None = None,
+        collection_id: str | None = None,
+        min_chunk_length: int = 50,
+    ) -> IndexPaths:
+        """Build indexes from precomputed embeddings for this chunk set."""
+        filtered = self.filter_chunks(chunks, min_chunk_length)
+        if not filtered:
+            raise ValueError(
+                f"No valid chunks found after filtering "
+                f"(min_length={min_chunk_length})"
+            )
+        if len(embeddings) != len(filtered):
+            raise ValueError(
+                "Embedding count does not match filtered chunk count: "
+                f"embeddings={len(embeddings)} chunks={len(filtered)}"
+            )
+
+        texts = [c["content"] for c in filtered]
+        indexes_dir = self._indexes_dir(account_id, collection_id)
+        return IndexPaths(
+            faiss=self._build_faiss_from_embeddings(embeddings, job_id, indexes_dir),
+            bm25=self._build_bm25(texts, job_id, indexes_dir),
+        )
+
+    def embed_texts(self, texts: List[str]):
+        """Embed texts using the configured embedder."""
+        logger.info(f"Generating embeddings for {len(texts)} chunks")
+        embeddings = self._embedder.embed(texts)
+        logger.debug(f"Embedding generation complete. Shape: {embeddings.shape}")
+        return embeddings
+
+    def filter_chunks(
+        self, chunks: List[Dict[str, Any]], min_length: int = 50
     ) -> List[Dict[str, Any]]:
         kept = [
             c
@@ -85,12 +123,9 @@ class DocumentIndexBuilder:
         os.makedirs(path, exist_ok=True)
         return path
 
-    def _build_faiss(self, texts: List[str], job_id: str, indexes_dir: str) -> str:
-        logger.info(f"Generating embeddings for {len(texts)} chunks")
-
-        embeddings = self._embedder.embed(texts)
-        logger.debug(f"Embedding generation complete. Shape: {embeddings.shape}")
-
+    def _build_faiss_from_embeddings(
+        self, embeddings, job_id: str, indexes_dir: str
+    ) -> str:
         normalized = embeddings.astype("float32")
         faiss.normalize_L2(normalized)
 

@@ -35,6 +35,9 @@ from doc_search.core.application.use_cases.collection_summary import (
 from doc_search.core.application.use_cases.upload.upload_ingestion_strategy_factory import (
     UploadIngestionStrategyFactory,
 )
+from doc_search.presentation.upload.sub_document_batch_indexer import (
+    SubDocumentBatchIndexer,
+)
 from doc_search.presentation.upload.upload_progress_tracker import UploadProgressTracker
 from doc_search.infrastructure.logging_config import get_logger
 
@@ -698,6 +701,8 @@ def process_document_with_subdocuments(
             )
             builder = DocumentIndexBuilder(embedder, DATA_DIR)
 
+        pending_subdocument_indexes: list[dict[str, Any]] = []
+
         for breadcrumb_key, pages in subdocs.items():
             subdoc_count += 1
             progress = 10 + int((subdoc_count / len(subdocs)) * 70)  # 10-80%
@@ -770,47 +775,17 @@ def process_document_with_subdocuments(
 
             total_chunks += len(chunks)
 
-            # Build indexes for this sub-document unless upload is DB-only.
+            # Defer sub-document indexing until all chunks are known so upload
+            # can batch embeddings across sub-documents in one logical pass.
             if ingestion_strategy.build_document_indexes and builder is not None:
-                index_stage_start = time.time()
-                try:
-                    # Get account_id and collection_id for organized storage
-                    account_id = (
-                        document.collection.account.account_id
-                        if document.collection.account
-                        else None
-                    )
-                    collection_id = document.collection.collection_id
-
-                    index_paths = builder.build(
-                        chunks,
-                        job_id=f"{job_id}_subdoc_{subdoc.id}",
-                        account_id=account_id,
-                        collection_id=collection_id,
-                    )
-
-                    # Update sub-document with index paths
-                    subdoc.faiss_index_path = index_paths.faiss
-                    subdoc.bm25_index_path = index_paths.bm25
-
-                    logger.info(f"Job {job_id}: Built indexes for '{breadcrumb_key}'")
-                    logger.debug(f"  FAISS: {index_paths.faiss}")
-                    logger.debug(f"  BM25: {index_paths.bm25}")
-
-                except Exception as e:
-                    logger.error(
-                        f"Job {job_id}: Failed to build indexes for '{breadcrumb_key}': {e}"
-                    )
-                    # Continue without indexes
-                finally:
-                    _upload_progress.log_stage(
-                        job_id,
-                        "subdocument_indexing",
-                        index_stage_start,
-                        subdocument=subdoc_count,
-                        chunks=len(chunks),
-                        ingestion_mode=ingestion_mode,
-                    )
+                pending_subdocument_indexes.append(
+                    {
+                        "subdoc_id": subdoc.id,
+                        "subdoc_count": subdoc_count,
+                        "breadcrumb_key": breadcrumb_key,
+                        "chunks": chunks,
+                    }
+                )
             else:
                 logger.info(
                     "Job %s: Skipping indexes for sub-document '%s' because ingestion_mode=fast",
@@ -940,6 +915,16 @@ def process_document_with_subdocuments(
                 ingestion_mode=ingestion_mode,
             )
             logger.info(f"Job {job_id}: Completed processing '{breadcrumb_key}'")
+
+        if ingestion_strategy.build_document_indexes and builder is not None:
+            SubDocumentBatchIndexer(builder, _upload_progress).build(
+                db=db,
+                document=document,
+                pending_subdocument_indexes=pending_subdocument_indexes,
+                job_id=job_id,
+                upload_start_time=start_time,
+                ingestion_mode=ingestion_mode,
+            )
 
         # Step 3: Create main document LibraryCard
         document_card_stage_start = time.time()
