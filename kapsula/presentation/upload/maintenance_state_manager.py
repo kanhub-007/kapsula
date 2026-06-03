@@ -55,8 +55,15 @@ class MaintenanceStateManager:
         summary: bool = True,
         collection_index: bool = True,
         account_index: bool = True,
+        consolidation: bool = False,
     ) -> dict[str, Any]:
-        """Clear selected deferred maintenance flags for a collection."""
+        """Clear selected deferred maintenance flags for a collection.
+
+        Consolidation is tracked separately from index/summary maintenance —
+        pass ``consolidation=True`` explicitly when you also want to reset
+        consolidation state (typically after a successful consolidation run).
+        Prefer :meth:`mark_consolidated` for that workflow.
+        """
         with _STATE_LOCK:
             states = self._load_states()
             key = str(collection.id)
@@ -67,6 +74,10 @@ class MaintenanceStateManager:
                 state["collection_index_stale"] = False
             if account_index:
                 state["account_index_stale"] = False
+            if consolidation:
+                state["consolidation_stale"] = False
+                state["uploads_since_consolidation"] = 0
+                state["last_consolidation_at"] = datetime.utcnow().isoformat()
             state["updated_at"] = datetime.utcnow().isoformat()
             states[key] = state
             self._save_states(states)
@@ -87,11 +98,12 @@ class MaintenanceStateManager:
         return sorted(stale, key=lambda item: item.get("updated_at", ""), reverse=True)
 
     # ── consolidation tracking (Phase 2) ──────────────────────
-
     def increment_uploads(self, collection_id: str) -> dict[str, Any]:
         """Increment the uploads-since-consolidation counter.
 
         Called after every upload_document or delete_document on a collection.
+        Raises ``KeyError`` if no maintenance state exists for this collection.
+        Callers should ensure ``mark_collection_stale`` was called first.
         """
         with _STATE_LOCK:
             states = self._load_states()
@@ -104,7 +116,10 @@ class MaintenanceStateManager:
                     state["updated_at"] = datetime.utcnow().isoformat()
                     self._save_states(states)
                     return state
-            # No existing state — create one
+            raise KeyError(
+                f"No maintenance state for collection {collection_id} -- "
+                f"call mark_collection_stale first"
+            )
             state = {
                 "collection_id": collection_id,
                 "collection_db_id": None,
