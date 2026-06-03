@@ -655,6 +655,76 @@ def register_tools(mcp: FastMCP):
             lines.append(f"  Error: {job['error']}")
         return "\n".join(lines)
 
+    @mcp.tool(
+        name="get_upload_metrics",
+        description="Aggregate upload metrics: counts by status, durations, and per-ingestion-mode breakdown.",
+    )
+    def get_upload_metrics() -> str:
+        db = _get_db()
+        try:
+            from doc_search.infrastructure.data import UploadJob
+            from sqlalchemy import func
+
+            total = db.query(UploadJob).count()
+            if total == 0:
+                return "No upload jobs recorded yet."
+
+            completed = (
+                db.query(UploadJob).filter(UploadJob.status == "completed").count()
+            )
+            failed = db.query(UploadJob).filter(UploadJob.status == "failed").count()
+            processing = (
+                db.query(UploadJob).filter(UploadJob.status == "processing").count()
+            )
+
+            durations = [
+                row[0]
+                for row in db.query(UploadJob.duration)
+                .filter(UploadJob.duration.isnot(None))
+                .all()
+                if row[0] is not None
+            ]
+            avg_duration = sum(durations) / len(durations) if durations else None
+            max_duration = max(durations) if durations else None
+            total_chunks = (
+                db.query(func.sum(UploadJob.chunk_count))
+                .filter(UploadJob.chunk_count.isnot(None))
+                .scalar()
+                or 0
+            )
+
+            mode_stats = (
+                db.query(
+                    UploadJob.ingestion_mode,
+                    func.count(UploadJob.id),
+                    func.avg(UploadJob.duration),
+                )
+                .filter(UploadJob.ingestion_mode.isnot(None))
+                .group_by(UploadJob.ingestion_mode)
+                .all()
+            )
+
+            lines = [
+                "Upload Metrics",
+                f"  Total jobs: {total}",
+                f"  Completed: {completed}",
+                f"  Failed: {failed}",
+                f"  Processing: {processing}",
+                f"  Total chunks indexed: {total_chunks}",
+            ]
+            if avg_duration is not None:
+                lines.append(f"  Average duration: {avg_duration:.1f}s")
+            if max_duration is not None:
+                lines.append(f"  Max duration: {max_duration:.1f}s")
+            if mode_stats:
+                lines.append("\n  By ingestion mode:")
+                for mode, count, avg_dur in mode_stats:
+                    dur = f"{avg_dur:.1f}s" if avg_dur else "—"
+                    lines.append(f"    {mode}: {count} jobs, avg {dur}")
+            return "\n".join(lines)
+        finally:
+            db.close()
+
     # ═══════════════════════════════════════════════════════════
     #  DOCUMENTS
     # ═══════════════════════════════════════════════════════════
