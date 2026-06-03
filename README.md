@@ -1,8 +1,32 @@
 # Kapsula
 
-Hybrid document search engine — FAISS vector search + BM25 keyword retrieval with LLM-powered intelligent question answering, built on a **Russian Doll** hierarchical architecture.
+**Structured knowledge memory system for AI assistants** — hierarchical document ingestion, dual-index retrieval (FAISS + BM25), and LLM-powered reasoning, built on a **Russian Doll** context-expansion architecture.
+
+Designed to serve as a persistent, searchable knowledge layer that LLMs can read from and write to via the MCP protocol.
 
 ---
+
+## Memory System Architecture
+
+Kapsula organizes knowledge in a 3-level hierarchy designed for AI memory:
+
+```
+Account (tenant / brain)
+ └─ Collection (knowledge domain: "Dog Training", "Project X", "API Docs")
+     └─ Document (a markdown file of connected facts)
+         └─ Sub-documents (H1 sections) → Chunks (H2/H3 sections)
+```
+
+Key design decisions that make this a memory system, not just search:
+
+| Capability | How Kapsula Does It |
+|-----------|-------------------|
+| **Write** | Upload markdown documents; chunker splits on headings; dual FAISS+BM25 indexes built automatically |
+| **Read** | Hybrid retrieval (semantic + keyword), cross-encoder reranking, quality gates |
+| **Reason** | LLM query planner decomposes questions, searches sub-questions, synthesizes grounded answers |
+| **Structure** | Library Cards preserve full section context (Russian Doll architecture) — search hits expand to their parent H2/H3 section so the LLM sees complete context, not isolated fragments |
+| **Update** | Delete + re-upload pattern; aggregate indexes rebuild automatically |
+| **Organize** | Collection-level routing (LLM picks the right knowledge domain per query); account-level aggregate indexes |
 
 ## What It Does
 
@@ -12,6 +36,69 @@ Hybrid document search engine — FAISS vector search + BM25 keyword retrieval w
 - **Answer** questions via LLM query planning and grounded answer generation
 - **Expand** context using Library Cards — pull in parent sections around search hits
 - **Serve** as a FastAPI REST API and/or an MCP server for AI assistant integration
+
+---
+
+## Usage Guide for AI Assistants (MCP)
+
+Kapsula exposes 19+ tools via the MCP protocol. Here's the intended workflow:
+
+### First-Time Setup
+
+```
+1. create_account(name="My Brain")          → account_id
+2. create_collection(name="Knowledge", account_id=...)  → collection_id
+```
+
+### Writing Knowledge
+
+```
+3. Write a markdown file on disk with your knowledge
+4. upload_document(file_path="/path/to/knowledge.md", collection_id=..., ingestion_mode="indexed")
+   → job_id (use get_document_progress to track)
+```
+
+**Sizing guidance:**
+- Stable, interconnected knowledge → one medium document (1-5 pages). The chunker splits on headings so cross-section context is preserved.
+- Frequently changing facts → separate small document (1-3 paragraphs). Isolate volatile info so updates are cheap.
+- Reference tables (configs, prices, dosages) → separate small document.
+- Use descriptive H2/H3 headings to define natural sub-document boundaries.
+
+### Reading / Searching
+
+Three search scopes, from narrowest to broadest:
+
+| Tool | Scope | Use When |
+|------|-------|----------|
+| `search_document(job_id, ...)` | One document | You know which specific doc has the answer |
+| `search_collection(collection_id, ...)` | One collection | You know the knowledge domain |
+| `search_documents(query, ...)` | All collections | Broad exploration across domains |
+| `intelligent_search(query, ...)` | All collections + LLM | You want a synthesized answer, not just chunks |
+
+**Context modes** (`context_mode` parameter):
+- `"none"` — return raw chunk text only
+- `"narrow"` — expand each hit to its parent H3 section (more context)
+- `"deep"` — expand to parent H2 chapter (full surrounding context, best for LLM reasoning)
+
+### Updating Knowledge
+
+Kapsula is **append-optimized** — there's no in-place edit. To update:
+
+```
+1. get_collection(collection_id) → find the document's job_id
+2. delete_document(job_id)       → soft-delete, rebuild indexes
+3. Re-upload the updated file
+```
+
+### Background Search
+
+For long-running searches, use the async pattern:
+
+```
+start_search_documents(query, ...)   → search_job_id
+get_search_progress(search_job_id)   → poll status
+get_search_results(search_job_id)    → retrieve results when completed
+```
 
 ---
 

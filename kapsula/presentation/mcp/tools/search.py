@@ -244,7 +244,15 @@ def register_search_tools(mcp: FastMCP):
 
     @mcp.tool(
         name="search_documents",
-        description="Hybrid search (FAISS + BM25) across all collections. Returns chunks with scores and source info.",
+        description=(
+            "Search across ALL collections in an account with hybrid FAISS+BM25 retrieval. "
+            "Returns ranked chunks with scores and source info. Use for broad exploration when "
+            "you don't know which collection holds the answer. For targeted searches, prefer "
+            "search_collection (scoped to one domain) or search_document (scoped to one file). "
+            "context_mode: 'none'=raw chunk, 'narrow'=H3 section, 'deep'=H2 chapter. "
+            "node_type_filter: comma-separated types like 'table,code' to restrict to specific content kinds. "
+            "When you need a synthesized answer (not just chunks), use intelligent_search instead."
+        ),
     )
     async def search_documents(
         query: str,
@@ -267,7 +275,13 @@ def register_search_tools(mcp: FastMCP):
 
     @mcp.tool(
         name="search_collection",
-        description="Hybrid search within a single collection by collection_id. Faster than broad search and broader than search_document.",
+        description=(
+            "Search within ONE collection (knowledge domain) by collection_id. "
+            "Faster and more precise than search_documents because it's scoped to a single domain. "
+            "Use when you know which collection holds the relevant knowledge (e.g., search only 'Dog Training' "
+            "docs, not all collections). context_mode: 'none'=raw chunk, 'narrow'=H3 section, 'deep'=H2 chapter. "
+            "node_type_filter: comma-separated like 'table,code'. Get collection_id from list_collections or get_account."
+        ),
     )
     async def search_collection(
         collection_id: str,
@@ -290,7 +304,13 @@ def register_search_tools(mcp: FastMCP):
 
     @mcp.tool(
         name="start_search_documents",
-        description="Start a background search across collections and return a search_job_id for polling.",
+        description=(
+            "Start a background hybrid search and return a search_job_id for polling. "
+            "Use this for long-running searches where you want to poll progress asynchronously. "
+            "After starting, use get_search_progress(job_id) to check status and "
+            "get_search_results(job_id) when status='completed'. "
+            "context_mode: 'none'/'narrow'/'deep'. node_type_filter: comma-separated like 'table,code'."
+        ),
     )
     async def start_search_documents(
         query: str,
@@ -372,7 +392,13 @@ def register_search_tools(mcp: FastMCP):
 
     @mcp.tool(
         name="start_intelligent_search",
-        description="Start a background intelligent search (LLM-powered) and return a search_job_id for polling.",
+        description=(
+            "Start a background intelligent (LLM-powered) search and return a search_job_id. "
+            "Poll with get_intelligent_search_progress(job_id) and retrieve with "
+            "get_intelligent_search_results(job_id) when status='completed'. "
+            "This is the async version of intelligent_search — use for complex queries "
+            "that may take time. context_mode: 'none'/'narrow'/'deep'."
+        ),
     )
     async def start_intelligent_search(
         query: str,
@@ -440,7 +466,15 @@ def register_search_tools(mcp: FastMCP):
 
     @mcp.tool(
         name="intelligent_search",
-        description="LLM-powered search across collections: plans sub-questions, searches, generates a grounded answer.",
+        description=(
+            "LLM-powered search across collections — NOT just chunk retrieval. "
+            "The system plans sub-questions, executes multiple searches, evaluates results, "
+            "and synthesizes a grounded answer with reasoning. Use when the user asks a complex "
+            "question that requires reasoning across documents ('how do X and Y relate?', "
+            "'what's the best approach for Z?'). For simple fact retrieval, use search_collection "
+            "or search_documents instead — they're faster. context_mode: 'none'/'narrow'/'deep'. "
+            "enable_planning=True uses the LLM to plan sub-questions for better coverage."
+        ),
     )
     async def intelligent_search(
         query: str,
@@ -462,7 +496,12 @@ def register_search_tools(mcp: FastMCP):
 
     @mcp.tool(
         name="search_document",
-        description="Hybrid search within a single document by job_id. Use for targeted searches in a specific doc.",
+        description=(
+            "Search within ONE specific document by job_id (returned from upload_document or get_collection). "
+            "Most precise scope — use when you know exactly which document contains the answer. "
+            "context_mode: 'none'=raw chunk, 'narrow'=H3 section, 'deep'=H2 chapter. "
+            "node_type_filter: comma-separated like 'table,code'."
+        ),
     )
     async def search_document(
         job_id: str,
@@ -539,7 +578,12 @@ def register_search_tools(mcp: FastMCP):
 
     @mcp.tool(
         name="intelligent_search_document",
-        description="LLM-powered search within a single document: plans, searches, and generates a grounded answer.",
+        description=(
+            "LLM-powered reasoning within ONE document — plans sub-questions, searches, and synthesizes a grounded answer. "
+            "Use when you need to reason about a specific document's content ('summarize this doc', "
+            "'what does this doc say about X?'). context_mode: 'none'/'narrow'/'deep'. "
+            "enable_planning=True lets the LLM decompose complex questions into sub-searches."
+        ),
     )
     async def intelligent_search_document(
         job_id: str,

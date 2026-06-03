@@ -122,7 +122,13 @@ def register_collection_tools(mcp: FastMCP):
 
     @mcp.tool(
         name="list_stale_maintenance",
-        description="List collections with deferred summary or aggregate-index maintenance.",
+        description=(
+            "List collections that have stale (outdated) summaries or aggregate indexes. "
+            "Call this after deleting documents or uploading new ones — those operations "
+            "mark maintenance as needed but defer heavy work. If a collection appears here, "
+            "run run_collection_maintenance(collection_id) for that collection to refresh "
+            "its summary and rebuild its aggregate FAISS+BM25 indexes."
+        ),
     )
     def list_stale_maintenance() -> str:
         db = _get_db()
@@ -160,7 +166,12 @@ def register_collection_tools(mcp: FastMCP):
 
     @mcp.tool(
         name="run_collection_maintenance",
-        description="Refresh a collection summary and rebuild collection/account aggregate indexes.",
+        description=(
+            "Refresh a collection: regenerate its LLM summary and rebuild collection-level "
+            "and account-level aggregate FAISS+BM25 indexes. Use when list_stale_maintenance() "
+            "shows a collection needs maintenance, or when search results seem incomplete/outdated "
+            "after deleting or uploading documents. This is the repair tool for stale indexes."
+        ),
     )
     def run_collection_maintenance(collection_id: str) -> str:
         db = _get_db()

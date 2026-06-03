@@ -28,29 +28,17 @@ def create_server() -> FastMCP:
     server = FastMCP(
         name="kapsula",
         instructions=(
-            "Document search engine designed as a memory system for AI agents. "
+            "Kapsula is a structured knowledge memory system for AI agents. "
+            "Call get_memory_guide() first for a complete usage guide. "
             "Knowledge is organized in a 3-level hierarchy: "
             "Account (tenant/brain) → Collection (knowledge domain) → Document (topic/fact-cluster). "
             "\n\n"
-            "MEMORY MODEL — how to structure knowledge:\n"
-            "• Stable, interconnected knowledge → one medium document (1-5 pages). "
-            "  The Russian Doll chunker splits by H2 headings, preserving cross-section context for search.\n"
-            "• Frequently changing facts → separate small document (1-3 paragraphs). "
-            "  Isolate volatile information so updates touch minimal chunks.\n"
-            "• Independent reference tables (prices, dosages, configs) → separate small document.\n"
-            "• Use descriptive H2/H3 headings to define sub-document boundaries.\n"
-            "\n"
-            "UPDATING KNOWLEDGE — to modify facts:\n"
-            "1. Use get_collection() to find the document by filename and get its job_id.\n"
-            "2. Delete the old document with delete_document(job_id).\n"
-            "3. Re-upload the updated file.\n"
-            "The system is append-optimized: deleting + re-uploading is the intended update path. "
-            "Aggregate indexes rebuild automatically after delete, so searches reflect current knowledge.\n"
-            "\n"
-            "SEARCH — three scopes available:\n"
-            "• search_collection() — scoped to one knowledge domain, fastest and most precise.\n"
-            "• search_documents() — across all collections in an account.\n"
-            "• intelligent_search() — LLM plans sub-questions, searches, and synthesizes a grounded answer."
+            "QUICK REFERENCE:\n"
+            "• Writing: upload_document() to add knowledge from .md files\n"
+            "• Reading: search_collection() for domain-specific, search_documents() for broad, intelligent_search() for AI-synthesized answers\n"
+            "• Updating: get_collection() to find job_id → delete_document() → re-upload\n"
+            "• Always use context_mode='deep' when retrieving for LLM consumption.\n"
+            "• Full details: call get_memory_guide()"
         ),
     )
 
