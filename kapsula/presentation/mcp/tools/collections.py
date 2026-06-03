@@ -200,17 +200,27 @@ def register_collection_tools(mcp: FastMCP):
             if not col:
                 return f"Collection not found: {collection_id}"
             result = CollectionMaintenanceRunner(db).run(col)
-            return (
-                "Collection maintenance completed\n"
-                f"  Collection: {result['collection_name']}\n"
-                f"  collection_id: {result['collection_id']}\n"
-                f"  Summary updates: {result['summary_updates']}\n"
-                f"  Summary failures: {result['summary_failures']}\n"
-                f"  Collection FAISS: {result['collection_faiss'] or '—'}\n"
-                f"  Collection BM25: {result['collection_bm25'] or '—'}\n"
-                f"  Account FAISS: {result['account_faiss'] or '—'}\n"
-                f"  Account BM25: {result['account_bm25'] or '—'}"
-            )
+            lines = [
+                "Collection maintenance completed",
+                f"  Collection: {result['collection_name']}",
+                f"  collection_id: {result['collection_id']}",
+                f"  Summary updates: {result['summary_updates']}",
+                f"  Summary failures: {result['summary_failures']}",
+                f"  Collection FAISS: {result['collection_faiss'] or '--'}",
+                f"  Collection BM25: {result['collection_bm25'] or '--'}",
+                f"  Account FAISS: {result['account_faiss'] or '--'}",
+                f"  Account BM25: {result['account_bm25'] or '--'}",
+            ]
+            if result.get('cards_created') or result.get('cards_updated'):
+                lines.append(
+                    f"  Consolidation: {result.get('cards_created', 0)} created, "
+                    f"{result.get('cards_updated', 0)} updated, "
+                    f"{result.get('conflicts_found', 0)} conflicts, "
+                    f"{result.get('gaps_found', 0)} gaps"
+                )
+            if result.get('error'):
+                lines.append(f"  Consolidation error: {result['error']}")
+            return '\n'.join(lines)
         finally:
             db.close()
 

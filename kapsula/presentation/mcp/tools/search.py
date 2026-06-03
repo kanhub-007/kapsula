@@ -30,6 +30,29 @@ from ._shared import (
 # ── shared search helpers ──────────────────────────────────
 
 
+def _log_search_miss(
+    db,
+    query: str,
+    collection_id: str,
+    result_count: int,
+    results: list[dict],
+) -> None:
+    """Log a search that returned few results for gap detection (Phase 3)."""
+    from kapsula.infrastructure.data import SearchMissLog
+
+    top_score = results[0].get("score", 0) if results else 0.0
+    miss = SearchMissLog(
+        collection_id=collection_id,
+        query=query[:500],
+        result_count=result_count,
+        top_score=top_score,
+    )
+    db.add(miss)
+    db.commit()
+
+
+
+
 async def _run_search_documents_text(
     query: str,
     top_k: int = 10,
@@ -67,6 +90,11 @@ async def _run_search_documents_text(
                 routing_mode=routing_mode,
             )
         )
+
+        # Log search misses for gap detection (Phase 3)
+        if len(results) < 3 and collection_id:
+            _log_search_miss(db, query, collection_id, len(results), results)
+
         return format_search_results(query, results, scope=scope, context_mode=context_mode)
     finally:
         db.close()
