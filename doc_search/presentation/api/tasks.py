@@ -198,6 +198,23 @@ def add_citation_metadata_to_chunks(
                             search_text, markdown_content
                         )
 
+            if chunk_start_pos == -1 and metadata.get("node_type") == "table":
+                # Table chunks are HTML-transformed (Field: X, Desc: Y format).
+                # Try every colon-separated segment as a potential cell value.
+                for line in chunk_content.split("\n"):
+                    # Split on ", " then extract value after ": " in each segment
+                    for segment in line.split(", "):
+                        if ": " in segment:
+                            value_part = segment.split(": ", 1)[-1].strip().rstrip(".")
+                            if len(value_part) > 10:
+                                chunk_start_pos = find_chunk_in_markdown(
+                                    value_part[:150], markdown_content
+                                )
+                                if chunk_start_pos != -1:
+                                    break
+                    if chunk_start_pos != -1:
+                        break
+
             if chunk_start_pos != -1:
                 chunk_end_pos = chunk_start_pos + len(chunk_content)
 
