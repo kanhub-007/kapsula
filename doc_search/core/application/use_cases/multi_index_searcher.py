@@ -59,6 +59,7 @@ class MultiIndexSearcher:
         chat_client: ChatClient,
         make_searcher: Callable,
         aggregate_strategy: CollectionSearchStrategy | None = None,
+        account_strategy: CollectionSearchStrategy | None = None,
     ):
         self._data = data
         self._embedder = embedder
@@ -66,6 +67,7 @@ class MultiIndexSearcher:
         self._chat_client = chat_client
         self._make_searcher = make_searcher
         self._aggregate_strategy = aggregate_strategy
+        self._account_strategy = account_strategy
 
     def _get_searcher(self, faiss_path: str, bm25_path: str):
         return self._make_searcher(faiss_path, bm25_path)
@@ -165,6 +167,29 @@ class MultiIndexSearcher:
                 search.collection_id,
             )
             return []
+
+        # Account aggregate fast path
+        if scope.kind == SearchScopeKind.ACCOUNT and self._account_strategy is not None:
+            metadata = self._build_collection_metadata(collections)
+            account_results = await self._account_strategy.search(
+                collection=metadata[0] if metadata else {},
+                query=search.query,
+                top_k=search.top_k,
+                per_document_multiplier=search.per_document_multiplier,
+                rerank=search.rerank,
+                context_mode=search.context_mode,
+                node_type_filter=search.node_type_filter,
+            )
+            if account_results is not None:
+                _route_scorer.compute_weights(account_results)
+                account_results.sort(key=lambda r: r.get("score", 0), reverse=True)
+                account_results = _quota_policy.apply(account_results, search.top_k)
+                logger.info(
+                    "Collection search total time %.3fs: account aggregate fast path returned=%s",
+                    perf_counter() - total_started,
+                    len(account_results),
+                )
+                return account_results
 
         metadata = self._build_collection_metadata(collections)
         routing_started = perf_counter()

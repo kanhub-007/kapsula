@@ -1120,6 +1120,18 @@ def _rebuild_collection_aggregate_index(
             job_id,
             collection.name,
         )
+
+        if account:
+            builder.build_account(
+                db,
+                account_id=account.id,
+                account_guid=account.account_id,
+            )
+            logger.info(
+                "Job %s: Account aggregate index rebuilt for account '%s'",
+                job_id,
+                account.name,
+            )
     except Exception as exc:
         logger.error(
             "Job %s: Failed to rebuild aggregate index: %s",

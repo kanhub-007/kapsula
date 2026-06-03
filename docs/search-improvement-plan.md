@@ -959,5 +959,5 @@ Then add confidence scoring and quotas to improve result quality.
 
 - [x] Design aggregate index schema/storage.
 - [x] Build collection-level indexes during ingestion.
-- [ ] Build account/global indexes if needed.
+- [x] Build account/global indexes if needed.
 - [x] Update broad search to use aggregate indexes.
