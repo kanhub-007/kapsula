@@ -494,15 +494,4 @@ Run with: `pytest tests/`
 
 ---
 
-## Current Plans
-
-Active improvement plans live in `docs/plans/`:
-
-| Plan | Status |
-|------|--------|
-| `upload-improvement-plan.md` | In progress — 80% stall fix |
-| `upload-improvement-evaluation.md` | Completed evaluation |
-| `search-improvement-plan.md` | Completed |
-| `consolidation-plan.md` | Planned — Phase 2 memory system |
-
-Read the relevant plan before starting work on a feature area.
+Implementation plans live in `docs/plans/`. Read the relevant plan before starting work on a feature area.
