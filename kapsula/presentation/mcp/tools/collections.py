@@ -232,7 +232,8 @@ def register_collection_tools(mcp: FastMCP):
             "like a table of contents with summaries. Use this BEFORE searching "
             "to understand what topics exist, then formulate a targeted search query. "
             "Filter by level ('level_1'=H3, 'level_2'=H2, 'level_3'=H1) or scope "
-            "to one document via document_job_id."
+            "to one document via document_job_id. "
+            "Also use get_consolidation_status() to see topic/gap/evolution cards."
         ),
     )
     def get_library_cards(
@@ -318,6 +319,69 @@ def register_collection_tools(mcp: FastMCP):
                     f"{ind}[{lvl_label}] {card.title} — " f'"{preview}..." ({doc_name})'
                 )
 
+            return "\n".join(lines)
+        finally:
+            db.close()
+
+    @mcp.tool(
+        name="get_consolidation_status",
+        description=(
+            "Show consolidation state for a collection: when it last ran, "
+            "how many topic/evolution/gap cards exist, and results of the "
+            "last run. Use this to check the knowledge graph before searching."
+        ),
+    )
+    def get_consolidation_status(collection_id: str) -> str:
+        db = _get_db()
+        try:
+            from kapsula.infrastructure.data import (
+                Collection as OrmCollection,
+                ConsolidationRun,
+                LibraryCard as OrmLibraryCard,
+            )
+
+            col = db.query(OrmCollection).filter(
+                OrmCollection.collection_id == collection_id
+            ).first()
+            if not col:
+                return f"Collection not found: {collection_id}"
+
+            topic_count = db.query(OrmLibraryCard).filter(
+                OrmLibraryCard.collection_id == col.id,
+                OrmLibraryCard.card_type == "topic",
+            ).count()
+            evolution_count = db.query(OrmLibraryCard).filter(
+                OrmLibraryCard.collection_id == col.id,
+                OrmLibraryCard.card_type == "evolution",
+            ).count()
+            gap_count = db.query(OrmLibraryCard).filter(
+                OrmLibraryCard.collection_id == col.id,
+                OrmLibraryCard.card_type == "gap",
+            ).count()
+
+            last_run = db.query(ConsolidationRun).filter(
+                ConsolidationRun.collection_id == collection_id
+            ).order_by(ConsolidationRun.created_at.desc()).first()
+
+            lines = [
+                f"Consolidation Status -- {col.name}",
+                f"  Topic cards: {topic_count}",
+                f"  Evolution cards: {evolution_count}",
+                f"  Gap cards: {gap_count}",
+            ]
+            if last_run:
+                lines.append(
+                    f"  Last run: {last_run.created_at.isoformat() if last_run.created_at else '?'}"
+                )
+                lines.append(f"  Triggered by: {last_run.triggered_by}")
+                lines.append(f"  Cards created: {last_run.cards_created}")
+                lines.append(f"  Cards updated: {last_run.cards_updated}")
+                lines.append(f"  Conflicts found: {last_run.conflicts_found}")
+                lines.append(f"  Gaps found: {last_run.gaps_found}")
+                if last_run.error:
+                    lines.append(f"  Error: {last_run.error[:200]}")
+            else:
+                lines.append("  No consolidation run yet.")
             return "\n".join(lines)
         finally:
             db.close()

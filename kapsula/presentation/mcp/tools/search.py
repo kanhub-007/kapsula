@@ -53,6 +53,32 @@ def _log_search_miss(
 
 
 
+
+def _get_topic_card_summary(db, collection_db_id: int) -> str:
+    """Return a summary of topic cards for the collection (Phase 3)."""
+    from kapsula.infrastructure.data import LibraryCard
+
+    cards = (
+        db.query(LibraryCard)
+        .filter(
+            LibraryCard.collection_id == collection_db_id,
+            LibraryCard.card_type == "topic",
+        )
+        .order_by(LibraryCard.importance.desc())
+        .limit(5)
+        .all()
+    )
+    if not cards:
+        return ""
+
+    lines = []
+    for card in cards:
+        imp = card.importance or 0.5
+        preview = card.content[:300].replace(chr(10), " ").strip()
+        lines.append(f"[{card.title}] (importance: {imp:.1f}): {preview}")
+    return chr(10).join(lines)
+
+
 async def _run_search_documents_text(
     query: str,
     top_k: int = 10,
@@ -215,6 +241,15 @@ async def _run_intelligent_collection_search(
     )
 
     parts = []
+
+    # Include topic cards as knowledge overview (Phase 3)
+    if routed_coll:
+        topic_summary = _get_topic_card_summary(db, routed_coll.id)
+        if topic_summary:
+            parts.append("--- Knowledge Overview (synthesized) ---")
+            parts.append(topic_summary)
+            parts.append("")
+
     plan_info = result.get("plan", {})
     if plan_info:
         parts.append(f"Strategy: {plan_info.get('strategy', '?')}")
@@ -743,6 +778,15 @@ def register_search_tools(mcp: FastMCP):
             )
 
             parts = []
+
+            # Include topic cards as knowledge overview (Phase 3)
+            if doc and doc.collection_id:
+                topic_summary = _get_topic_card_summary(db, doc.collection_id)
+                if topic_summary:
+                    parts.append("--- Knowledge Overview (synthesized) ---")
+                    parts.append(topic_summary)
+                    parts.append("")
+
             plan_info = result.get("plan", {})
             if plan_info:
                 parts.append(f"Strategy: {plan_info.get('strategy', '?')}")
