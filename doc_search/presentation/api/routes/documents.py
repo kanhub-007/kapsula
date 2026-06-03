@@ -22,10 +22,6 @@ from doc_search.infrastructure.data import (
     DocumentStructure,
     Chunk,
     Collection,
-    LibraryCard,
-    SubDocument,
-    SubDocumentPage,
-    DATA_DIR,
 )
 from doc_search.infrastructure.logging_config import get_logger
 from ..models import (
@@ -404,145 +400,30 @@ async def delete_document(job_id: str, db: Session = Depends(get_db)):
     from the database, document-level index files are deleted, and aggregate
     indexes are rebuilt to reflect the removal.
     """
-    import os
+    from doc_search.startup import create_delete_document_use_case
 
-    document = db.query(Document).filter(Document.job_id == job_id).first()
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
+    try:
+        use_case = create_delete_document_use_case()
+        result = use_case.execute(db, job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    logger.info(
-        "Deleting document: job_id=%s filename=%s collection=%s",
-        job_id,
-        document.filename,
-        document.collection.name if document.collection else "?",
-    )
-
-    collection = document.collection
-    account = collection.account if collection else None
-
-    # 1. Delete document-level index files from disk
-    for path_attr in ("faiss_index_path", "bm25_index_path"):
-        path = getattr(document, path_attr, None)
-        if path and os.path.exists(path):
-            os.remove(path)
-            logger.debug("Deleted index file: %s", path)
-
-    # Also delete sub-document index files
-    subdocs = (
-        db.query(SubDocument).filter(SubDocument.document_id == document.id).all()
-    )
-    for sd in subdocs:
-        for path_attr in ("faiss_index_path", "bm25_index_path"):
-            path = getattr(sd, path_attr, None)
-            if path and os.path.exists(path):
-                os.remove(path)
-
-    # 2. Delete aggregate cache files (force full rebuild)
-    if collection:
-        from doc_search.core.application.dto.aggregate_index_paths import (
-            AggregateIndexPaths,
-        )
-
-        account_guid = account.account_id if account else None
-        coll_paths = AggregateIndexPaths.for_collection(
-            DATA_DIR, account_guid, collection.collection_id
-        )
-        for cache_path in (
-            coll_paths.faiss,
-            coll_paths.bm25,
-            coll_paths.mapping,
-            coll_paths.faiss_npy,
-        ):
-            if cache_path and os.path.exists(cache_path):
-                os.remove(cache_path)
-                logger.debug("Deleted aggregate cache: %s", cache_path)
-
-        if account_guid:
-            acct_paths = AggregateIndexPaths.for_account(DATA_DIR, account_guid)
-            for cache_path in (
-                acct_paths.faiss,
-                acct_paths.bm25,
-                acct_paths.mapping,
-                acct_paths.faiss_npy,
-            ):
-                if cache_path and os.path.exists(cache_path):
-                    os.remove(cache_path)
-                    logger.debug("Deleted account cache: %s", cache_path)
-
-    # 3. Delete chunks and sub-document pages (cascade)
-    chunks_deleted = (
-        db.query(Chunk).filter(Chunk.document_id == document.id).delete()
-    )
-    subdoc_page_ids = (
-        db.query(SubDocumentPage.id)
-        .join(SubDocument)
-        .filter(SubDocument.document_id == document.id)
-        .all()
-    )
-    for (pid,) in subdoc_page_ids:
-        db.query(SubDocumentPage).filter(SubDocumentPage.id == pid).delete()
-    db.query(SubDocument).filter(SubDocument.document_id == document.id).delete()
-    db.query(LibraryCard).filter(
-        LibraryCard.document_id == document.id
-    ).delete()
-    db.query(DocumentStructure).filter(
-        DocumentStructure.document_id == document.id
-    ).delete()
-
-    # 4. Mark document as archived (soft delete)
-    document.doc_state = "archived"
-    document.status = "archived"
-
-    db.commit()
-
-    # 5. Rebuild aggregate indexes
     rebuild_msgs = []
-    if collection:
-        try:
-            from doc_search.infrastructure.repositories.embedding.huggingface_embedder import (
-                HuggingFaceEmbedder,
-            )
-            from doc_search.infrastructure.repositories.indexing.aggregate_index_builder import (
-                AggregateIndexBuilder,
-            )
-
-            embedder = HuggingFaceEmbedder(
-                endpoint_url=os.getenv(
-                    "EMBEDDING_MODEL_URL", "Qwen/Qwen3-Embedding-8B"
-                ),
-                token=os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN", ""),
-            )
-            builder = AggregateIndexBuilder(embedder, DATA_DIR)
-
-            coll_faiss, coll_bm25 = builder.build(
-                db,
-                collection.id,
-                account_id=account_guid,
-                collection_guid=collection.collection_id,
-            )
-            rebuild_msgs.append(
-                f"Collection aggregate rebuilt: faiss={'yes' if coll_faiss else 'no'}, bm25={'yes' if coll_bm25 else 'no'}"
-            )
-
-            if account:
-                acct_faiss, acct_bm25 = builder.build_account(
-                    db, account.id, account.account_id
-                )
-                rebuild_msgs.append(
-                    f"Account aggregate rebuilt: faiss={'yes' if acct_faiss else 'no'}, bm25={'yes' if acct_bm25 else 'no'}"
-                )
-        except Exception as exc:
-            logger.error("Aggregate rebuild failed after delete: %s", exc)
-            rebuild_msgs.append(f"Aggregate rebuild failed: {exc}")
-
-    logger.info(
-        "Document deleted: job_id=%s chunks=%s", job_id, chunks_deleted
-    )
+    if result.rebuild.get("collection_faiss"):
+        rebuild_msgs.append(
+            f"Collection aggregate rebuilt: faiss=yes, bm25={'yes' if result.rebuild.get('collection_bm25') else 'no'}"
+        )
+    if result.rebuild.get("account_faiss"):
+        rebuild_msgs.append(
+            f"Account aggregate rebuilt: faiss=yes, bm25={'yes' if result.rebuild.get('account_bm25') else 'no'}"
+        )
+    if result.error:
+        rebuild_msgs.append(f"Aggregate rebuild failed: {result.error}")
 
     return {
-        "job_id": job_id,
-        "filename": document.filename,
+        "job_id": result.job_id,
+        "filename": result.filename,
         "status": "archived",
-        "chunks_deleted": chunks_deleted,
+        "chunks_deleted": result.chunks_deleted,
         "rebuild": rebuild_msgs,
     }

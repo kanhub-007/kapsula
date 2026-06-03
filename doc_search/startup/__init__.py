@@ -178,3 +178,18 @@ def create_account_search_strategy(embedder=None):
     return AggregateIndexSearchStrategy(
         data_dir=DATA_DIR, embedder=embedder, path_factory=_account_paths
     )
+
+
+def create_delete_document_use_case():
+    """Create a DeleteDocumentUseCase with wired dependencies."""
+    from doc_search.infrastructure.data.connection import DATA_DIR
+    from doc_search.infrastructure.repositories.indexing.index_manager import (
+        FileSystemIndexManager,
+    )
+    from doc_search.core.application.use_cases.delete_document import (
+        DeleteDocumentUseCase,
+    )
+
+    embedder = create_embedder()
+    index_manager = FileSystemIndexManager(embedder, DATA_DIR)
+    return DeleteDocumentUseCase(index_manager)
