@@ -1,5 +1,7 @@
 """SQLAlchemy-backed CollectionRepository."""
 
+from dataclasses import replace
+
 from sqlalchemy.orm import Session
 
 from kapsula.core.domain.entities.collection import Collection as DomainCollection
@@ -57,9 +59,9 @@ class SqlCollectionRepository(CollectionRepository):
             return None
         return collection_from_orm(orm)
 
-    def save(self, db: Session, collection: DomainCollection) -> None:
+    def save(self, db: Session, collection: DomainCollection) -> DomainCollection:
         orm_collection = collection_to_orm(collection)
         db.add(orm_collection)
         db.commit()
         db.refresh(orm_collection)
-        collection.id = orm_collection.id
+        return replace(collection, id=orm_collection.id, created_at=orm_collection.created_at)

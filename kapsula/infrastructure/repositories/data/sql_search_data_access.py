@@ -99,5 +99,8 @@ class SqlSearchDataAccess:
         return self._db.query(Account).filter(Account.name == name).first()
 
     def save_account(self, account) -> None:
+        """Persist an account and return it with the generated identity."""
         self._db.add(account)
         self._db.commit()
+        self._db.refresh(account)
+        return account

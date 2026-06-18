@@ -1,5 +1,7 @@
 """SQLAlchemy-backed DocumentRepository — maps between domain and ORM."""
 
+from dataclasses import replace
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -80,13 +82,12 @@ class SqlDocumentRepository(DocumentRepository):
             return None
         return collection_from_orm(orm_col)
 
-    def save_document(self, db: Session, document: DomainDocument) -> None:
+    def save_document(self, db: Session, document: DomainDocument) -> DomainDocument:
         orm_doc = document_to_orm(document)
         db.add(orm_doc)
         db.commit()
         db.refresh(orm_doc)
-        # Push back generated ID
-        document.id = orm_doc.id
+        return replace(document, id=orm_doc.id)
 
     def cascade_delete_related(self, db: Session, document: DomainDocument) -> int:
         if document.id is None:

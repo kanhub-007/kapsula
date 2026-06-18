@@ -3,8 +3,6 @@
 import uuid
 from pathlib import Path
 
-from sqlalchemy.orm import Session
-
 from kapsula.core.application.dto.upload_document_result import (
     UploadDocumentResult,
 )
@@ -21,9 +19,9 @@ from kapsula.core.domain.interfaces.document_repository import (
 from kapsula.core.domain.interfaces.progress_tracker import (
     ProgressTracker,
 )
-from kapsula.infrastructure.logging_config import get_logger
+import logging
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class UploadDocumentUseCase:
@@ -42,7 +40,7 @@ class UploadDocumentUseCase:
 
     def execute(
         self,
-        db: Session,
+        db,
         file_path: str,
         collection_id: str,
         max_tokens: int = 512,
@@ -94,7 +92,7 @@ class UploadDocumentUseCase:
             content=content,
             status="processing",
         )
-        self._document_repository.save_document(db, doc)
+        doc = self._document_repository.save_document(db, doc)
 
         # Register tracking and start background processing
         self._progress_tracker.register_job(

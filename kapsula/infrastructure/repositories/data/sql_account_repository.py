@@ -1,5 +1,7 @@
 """SQLAlchemy-backed AccountRepository."""
 
+from dataclasses import replace
+
 from sqlalchemy.orm import Session
 
 from kapsula.core.domain.entities.account import Account as DomainAccount
@@ -28,9 +30,9 @@ class SqlAccountRepository(AccountRepository):
             return None
         return account_from_orm(orm)
 
-    def save(self, db: Session, account: DomainAccount) -> None:
+    def save(self, db: Session, account: DomainAccount) -> DomainAccount:
         orm_account = account_to_orm(account)
         db.add(orm_account)
         db.commit()
         db.refresh(orm_account)
-        account.id = orm_account.id
+        return replace(account, id=orm_account.id, created_at=orm_account.created_at)

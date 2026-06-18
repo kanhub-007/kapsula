@@ -3,9 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Protocol
 
-from sqlalchemy.orm import Session
-
-from kapsula.core.application.dto.rebuild_result import RebuildResult
+from kapsula.core.domain.entities.rebuild_result import RebuildResult
 
 
 class HasAccountId(Protocol):
@@ -47,7 +45,7 @@ class IndexManager(ABC):
 
     @abstractmethod
     def rebuild_aggregates(
-        self, db: Session, collection: IndexableCollection
+        self, db, collection: IndexableCollection
     ) -> RebuildResult:
         """Rebuild collection and account aggregate indexes."""
 
