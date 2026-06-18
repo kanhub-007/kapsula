@@ -1,30 +1,36 @@
-"""Persistent upload job manager."""
+"""SQLAlchemy-backed UploadJobRepository.
+
+Moved from presentation/upload/ to infrastructure/repositories/data/ to satisfy
+the CQRS-lite rule (writes must live behind a repository) and the layer rule
+(infrastructure must not import presentation). The previous ``UploadJobManager``
+name is retained as a deprecated alias for callers that have not migrated.
+"""
 
 from datetime import UTC, datetime
+from typing import Any
 
+from kapsula.core.domain.interfaces.upload_job_repository import (
+    UploadJobRepository,
+)
 from kapsula.infrastructure.data import SessionLocal, UploadJob
 from kapsula.infrastructure.logging_config import get_logger
-from kapsula.presentation.upload.upload_progress_tracker import UploadProgressTracker
 
 logger = get_logger(__name__)
 
 
-class UploadJobManager:
-    """Persistent upload job CRUD that optionally syncs with a live progress tracker."""
-
-    def __init__(self, progress_tracker: UploadProgressTracker | None = None):
-        self._progress = progress_tracker
+class SqlUploadJobRepository(UploadJobRepository):
+    """CRUD for UploadJob rows."""
 
     def create(
         self,
         job_id: str,
         *,
         filename: str,
-        collection_id: int,
+        collection_id: int | None,
         collection_name: str,
         ingestion_mode: str,
     ) -> None:
-        """Create a new upload job record and live progress entry."""
+        """Insert a new upload-job row in 'processing' state."""
         db = SessionLocal()
         try:
             job = UploadJob(
@@ -43,64 +49,24 @@ class UploadJobManager:
         finally:
             db.close()
 
-        if self._progress:
-            self._progress.set(
-                job_id,
-                status="processing",
-                progress=0,
-                stage="queued",
-                message=f"Document queued for {ingestion_mode} ingestion...",
-                ingestion_mode=ingestion_mode,
-            )
-
-    def update(
-        self,
-        job_id: str,
-        *,
-        status: str | None = None,
-        progress: int | None = None,
-        stage: str | None = None,
-        message: str | None = None,
-        chunk_count: int | None = None,
-        subdocument_count: int | None = None,
-        duration: float | None = None,
-        error: str | None = None,
-        ingestion_mode: str | None = None,
-    ) -> None:
-        """Update both the DB record and live progress."""
+    def update(self, job_id: str, **fields: Any) -> None:
+        """Patch zero or more columns on an existing upload-job row."""
         db = SessionLocal()
         try:
             job = db.query(UploadJob).filter(UploadJob.job_id == job_id).first()
             if not job:
                 logger.warning("UploadJob %s not found for update", job_id)
                 return
-
-            if status is not None:
-                job.status = status
-            if progress is not None:
-                job.progress = progress
-            if stage is not None:
-                job.stage = stage
-            if message is not None:
-                job.message = message
-            if chunk_count is not None:
-                job.chunk_count = chunk_count
-            if subdocument_count is not None:
-                job.subdocument_count = subdocument_count
-            if duration is not None:
-                job.duration = duration
-            if error is not None:
-                job.error = error
-            if ingestion_mode is not None:
-                job.ingestion_mode = ingestion_mode
-
+            for key, value in fields.items():
+                if value is not None and hasattr(job, key):
+                    setattr(job, key, value)
             job.updated_at = datetime.now(UTC)
             db.commit()
         finally:
             db.close()
 
-    def get(self, job_id: str) -> dict | None:
-        """Return a job as a dict from DB."""
+    def get(self, job_id: str) -> dict[str, Any] | None:
+        """Return one job as a plain dict, or None if not found."""
         db = SessionLocal()
         try:
             job = db.query(UploadJob).filter(UploadJob.job_id == job_id).first()
@@ -110,8 +76,8 @@ class UploadJobManager:
         finally:
             db.close()
 
-    def list_recent(self, limit: int = 50) -> list[dict]:
-        """Return recent upload jobs ordered by creation time."""
+    def list_recent(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return recent upload jobs ordered by creation time (newest first)."""
         db = SessionLocal()
         try:
             jobs = (
@@ -125,7 +91,7 @@ class UploadJobManager:
             db.close()
 
 
-def _job_to_dict(job) -> dict:
+def _job_to_dict(job: UploadJob) -> dict[str, Any]:
     """Serialize an UploadJob ORM instance to a plain dict."""
     return {
         "job_id": job.job_id,
@@ -143,3 +109,9 @@ def _job_to_dict(job) -> dict:
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "updated_at": job.updated_at.isoformat() if job.updated_at else None,
     }
+
+
+# Deprecated alias: kept so external callers (and MCP tools) importing
+# ``UploadJobManager`` continue to work while they migrate to the repository
+# name. New code should use ``SqlUploadJobRepository``.
+UploadJobManager = SqlUploadJobRepository

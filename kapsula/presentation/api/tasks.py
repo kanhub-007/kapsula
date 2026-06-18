@@ -40,6 +40,9 @@ from kapsula.infrastructure.repositories.chunking.breadcrumb_parser import (
 from kapsula.infrastructure.repositories.chunking.header_matcher import (
     match_header_to_parents,
 )
+from kapsula.infrastructure.repositories.data.sql_upload_job_repository import (
+    SqlUploadJobRepository,
+)
 from kapsula.infrastructure.repositories.indexing import DocumentIndexBuilder
 from kapsula.infrastructure.repositories.processing._chunk_linker import (
     _build_document_indexes,
@@ -51,14 +54,18 @@ from kapsula.infrastructure.repositories.processing.aggregate_build_stage import
 from kapsula.infrastructure.repositories.processing.collection_summary_stage import (
     update_collection_library_card,
 )
-from kapsula.presentation.upload.maintenance_state_manager import (
+from kapsula.infrastructure.repositories.processing.maintenance_state_manager import (
     MaintenanceStateManager,
+)
+from kapsula.infrastructure.repositories.processing.upload_progress_store import (
+    processing_status,
+)
+from kapsula.infrastructure.repositories.processing.upload_progress_tracker import (
+    UploadProgressTracker,
 )
 from kapsula.presentation.upload.sub_document_batch_indexer import (
     SubDocumentBatchIndexer,
 )
-from kapsula.presentation.upload.upload_job_manager import UploadJobManager
-from kapsula.presentation.upload.upload_progress_tracker import UploadProgressTracker
 from kapsula.startup import create_embedder
 
 logger = get_logger(__name__)
@@ -84,12 +91,10 @@ def _strip_section_images(content: str) -> str:
     return cleaned.lstrip()
 
 
-# Global dictionary to track processing progress
-processing_status = {}
-
-
+# Live progress store lives in infrastructure; re-exported here for the
+# legacy ``get_processing_status`` API used by routes/MCP tools.
 _upload_progress = UploadProgressTracker(processing_status, logger)
-_upload_job_manager = UploadJobManager(_upload_progress)
+_upload_job_manager = SqlUploadJobRepository()
 
 
 def process_document(
@@ -859,41 +864,3 @@ def get_processing_status(job_id: str) -> dict:
         Dictionary with status information, or None if not found.
     """
     return _upload_progress.get(job_id)
-
-
-# ── Pipeline-based entry points ───────────────────────────
-# These delegate to DocumentPipeline, which runs stages in sequence
-# and reports progress through UploadProgressTracker.
-
-
-def process_document_via_pipeline(
-    job_id: str,
-    markdown_content: str,
-    max_tokens: int,
-    db,
-    ingestion_mode: str = "indexed",
-) -> None:
-    """Process a document using the PipelineStage architecture.
-
-    Currently delegates to the legacy process_document implementation.
-    As stages are extracted into PipelineStage classes, this wrapper
-    will build stage lists and delegate to DocumentPipeline.execute().
-    """
-    process_document(job_id, markdown_content, max_tokens, db, ingestion_mode)
-
-
-def process_subdocuments_via_pipeline(
-    job_id: str,
-    markdown_content: str,
-    max_tokens: int,
-    db,
-    ingestion_mode: str = "indexed",
-) -> None:
-    """Process a sub-document using the PipelineStage architecture.
-
-    Currently delegates to the legacy process_document_with_subdocuments
-    implementation.
-    """
-    process_document_with_subdocuments(
-        job_id, markdown_content, max_tokens, db, ingestion_mode
-    )

@@ -54,7 +54,7 @@ def register_document_tools(mcp: FastMCP):
             )
             # Mark consolidation as stale after successful upload
             try:
-                from kapsula.presentation.upload.maintenance_state_manager import (
+                from kapsula.infrastructure.repositories.processing.maintenance_state_manager import (
                     MaintenanceStateManager,
                 )
 
@@ -105,7 +105,7 @@ def register_document_tools(mcp: FastMCP):
             # Mark consolidation as stale after successful deletion
             if collection_id:
                 try:
-                    from kapsula.presentation.upload.maintenance_state_manager import (
+                    from kapsula.infrastructure.repositories.processing.maintenance_state_manager import (
                         MaintenanceStateManager,
                     )
 
@@ -354,9 +354,11 @@ def register_document_tools(mcp: FastMCP):
         description="List recent upload jobs with status, progress, and timing.",
     )
     def list_upload_jobs(limit: int = 20) -> str:
-        from kapsula.presentation.upload.upload_job_manager import UploadJobManager
+        from kapsula.infrastructure.repositories.data.sql_upload_job_repository import (
+            SqlUploadJobRepository,
+        )
 
-        manager = UploadJobManager()
+        manager = SqlUploadJobRepository()
         jobs = manager.list_recent(limit)
         if not jobs:
             return "No upload jobs found."
@@ -383,9 +385,11 @@ def register_document_tools(mcp: FastMCP):
         description="Get detailed information about a specific upload job.",
     )
     def get_upload_job(job_id: str) -> str:
-        from kapsula.presentation.upload.upload_job_manager import UploadJobManager
+        from kapsula.infrastructure.repositories.data.sql_upload_job_repository import (
+            SqlUploadJobRepository,
+        )
 
-        manager = UploadJobManager()
+        manager = SqlUploadJobRepository()
         job = manager.get(job_id)
         if not job:
             return f"Upload job not found: {job_id}"

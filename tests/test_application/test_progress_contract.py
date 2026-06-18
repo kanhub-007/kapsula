@@ -4,7 +4,9 @@ import logging
 
 import pytest
 
-from kapsula.presentation.upload.upload_progress_tracker import UploadProgressTracker
+from kapsula.infrastructure.repositories.processing.upload_progress_tracker import (
+    UploadProgressTracker,
+)
 
 
 @pytest.fixture

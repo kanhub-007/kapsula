@@ -153,7 +153,7 @@ def register_collection_tools(mcp: FastMCP):
     def list_stale_maintenance() -> str:
         db = _get_db()
         try:
-            from kapsula.presentation.upload.maintenance_state_manager import (
+            from kapsula.infrastructure.repositories.processing.maintenance_state_manager import (
                 MaintenanceStateManager,
             )
 

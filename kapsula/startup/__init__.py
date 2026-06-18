@@ -233,6 +233,9 @@ def create_upload_document_use_case():
     from kapsula.infrastructure.repositories.data.sql_document_repository import (
         SqlDocumentRepository,
     )
+    from kapsula.infrastructure.repositories.data.sql_upload_job_repository import (
+        SqlUploadJobRepository,
+    )
     from kapsula.infrastructure.repositories.processing.background_processor import (
         ThreadPoolBackgroundProcessor,
     )
@@ -240,9 +243,17 @@ def create_upload_document_use_case():
         InMemoryProgressTracker,
     )
 
-    background_processor = ThreadPoolBackgroundProcessor()
+    # The background task lives in presentation; the composition root (here)
+    # is the only layer allowed to wire presentation into infrastructure,
+    # so ThreadPoolBackgroundProcessor never imports presentation itself.
+    from kapsula.presentation.api.tasks import process_document_with_subdocuments
+
+    background_processor = ThreadPoolBackgroundProcessor(
+        process_document_with_subdocuments
+    )
     document_repository = SqlDocumentRepository()
-    progress_tracker = InMemoryProgressTracker()
+    job_repository = SqlUploadJobRepository()
+    progress_tracker = InMemoryProgressTracker(job_repository)
     return UploadDocumentUseCase(
         background_processor, document_repository, progress_tracker
     )

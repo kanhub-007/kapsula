@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session
 from kapsula.infrastructure.data import Document, LibraryCard, SubDocument
 from kapsula.infrastructure.logging_config import get_logger
 from kapsula.infrastructure.repositories.indexing import DocumentIndexBuilder
-from kapsula.presentation.upload.upload_progress_tracker import UploadProgressTracker
+from kapsula.infrastructure.repositories.processing.upload_progress_tracker import (
+    UploadProgressTracker,
+)
 
 logger = get_logger(__name__)
 

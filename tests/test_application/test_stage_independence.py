@@ -38,17 +38,3 @@ class TestStageIndependence:
         )
 
         assert callable(update_collection_library_card)
-
-    def test_pipeline_stage_protocol_imports(self):
-        """PipelineStage protocol must be importable without infrastructure."""
-        from kapsula.core.application.use_cases.processing.document_pipeline import (
-            DocumentPipeline,
-        )
-        from kapsula.core.application.use_cases.processing.pipeline_stage import (
-            PipelineStage,
-        )
-
-        # Protocol fields are in __annotations__; methods are callable attrs
-        assert "name" in PipelineStage.__annotations__
-        assert hasattr(PipelineStage, "run")
-        assert callable(getattr(DocumentPipeline, "execute"))

@@ -15,7 +15,7 @@ from kapsula.infrastructure.logging_config import get_logger
 from kapsula.infrastructure.repositories.indexing.aggregate_index_builder import (
     AggregateIndexBuilder,
 )
-from kapsula.presentation.upload.maintenance_state_manager import (
+from kapsula.infrastructure.repositories.processing.maintenance_state_manager import (
     MaintenanceStateManager,
 )
 from kapsula.startup import create_embedder
