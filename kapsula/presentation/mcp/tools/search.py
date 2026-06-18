@@ -79,7 +79,6 @@ def _get_topic_card_summary(db, collection_db_id: int) -> str:
 async def _run_search_documents_text(
     query: str,
     top_k: int = 10,
-    rerank: bool = False,
     context_mode: str = "none",
     account_id: str | None = None,
     collection_id: str | None = None,
@@ -106,7 +105,6 @@ async def _run_search_documents_text(
                 account_id=account_id or None,
                 collection_id=collection_id,
                 top_k=min(top_k, 100),
-                rerank=False,
                 context_mode=context_mode,
                 hf_api_token=_hf_token(),
                 node_type_filter=_parse_node_type_filter(node_type_filter),
@@ -129,7 +127,6 @@ async def _run_intelligent_collection_search(
     context_mode: str,
     account_id: str | None,
     enable_planning: bool,
-    rerank: bool,
     node_type_filter: str | None,
     db=None,
 ) -> str:
@@ -177,29 +174,15 @@ async def _run_intelligent_collection_search(
         routed_id = routed_ids[0] if routed_ids else collections[0].id
         routed_coll = db.query(Collection).filter(Collection.id == routed_id).first()
 
+        from kapsula.presentation.shared.document_structure_builder import (
+            build_document_structure_from_subdocs,
+        )
         document_structure = []
         if routed_coll:
             for doc in routed_coll.documents:
-                for subdoc in doc.sub_documents:
-                    cards = (
-                        db.query(LibraryCard)
-                        .filter(
-                            LibraryCard.sub_document_id == subdoc.id,
-                            LibraryCard.level.in_(["level_1", "level_2", "level_3"]),
-                        )
-                        .order_by(LibraryCard.level.desc())
-                        .limit(20)
-                        .all()
-                    )
-                    if cards:
-                        document_structure.append(
-                            {
-                                "subdocument_name": subdoc.breadcrumb_key,
-                                "sections": [
-                                    {"level": c.level, "title": c.title} for c in cards
-                                ],
-                            }
-                        )
+                document_structure.extend(
+                    build_document_structure_from_subdocs(doc.sub_documents, db)
+                )
 
         search_plan = None
         if enable_planning and document_structure:
@@ -223,7 +206,6 @@ async def _run_intelligent_collection_search(
                 query=q,
                 account_id=account_id or "",
                 top_k=min(top_k, 100),
-                rerank=False,
                 context_mode=context_mode,
                 hf_api_token=token,
             )
@@ -291,7 +273,6 @@ def register_search_tools(mcp: FastMCP):
                 context_mode=job.params.get("context_mode", "none"),
                 account_id=job.params.get("account_id"),
                 enable_planning=job.params.get("enable_planning", True),
-                rerank=job.params.get("rerank", False),
                 node_type_filter=job.params.get("node_type_filter"),
             )
             manager.update(job, status="completed", progress="Intelligent search completed", result=result)
@@ -316,7 +297,6 @@ def register_search_tools(mcp: FastMCP):
     async def search_documents(
         query: str,
         top_k: int = 10,
-        rerank: bool = False,
         context_mode: str = "none",
         account_id: str | None = None,
         node_type_filter: str | None = None,
@@ -325,7 +305,6 @@ def register_search_tools(mcp: FastMCP):
         return await _run_search_documents_text(
             query=query,
             top_k=top_k,
-            rerank=rerank,
             context_mode=context_mode,
             account_id=account_id,
             node_type_filter=node_type_filter,
@@ -346,7 +325,6 @@ def register_search_tools(mcp: FastMCP):
         collection_id: str,
         query: str,
         top_k: int = 10,
-        rerank: bool = False,
         context_mode: str = "none",
         node_type_filter: str | None = None,
         routing_mode: str = "auto",
@@ -354,7 +332,6 @@ def register_search_tools(mcp: FastMCP):
         return await _run_search_documents_text(
             query=query,
             top_k=top_k,
-            rerank=rerank,
             context_mode=context_mode,
             collection_id=collection_id,
             node_type_filter=node_type_filter,
@@ -378,7 +355,6 @@ def register_search_tools(mcp: FastMCP):
         account_id: str | None = None,
         collection_id: str | None = None,
         routing_mode: str = "auto",
-        rerank: bool = False,
         node_type_filter: str | None = None,
     ) -> str:
         job = _get_search_job_manager().start(
@@ -389,7 +365,6 @@ def register_search_tools(mcp: FastMCP):
                 "account_id": account_id,
                 "collection_id": collection_id,
                 "routing_mode": routing_mode,
-                "rerank": rerank,
                 "node_type_filter": node_type_filter,
             },
             runner=_execute_search_job,
@@ -423,7 +398,7 @@ def register_search_tools(mcp: FastMCP):
         description="Get results for a completed background search job.",
     )
     def get_search_results(search_job_id: str) -> str:
-        job = _search_job_manager.get(search_job_id)
+        job = _get_search_job_manager().get(search_job_id)
         if not job:
             return f"Search job not found: {search_job_id}"
         if job.status == "completed":
@@ -441,12 +416,12 @@ def register_search_tools(mcp: FastMCP):
         description="Cancel a running background search job where practical.",
     )
     def cancel_search(search_job_id: str) -> str:
-        job = _search_job_manager.get(search_job_id)
+        job = _get_search_job_manager().get(search_job_id)
         if not job:
             return f"Search job not found: {search_job_id}"
         if job.status in {"completed", "failed", "cancelled"}:
             return f"Search job already {job.status}."
-        _search_job_manager.cancel(search_job_id)
+        _get_search_job_manager().cancel(search_job_id)
         return f"Cancellation requested for search_job_id: {search_job_id}"
 
     @mcp.tool(
@@ -465,7 +440,6 @@ def register_search_tools(mcp: FastMCP):
         context_mode: str = "none",
         account_id: str | None = None,
         enable_planning: bool = True,
-        rerank: bool = False,
         node_type_filter: str | None = None,
     ) -> str:
         job = _get_search_job_manager().start(
@@ -475,7 +449,6 @@ def register_search_tools(mcp: FastMCP):
                 "context_mode": context_mode,
                 "account_id": account_id,
                 "enable_planning": enable_planning,
-                "rerank": rerank,
                 "node_type_filter": node_type_filter,
             },
             runner=_execute_intelligent_search_job,
@@ -510,7 +483,7 @@ def register_search_tools(mcp: FastMCP):
         description="Get results for a completed background intelligent search job.",
     )
     def get_intelligent_search_results(search_job_id: str) -> str:
-        job = _search_job_manager.get(search_job_id)
+        job = _get_search_job_manager().get(search_job_id)
         if not job:
             return f"Search job not found: {search_job_id}"
         if job.status == "completed":
@@ -542,14 +515,13 @@ def register_search_tools(mcp: FastMCP):
         context_mode: str = "none",
         account_id: str | None = None,
         enable_planning: bool = True,
-        rerank: bool = False,
         node_type_filter: str | None = None,
     ) -> str:
         db = _get_db()
         try:
             return await _run_intelligent_collection_search(
                 query, top_k, context_mode, account_id,
-                enable_planning, rerank, node_type_filter, db,
+                enable_planning, node_type_filter, db,
             )
         finally:
             db.close()
@@ -567,7 +539,6 @@ def register_search_tools(mcp: FastMCP):
         job_id: str,
         query: str,
         top_k: int = 10,
-        rerank: bool = False,
         context_mode: str = "none",
         node_type_filter: str | None = None,
     ) -> str:
@@ -597,7 +568,6 @@ def register_search_tools(mcp: FastMCP):
                         query=query,
                         document_id=doc.id,
                         top_k=min(top_k, 100),
-                        rerank=False,
                         context_mode=context_mode,
                         hf_api_token=_hf_token(),
                         node_type_filter=_parse_node_type_filter(node_type_filter),
@@ -614,7 +584,6 @@ def register_search_tools(mcp: FastMCP):
                         bm25_path=doc.bm25_index_path,
                         document_id=doc.id,
                         top_k=min(top_k, 100),
-                        rerank=False,
                         context_mode=context_mode,
                         node_type_filter=_parse_node_type_filter(node_type_filter),
                     )
@@ -651,7 +620,6 @@ def register_search_tools(mcp: FastMCP):
         top_k: int = 10,
         context_mode: str = "none",
         enable_planning: bool = True,
-        rerank: bool = False,
         node_type_filter: str | None = None,
     ) -> str:
         from kapsula.core.application.dto.sub_document_search import (
@@ -680,48 +648,19 @@ def register_search_tools(mcp: FastMCP):
                     .filter(SubDocument.document_id == doc.id)
                     .all()
                 )
+                from kapsula.presentation.shared.document_structure_builder import (
+                    build_document_structure_from_subdocs,
+                    build_document_structure_from_document,
+                )
                 if subdocs:
-                    for subdoc in subdocs:
-                        cards = (
-                            db.query(LibraryCard)
-                            .filter(
-                                LibraryCard.sub_document_id == subdoc.id,
-                                LibraryCard.level.in_(["level_1", "level_2", "level_3"]),
-                            )
-                            .order_by(LibraryCard.level.desc())
-                            .limit(20)
-                            .all()
-                        )
-                        if cards:
-                            document_structure.append(
-                                {
-                                    "subdocument_name": subdoc.breadcrumb_key,
-                                    "sections": [
-                                        {"level": c.level, "title": c.title}
-                                        for c in cards
-                                    ],
-                                }
-                            )
+                    document_structure = build_document_structure_from_subdocs(subdocs, db)
                 else:
-                    cards = (
-                        db.query(LibraryCard)
-                        .filter(
-                            LibraryCard.document_id == doc.id,
-                            LibraryCard.level.in_(["level_1", "level_2", "level_3"]),
-                        )
-                        .order_by(LibraryCard.level.desc())
-                        .limit(30)
-                        .all()
+                    document_structure = build_document_structure_from_document(
+                        document_id=doc.id,
+                        fallback_name=doc.filename,
+                        db=db,
+                        limit=30,
                     )
-                    if cards:
-                        document_structure.append(
-                            {
-                                "subdocument_name": doc.filename,
-                                "sections": [
-                                    {"level": c.level, "title": c.title} for c in cards
-                                ],
-                            }
-                        )
 
                 search_plan = None
                 if enable_planning and document_structure:
@@ -747,7 +686,6 @@ def register_search_tools(mcp: FastMCP):
                             query=q,
                             document_id=doc.id,
                             top_k=min(top_k, 100),
-                            rerank=False,
                             context_mode=context_mode,
                             hf_api_token=token,
                         )
@@ -761,7 +699,6 @@ def register_search_tools(mcp: FastMCP):
                         bm25_path=doc.bm25_index_path,
                         document_id=doc.id,
                         top_k=min(top_k, 100),
-                        rerank=False,
                         context_mode=context_mode,
                     )
                 )

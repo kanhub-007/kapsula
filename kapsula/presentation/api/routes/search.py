@@ -19,6 +19,7 @@ from kapsula.infrastructure.data.tables.sub_document import SubDocument
 from kapsula.infrastructure.logging_config import get_logger
 from kapsula.presentation.api.search_presenter import (
     build_collection_search_response,
+    collect_unique_citations,
 )
 from kapsula.startup import (
     create_multi_index_searcher,
@@ -98,25 +99,7 @@ def extract_citation_from_result(
         return None
 
 
-def collect_unique_citations(citations: list) -> list:
-    """Remove duplicate citations based on library_card_id and char positions."""
-    seen = set()
-    unique = []
-    for citation in citations:
-        if citation is None:
-            continue
-        key = (citation.library_card_id, citation.start_char, citation.end_char)
-        if key not in seen:
-            seen.add(key)
-            unique.append(citation)
-    return unique
-
-
-def parse_node_type_filter(node_type_filter: str | None) -> list[str] | None:
-    if not node_type_filter:
-        return None
-    parsed = [item.strip() for item in node_type_filter.split(",") if item.strip()]
-    return parsed or None
+from kapsula.core.domain.text_processing import parse_node_type_filter
 
 
 @router.post("/collections", response_model=CollectionSearchResponse)
@@ -129,9 +112,6 @@ async def search_across_collections(
     top_k: int = Query(10, ge=1, le=100, description="Number of results to return"),
     context_mode: str = Query(
         "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
-    ),
-    rerank: bool = Query(
-        False, description="Enable LLM reranking for better relevance (default: False)"
     ),
     node_type_filter: Optional[str] = Query(
         None, description="Comma-separated node types to filter (e.g., 'code,table')"
@@ -152,7 +132,6 @@ async def search_across_collections(
     - **account_id**: Optional account ID to filter collections
     - **top_k**: Number of results to return (1-100, default 10)
     - **context_mode**: "none" (raw chunk), "narrow" (H3 section), "deep" (H2 chapter)
-    - **rerank**: Enable cross-encoder reranking (default: False)
 
     Returns search results with scores, content, and source information.
     """
@@ -167,7 +146,6 @@ async def search_across_collections(
                 query=query,
                 account_id=account_id,
                 top_k=top_k,
-                rerank=False,
                 context_mode=context_mode,
                 hf_api_token=os.getenv("HF_TOKEN"),
                 node_type_filter=parse_node_type_filter(node_type_filter),
@@ -203,9 +181,6 @@ async def search_collection(
     context_mode: str = Query(
         "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
     ),
-    rerank: bool = Query(
-        False, description="Enable LLM reranking for better relevance (default: False)"
-    ),
     node_type_filter: Optional[str] = Query(
         None, description="Comma-separated node types to filter (e.g., 'code,table')"
     ),
@@ -224,7 +199,6 @@ async def search_collection(
     - **query**: Search query text
     - **top_k**: Number of results to return (1-100, default 10)
     - **context_mode**: "none" (raw chunk), "narrow" (H3 section), "deep" (H2 chapter)
-    - **rerank**: Enable cross-encoder reranking (default: False)
 
     Returns search results with scores, content, and source information.
     """
@@ -246,7 +220,6 @@ async def search_collection(
                 account_id=None,
                 collection_id=collection_id,
                 top_k=top_k,
-                rerank=False,
                 context_mode=context_mode,
                 hf_api_token=os.getenv("HF_TOKEN"),
                 node_type_filter=parse_node_type_filter(node_type_filter),
@@ -278,9 +251,6 @@ async def search_collection_by_query_param(
     context_mode: str = Query(
         "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
     ),
-    rerank: bool = Query(
-        False, description="Enable LLM reranking for better relevance (default: False)"
-    ),
     node_type_filter: Optional[str] = Query(
         None, description="Comma-separated node types to filter (e.g., 'code,table')"
     ),
@@ -293,7 +263,6 @@ async def search_collection_by_query_param(
         query=query,
         top_k=top_k,
         context_mode=context_mode,
-        rerank=False,
         node_type_filter=node_type_filter,
         routing_mode=routing_mode,
         db=db,
@@ -312,9 +281,6 @@ async def intelligent_search_across_collections(
     top_k: int = Query(10, ge=1, le=100, description="Number of results to return"),
     context_mode: str = Query(
         "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
-    ),
-    rerank: bool = Query(
-        False, description="Enable LLM reranking for better relevance (default: False)"
     ),
     max_context_length: int = Query(
         8000, ge=1000, le=20000, description="Maximum context length for LLM evaluation"
@@ -414,30 +380,12 @@ async def intelligent_search_across_collections(
                     .filter(SubDocument.document_id == doc.id)
                     .all()
                 )
-
-                for subdoc in subdocs:
-                    # Get hierarchical library cards for structure
-                    hierarchy_cards = (
-                        db.query(LibraryCard)
-                        .filter(
-                            LibraryCard.sub_document_id == subdoc.id,
-                            LibraryCard.level.in_(["level_1", "level_2", "level_3"]),
-                        )
-                        .order_by(LibraryCard.level.desc())
-                        .limit(20)
-                        .all()
-                    )
-
-                    if hierarchy_cards:
-                        subdoc_structure = {
-                            "subdocument_name": subdoc.breadcrumb_key,
-                            "sections": [],
-                        }
-                        for card in hierarchy_cards:
-                            subdoc_structure["sections"].append(
-                                {"level": card.level, "title": card.title}
-                            )
-                        document_structure.append(subdoc_structure)
+                from kapsula.presentation.shared.document_structure_builder import (
+                    build_document_structure_from_subdocs,
+                )
+                document_structure.extend(
+                    build_document_structure_from_subdocs(subdocs, db)
+                )
 
         search_plan = None
 
@@ -459,13 +407,11 @@ async def intelligent_search_across_collections(
 
         # Create search function that searches within the routed collection
         async def execute_search(search_query: str):
-            # Reranker disabled — runs too slow locally
             return await create_multi_index_searcher(db).search_collections(
                 CollectionSearch(
                     query=search_query,
                     account_id=account_id,
                     top_k=top_k,
-                    rerank=False,
                     context_mode=context_mode,
                     hf_api_token=os.getenv("HF_TOKEN"),
                 )
@@ -557,9 +503,6 @@ async def intelligent_search_across_collections_streaming(
     top_k: int = Query(10, ge=1, le=100, description="Number of results to return"),
     context_mode: str = Query(
         "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
-    ),
-    rerank: bool = Query(
-        False, description="Enable LLM reranking for better relevance (default: False)"
     ),
     max_context_length: int = Query(
         8000, ge=1000, le=20000, description="Maximum context length for LLM evaluation"
@@ -699,7 +642,6 @@ async def intelligent_search_across_collections_streaming(
     - **account_id**: Optional account ID to filter collections
     - **top_k**: Number of results to return per subquestion (1-100)
     - **context_mode**: Context expansion mode - "none", "narrow" (H3), "deep" (H2)
-    - **rerank**: Enable LLM reranking (default: False)
     - **max_context_length**: Maximum context length for LLM (1000-20000)
     - **enable_planning**: Enable query planning to create subquestions (default: True)
     """
@@ -778,31 +720,12 @@ async def intelligent_search_across_collections_streaming(
                         .filter(SubDocument.document_id == doc.id)
                         .all()
                     )
-
-                    for subdoc in subdocs:
-                        hierarchy_cards = (
-                            db.query(LibraryCard)
-                            .filter(
-                                LibraryCard.sub_document_id == subdoc.id,
-                                LibraryCard.level.in_(
-                                    ["level_1", "level_2", "level_3"]
-                                ),
-                            )
-                            .order_by(LibraryCard.level.desc())
-                            .limit(20)
-                            .all()
-                        )
-
-                        if hierarchy_cards:
-                            subdoc_structure = {
-                                "subdocument_name": subdoc.breadcrumb_key,
-                                "sections": [],
-                            }
-                            for card in hierarchy_cards:
-                                subdoc_structure["sections"].append(
-                                    {"level": card.level, "title": card.title}
-                                )
-                            document_structure.append(subdoc_structure)
+                    from kapsula.presentation.shared.document_structure_builder import (
+                        build_document_structure_from_subdocs,
+                    )
+                    document_structure.extend(
+                        build_document_structure_from_subdocs(subdocs, db)
+                    )
 
             search_plan = None
 
@@ -831,7 +754,6 @@ async def intelligent_search_across_collections_streaming(
                         query=search_query,
                         account_id=account_id,
                         top_k=top_k,
-                        rerank=False,
                         context_mode=context_mode,
                         hf_api_token=os.getenv("HF_TOKEN"),
                     )
@@ -863,7 +785,7 @@ async def intelligent_search_across_collections_streaming(
                     unique_citations = collect_unique_citations(all_citations)
 
                     # Add citations to the final data
-                    event["data"]["citations"] = [c.dict() for c in unique_citations]
+                    event["data"]["citations"] = [c.model_dump() for c in unique_citations]
                     event["data"]["account_id"] = account_id
                     event["data"]["context_mode"] = context_mode
 
@@ -898,9 +820,6 @@ async def search_document(
     ),
     node_type_filter: Optional[str] = Query(
         None, description="Comma-separated node types to filter (e.g., 'code,table')"
-    ),
-    rerank: bool = Query(
-        False, description="Enable LLM reranking for better relevance (default: False)"
     ),
     db: Session = Depends(get_db),
 ):
@@ -956,13 +875,11 @@ async def search_document(
                 f"Using multi-index search for document {job_id} ({len(subdocs)} sub-documents)"
             )
             searcher = create_multi_index_searcher(db)
-            # Reranker disabled — runs too slow locally
             results = await searcher.search_subdocuments(
                 SubDocumentSearch(
                     query=query,
                     document_id=document.id,
                     top_k=top_k,
-                    rerank=False,
                     context_mode=context_mode,
                     hf_api_token=os.getenv("HF_TOKEN"),
                     node_type_filter=node_types,
@@ -980,7 +897,6 @@ async def search_document(
                     detail="Search indexes not available for this document",
                 )
 
-            # Reranker disabled — runs too slow locally
             results = await create_multi_index_searcher(db).search_single_index(
                 SingleIndexSearch(
                     query=query,
@@ -988,7 +904,6 @@ async def search_document(
                     bm25_path=document.bm25_index_path,
                     document_id=document.id,
                     top_k=top_k,
-                    rerank=False,
                     context_mode=context_mode,
                     node_type_filter=node_types,
                 )
@@ -1058,9 +973,6 @@ async def intelligent_search_document(
     ),
     node_type_filter: Optional[str] = Query(
         None, description="Comma-separated node types to filter (e.g., 'code,table')"
-    ),
-    rerank: bool = Query(
-        False, description="Enable LLM reranking for better relevance (default: False)"
     ),
     max_context_length: int = Query(
         8000, ge=1000, le=20000, description="Maximum context length for LLM evaluation"
@@ -1154,57 +1066,19 @@ async def intelligent_search_document(
                     )
 
             # Get document structure from library cards (H1, H2, H3 hierarchy)
-            document_structure = []
+            from kapsula.presentation.shared.document_structure_builder import (
+                build_document_structure_from_subdocs,
+                build_document_structure_from_document,
+            )
             if subdocs:
-                # Get all library cards for subdocuments to see the structural hierarchy
-                for subdoc in subdocs:
-                    # Get all hierarchical cards for this subdocument (level_1, level_2, level_3)
-                    hierarchy_cards = (
-                        db.query(LibraryCard)
-                        .filter(
-                            LibraryCard.sub_document_id == subdoc.id,
-                            LibraryCard.level.in_(
-                                ["level_1", "level_2", "level_3", "subdocument"]
-                            ),
-                        )
-                        .order_by(LibraryCard.level.desc())
-                        .limit(20)
-                        .all()
-                    )  # Get top-level structure
-
-                    if hierarchy_cards:
-                        subdoc_structure = {
-                            "subdocument_name": subdoc.breadcrumb_key,
-                            "sections": [],
-                        }
-                        for card in hierarchy_cards:
-                            subdoc_structure["sections"].append(
-                                {"level": card.level, "title": card.title}
-                            )
-                        document_structure.append(subdoc_structure)
+                document_structure = build_document_structure_from_subdocs(subdocs, db)
             else:
-                # For single-index documents, get their library cards
-                hierarchy_cards = (
-                    db.query(LibraryCard)
-                    .filter(
-                        LibraryCard.document_id == document.id,
-                        LibraryCard.level.in_(["level_1", "level_2", "level_3"]),
-                    )
-                    .order_by(LibraryCard.level.desc())
-                    .limit(30)
-                    .all()
+                document_structure = build_document_structure_from_document(
+                    document_id=document.id,
+                    fallback_name=document.filename,
+                    db=db,
+                    limit=30,
                 )
-
-                if hierarchy_cards:
-                    doc_structure = {
-                        "subdocument_name": document.filename,
-                        "sections": [],
-                    }
-                    for card in hierarchy_cards:
-                        doc_structure["sections"].append(
-                            {"level": card.level, "title": card.title}
-                        )
-                    document_structure.append(doc_structure)
 
             if document_structure:
                 logger.info(
@@ -1228,13 +1102,11 @@ async def intelligent_search_document(
             if subdocs:
                 # Use new multi-index search with LLM routing
                 searcher = create_multi_index_searcher(db)
-                # Reranker disabled — runs too slow locally
                 return await searcher.search_subdocuments(
                     SubDocumentSearch(
                         query=search_query,
                         document_id=document.id,
                         top_k=top_k,
-                        rerank=False,
                         context_mode=context_mode,
                         hf_api_token=os.getenv("HF_TOKEN"),
                     )
@@ -1247,7 +1119,6 @@ async def intelligent_search_document(
                         detail="Search indexes not available for this document",
                     )
 
-                # Reranker disabled — runs too slow locally
                 return await create_multi_index_searcher(db).search_single_index(
                     SingleIndexSearch(
                         query=search_query,
@@ -1255,7 +1126,6 @@ async def intelligent_search_document(
                         bm25_path=document.bm25_index_path,
                         document_id=document.id,
                         top_k=top_k,
-                        rerank=False,
                         context_mode=context_mode,
                     )
                 )
