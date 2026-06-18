@@ -142,7 +142,6 @@ def register_search_intelligent_tools(mcp: FastMCP):
                             document_id=doc.id,
                             top_k=min(top_k, 100),
                             context_mode=context_mode,
-                            hf_api_token=token,
                         )
                     )
                 if not doc.faiss_index_path or not doc.bm25_index_path:

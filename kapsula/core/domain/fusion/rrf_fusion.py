@@ -1,27 +1,29 @@
 """Reciprocal Rank Fusion with quality filtering."""
 
 import logging
-from typing import Any
 
-from kapsula.core.domain.quality_filter import passes_quality_filter
+from kapsula.core.domain.interfaces.fusion import Fusion
+from kapsula.core.domain.quality_filter import (
+    apply_fusion_quality_filter,
+    normalize_max_sparse,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class RRFFusion:
+class RRFFusion(Fusion):
     """Fuses results using Reciprocal Rank Fusion."""
 
     def __init__(self, k: int = 60):
         self._k = k
 
     def fuse(
-        self, dense: list[dict[str, Any]], sparse: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
+        self,
+        dense: list[dict],
+        sparse: list[dict],
+    ) -> list[dict]:
         result_map: dict[int, dict] = {}
-        sparse_scores = [
-            r["sparse_score"] for r in sparse if r.get("sparse_score", 0) > 0
-        ]
-        max_sparse = max(sparse_scores) if sparse_scores else 1.0
+        max_sparse = normalize_max_sparse(sparse)
 
         for item in dense:
             idx = item["index"]
@@ -51,17 +53,6 @@ class RRFFusion:
             result_map[idx]["sparse_score"] = item.get("sparse_score", 0)
 
         combined = sorted(result_map.values(), key=lambda x: x["score"], reverse=True)
-        return _apply_quality_filter(combined, max_sparse)
-
-
-def _apply_quality_filter(
-    combined: list[dict[str, Any]], max_sparse: float
-) -> list[dict[str, Any]]:
-    filtered = []
-    for result in combined:
-        dense = result.get("dense_score", 0)
-        sn = result.get("sparse_score", 0) / max_sparse if max_sparse > 0 else 0
-        if passes_quality_filter(dense, sn, max_sparse):
-            filtered.append(result)
-    logger.debug(f"Quality filter: kept {len(filtered)}/{len(combined)}")
-    return filtered
+        filtered = apply_fusion_quality_filter(combined, max_sparse)
+        logger.debug("Quality filter (RRF): kept %s/%s", len(filtered), len(combined))
+        return filtered

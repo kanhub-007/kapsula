@@ -442,9 +442,9 @@ class MultiIndexSearcher:
         doc: Any,
         query: str,
         top_k: int,
-        hf_api_token: str | None,
         node_type_filter: list[str] | None = None,
     ) -> list:
+        """Search a single document via sub-documents or its own index."""
         subdoc_count = self._data.count_sub_documents(doc.id)
         if subdoc_count > 0:
             return await self.search_subdocuments(
@@ -453,7 +453,6 @@ class MultiIndexSearcher:
                     document_id=doc.id,
                     top_k=top_k,
                     context_mode="none",
-                    hf_api_token=hf_api_token,
                     per_subdoc_multiplier=2,
                     node_type_filter=node_type_filter,
                 )

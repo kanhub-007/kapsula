@@ -10,7 +10,6 @@ from ._search_helpers import (
 from ._shared import (
     _get_db,
     _get_multi_index_searcher,
-    _hf_token,
     _parse_node_type_filter,
 )
 
@@ -116,7 +115,6 @@ def register_search_document_tools(mcp: FastMCP):
                         document_id=doc.id,
                         top_k=min(top_k, 100),
                         context_mode=context_mode,
-                        hf_api_token=_hf_token(),
                         node_type_filter=_parse_node_type_filter(node_type_filter),
                     )
                 )

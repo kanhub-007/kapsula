@@ -1,7 +1,5 @@
 """Search routes."""
 
-import os
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -67,7 +65,6 @@ async def search_across_collections(
                 account_id=account_id,
                 top_k=top_k,
                 context_mode=context_mode,
-                hf_api_token=os.getenv("HF_TOKEN"),
                 node_type_filter=parse_node_type_filter(node_type_filter),
                 routing_mode=routing_mode,
             )
@@ -141,7 +138,6 @@ async def search_collection(
                 collection_id=collection_id,
                 top_k=top_k,
                 context_mode=context_mode,
-                hf_api_token=os.getenv("HF_TOKEN"),
                 node_type_filter=parse_node_type_filter(node_type_filter),
                 routing_mode=routing_mode,
             )

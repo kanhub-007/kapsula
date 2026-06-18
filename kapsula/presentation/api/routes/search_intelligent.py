@@ -1,7 +1,6 @@
 """Search routes."""
 
 import json
-import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -89,7 +88,6 @@ async def intelligent_search_across_collections(
                     account_id=account_id,
                     top_k=top_k,
                     context_mode=context_mode,
-                    hf_api_token=os.getenv("HF_TOKEN"),
                 )
             )
 
@@ -348,7 +346,6 @@ async def intelligent_search_across_collections_streaming(
                         account_id=account_id,
                         top_k=top_k,
                         context_mode=context_mode,
-                        hf_api_token=os.getenv("HF_TOKEN"),
                     )
                 )
 

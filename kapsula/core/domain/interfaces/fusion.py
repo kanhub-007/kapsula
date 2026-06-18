@@ -1,8 +1,9 @@
 """Fusion method protocol for combining dense and sparse results."""
 
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 
+@runtime_checkable
 class Fusion(Protocol):
     """Interface for fusing dense and sparse retrieval results."""
 

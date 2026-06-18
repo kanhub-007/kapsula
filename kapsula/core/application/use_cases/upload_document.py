@@ -45,6 +45,7 @@ class UploadDocumentUseCase:
         collection_id: str,
         max_tokens: int = 512,
         ingestion_mode: str = "indexed",
+        ip_address: str = "127.0.0.1",
     ) -> UploadDocumentResult:
         """Execute the upload workflow.
 
@@ -88,7 +89,7 @@ class UploadDocumentUseCase:
             collection_id=col.id,
             filename=p.name,
             size=len(content.encode("utf-8")),
-            ip_address="127.0.0.1",
+            ip_address=ip_address,
             content=content,
             status="processing",
         )
@@ -128,26 +129,61 @@ class UploadDocumentUseCase:
         collection_id: str,
         max_tokens: int = 512,
         ingestion_mode: str = "indexed",
+        ip_address: str = "127.0.0.1",
     ) -> UploadDocumentResult:
         """Execute upload from raw content bytes (for HTTP upload routes).
 
-        Writes content to a temp file, delegates to execute(), cleans up.
+        Validates the filename extension directly and persists the decoded
+        content without a temp-file round-trip. The caller's filename is
+        preserved on the upload record.
         """
-        import tempfile
+        suffix = Path(filename).suffix.lower()
+        if suffix != ".md":
+            raise ValueError(f"Only .md files accepted, got: {suffix}")
 
-        suffix = Path(filename).suffix if Path(filename).suffix else ".md"
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, mode="wb") as tmp:
-            tmp.write(content_bytes)
-            tmp_path = tmp.name
         try:
-            result = self.execute(
-                db, tmp_path, collection_id, max_tokens, ingestion_mode
-            )
-            return UploadDocumentResult(
-                job_id=result.job_id,
-                filename=filename,
-                collection_name=result.collection_name,
-                ingestion_mode=result.ingestion_mode,
-            )
-        finally:
-            Path(tmp_path).unlink(missing_ok=True)
+            ingestion_mode = UploadIngestionMode.normalize(ingestion_mode)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+
+        col = self._document_repository.find_collection_by_guid(db, collection_id)
+        if not col:
+            raise ValueError(f"Collection not found: {collection_id}")
+
+        content = content_bytes.decode("utf-8")
+        job_id = str(uuid.uuid4())
+        doc = Document(
+            job_id=job_id,
+            collection_id=col.id,
+            filename=filename,
+            size=len(content_bytes),
+            ip_address=ip_address,
+            content=content,
+            status="processing",
+        )
+        doc = self._document_repository.save_document(db, doc)
+
+        self._progress_tracker.register_job(
+            job_id=job_id,
+            filename=filename,
+            collection_name=col.name,
+            ingestion_mode=ingestion_mode,
+        )
+        self._background_processor.start_processing(
+            job_id, content, max_tokens, ingestion_mode
+        )
+
+        logger.info(
+            "Upload started: job_id=%s filename=%s collection=%s mode=%s",
+            job_id,
+            filename,
+            col.name,
+            ingestion_mode,
+        )
+
+        return UploadDocumentResult(
+            job_id=job_id,
+            filename=filename,
+            collection_name=col.name,
+            ingestion_mode=ingestion_mode,
+        )

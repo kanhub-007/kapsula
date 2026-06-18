@@ -1,7 +1,6 @@
 """Search routes."""
 
 import json
-import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -103,7 +102,6 @@ async def search_document(
                     document_id=document.id,
                     top_k=top_k,
                     context_mode=context_mode,
-                    hf_api_token=os.getenv("HF_TOKEN"),
                     node_type_filter=node_types,
                 )
             )
@@ -331,7 +329,6 @@ async def intelligent_search_document(
                         document_id=document.id,
                         top_k=top_k,
                         context_mode=context_mode,
-                        hf_api_token=os.getenv("HF_TOKEN"),
                     )
                 )
             else:

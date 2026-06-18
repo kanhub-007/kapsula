@@ -10,20 +10,17 @@ Functions that are used by multiple tool registration modules:
 import asyncio
 
 from kapsula.infrastructure.data import (
-    Account,
-    Collection,
-    Document,
-    LibraryCard,
-    SearchMissLog,
-    SubDocument,
+    Account as OrmAccount,
 )
-
-# ORM aliases per project convention
-OrmAccount = Account
-OrmCollection = Collection
-OrmDocument = Document
-OrmLibraryCard = LibraryCard
-OrmSubDocument = SubDocument
+from kapsula.infrastructure.data import (
+    Collection as OrmCollection,
+)
+from kapsula.infrastructure.data import (
+    LibraryCard as OrmLibraryCard,
+)
+from kapsula.infrastructure.data import (
+    SearchMissLog as OrmSearchMissLog,
+)
 
 from ._shared import (
     _get_chat_client,
@@ -46,7 +43,7 @@ def log_search_miss(
 ) -> None:
     """Log a search that returned few results for gap detection (Phase 3)."""
     top_score = results[0].get("score", 0) if results else 0.0
-    miss = SearchMissLog(
+    miss = OrmSearchMissLog(
         collection_id=collection_id,
         query=query[:500],
         result_count=result_count,
@@ -109,7 +106,6 @@ async def run_search_documents_text(
                 collection_id=collection_id,
                 top_k=min(top_k, 100),
                 context_mode=context_mode,
-                hf_api_token=_hf_token(),
                 node_type_filter=_parse_node_type_filter(node_type_filter),
                 routing_mode=routing_mode,
             )
@@ -148,7 +144,7 @@ async def run_intelligent_collection_search(
         return "Error: HF_TOKEN not set."
 
     def _db_work():
-        q = db.query(Collection)
+        q = db.query(OrmCollection)
         if account_id:
             q = q.join(OrmAccount).filter(OrmAccount.account_id == account_id)
         collections = q.all()
@@ -177,7 +173,9 @@ async def run_intelligent_collection_search(
 
         routed_ids = router.select(query, meta)
         routed_id = routed_ids[0] if routed_ids else collections[0].id
-        routed_coll = db.query(Collection).filter(Collection.id == routed_id).first()
+        routed_coll = (
+            db.query(OrmCollection).filter(OrmCollection.id == routed_id).first()
+        )
 
         from kapsula.presentation.shared.document_structure_builder import (
             build_document_structure_from_subdocs,
@@ -213,7 +211,6 @@ async def run_intelligent_collection_search(
                 account_id=account_id or "",
                 top_k=min(top_k, 100),
                 context_mode=context_mode,
-                hf_api_token=token,
             )
         )
 
