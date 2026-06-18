@@ -88,6 +88,50 @@ class SqlSearchDataAccess:
             query = query.filter(Chunk.sub_document_id == sub_doc_id)
         return query.first()
 
+    def get_chunks_batch(
+        self,
+        document_id: int,
+        chunk_specs: list[tuple[int, int | None]],
+    ) -> dict:
+        """Fetch multiple chunks in a single DB query.
+
+        Returns a dict mapping ``(chunk_index, sub_doc_id)`` to Chunk ORM.
+        """
+        if not chunk_specs:
+            return {}
+        from sqlalchemy import or_
+        conditions = []
+        for c_idx, s_id in chunk_specs:
+            if s_id is not None:
+                conditions.append(
+                    (Chunk.chunk_index == c_idx) & (Chunk.sub_document_id == s_id)
+                )
+            else:
+                conditions.append(Chunk.chunk_index == c_idx)
+        chunks = (
+            self._db.query(Chunk)
+            .filter(Chunk.document_id == document_id, or_(*conditions))
+            .all()
+        )
+        result: dict = {}
+        for c in chunks:
+            result[(c.chunk_index, c.sub_document_id)] = c
+        return result
+
+    def get_library_cards_by_doc_ids(self, doc_ids: list[str]) -> dict:
+        """Fetch multiple library cards by doc_id in a single DB query.
+
+        Returns a dict mapping doc_id to LibraryCard ORM.
+        """
+        if not doc_ids:
+            return {}
+        cards = (
+            self._db.query(LibraryCard)
+            .filter(LibraryCard.doc_id.in_(doc_ids))
+            .all()
+        )
+        return {c.doc_id: c for c in cards}
+
     def count_sub_documents(self, document_id: int) -> int:
         return (
             self._db.query(SubDocument)

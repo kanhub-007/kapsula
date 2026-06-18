@@ -63,12 +63,12 @@ class CachingEmbedder:
             if cached is None:
                 return None
             self._cache.move_to_end(key)
-            return cached.copy()
+            return cached
 
     def _set(self, query: str, embedding: np.ndarray) -> None:
         key = self._key(query)
         with self._lock:
-            self._cache[key] = embedding.copy()
+            self._cache[key] = embedding
             self._cache.move_to_end(key)
             while len(self._cache) > self._max_entries:
                 self._cache.popitem(last=False)

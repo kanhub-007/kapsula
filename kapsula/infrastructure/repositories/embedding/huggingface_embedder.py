@@ -1,5 +1,6 @@
 """HuggingFace Inference Endpoint embedder."""
 
+from concurrent.futures import ThreadPoolExecutor
 from time import perf_counter
 from typing import List, Union, Iterator
 
@@ -14,14 +15,14 @@ logger = get_logger(__name__)
 class HuggingFaceEmbedder:
     """Embedder backed by a HuggingFace Inference Endpoint."""
 
-    def __init__(self, endpoint_url: str, token: str):
+    def __init__(self, endpoint_url: str, token: str, timeout: int = 30):
         if not endpoint_url:
             raise ValueError("endpoint_url is required")
         if not token:
             raise ValueError("token is required")
 
-        logger.info(f"Initializing HF Inference Client for: {endpoint_url}")
-        self._client = InferenceClient(model=endpoint_url, token=token)
+        logger.info("Initializing HF Inference Client for: %s", endpoint_url)
+        self._client = InferenceClient(model=endpoint_url, token=token, timeout=timeout)
 
     def embed(self, text: Union[str, List[str]], batch_size: int = 32) -> np.ndarray:
         """Generate embeddings. Always returns 2D."""
@@ -30,15 +31,19 @@ class HuggingFaceEmbedder:
             raise ValueError("No text provided for embedding")
 
         started = perf_counter()
-        all_embeddings = [
-            self._process_batch(batch) for batch in self._batch(texts, batch_size)
-        ]
+        batches = list(self._batch(texts, batch_size))
+
+        if len(batches) > 1:
+            with ThreadPoolExecutor(max_workers=min(len(batches), 8)) as pool:
+                all_embeddings = list(pool.map(self._process_batch, batches))
+        else:
+            all_embeddings = [self._process_batch(batches[0])]
 
         result = (
             np.vstack(all_embeddings) if len(all_embeddings) > 1 else all_embeddings[0]
         )
         logger.info(
-            "HF embedding call completed in %.3fs: texts=%s single_query=%s",
+            "HF embedding completed in %.3fs: texts=%s single_query=%s",
             perf_counter() - started,
             len(texts),
             isinstance(text, str),

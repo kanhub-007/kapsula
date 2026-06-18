@@ -22,7 +22,13 @@ class SparseRetriever:
     def _retrieve_sync(self, query: str, k: int) -> List[Dict[str, Any]]:
         tokens = tokenize(query)
         scores = self._index.get_scores(tokens)
-        top_indices = np.argsort(scores)[::-1][:k]
+        # Use argpartition for O(n) top-k instead of O(n log n) full sort
+        n = len(scores)
+        if k >= n:
+            top_indices = np.argsort(scores)[::-1]
+        else:
+            top_indices = np.argpartition(scores, -k)[-k:]
+            top_indices = top_indices[np.argsort(scores[top_indices])[::-1]]
 
         return [
             {
