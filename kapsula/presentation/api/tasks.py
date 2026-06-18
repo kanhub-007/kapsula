@@ -989,13 +989,50 @@ def process_document_with_subdocuments(
 
 
 def get_processing_status(job_id: str) -> dict:
-    """
-    Get the current processing status for a job.
+    """Return the current processing status for a job.
 
     Args:
-        job_id: Unique job identifier
+        job_id: Unique job identifier.
 
     Returns:
-        Dictionary with status information
+        Dictionary with status information, or None if not found.
     """
     return _upload_progress.get(job_id)
+
+
+# ── Pipeline-based entry points ───────────────────────────
+# These delegate to DocumentPipeline, which runs stages in sequence
+# and reports progress through UploadProgressTracker.
+
+
+def process_document_via_pipeline(
+    job_id: str,
+    markdown_content: str,
+    max_tokens: int,
+    db,
+    ingestion_mode: str = "indexed",
+) -> None:
+    """Process a document using the PipelineStage architecture.
+
+    Currently delegates to the legacy process_document implementation.
+    As stages are extracted into PipelineStage classes, this wrapper
+    will build stage lists and delegate to DocumentPipeline.execute().
+    """
+    process_document(job_id, markdown_content, max_tokens, db, ingestion_mode)
+
+
+def process_subdocuments_via_pipeline(
+    job_id: str,
+    markdown_content: str,
+    max_tokens: int,
+    db,
+    ingestion_mode: str = "indexed",
+) -> None:
+    """Process a sub-document using the PipelineStage architecture.
+
+    Currently delegates to the legacy process_document_with_subdocuments
+    implementation.
+    """
+    process_document_with_subdocuments(
+        job_id, markdown_content, max_tokens, db, ingestion_mode
+    )
