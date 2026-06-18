@@ -7,7 +7,7 @@ from typing import List, Dict, Any
 import faiss
 from rank_bm25 import BM25Plus
 
-from kapsula.core.application.dto.index_paths import IndexPaths
+from kapsula.core.domain.entities.index_paths import IndexPaths
 from kapsula.core.domain.text_processing import tokenize, is_meaningful_chunk
 from kapsula.core.domain.interfaces import Embedder
 from kapsula.infrastructure.logging_config import get_logger

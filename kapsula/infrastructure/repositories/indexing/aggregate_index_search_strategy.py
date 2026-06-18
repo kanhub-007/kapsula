@@ -9,7 +9,6 @@ from typing import Callable
 from kapsula.core.domain.entities.aggregate_index_paths import (
     AggregateIndexPaths,
 )
-from kapsula.core.application.use_cases.hybrid_searcher import HybridSearcher
 from kapsula.core.domain.fusion.weighted_fusion import WeightedFusion
 from kapsula.core.domain.interfaces.embedder import Embedder
 from kapsula.infrastructure.logging_config import get_logger
@@ -41,10 +40,12 @@ class AggregateIndexSearchStrategy:
         data_dir: str,
         embedder: Embedder,
         path_factory: PathFactory,
+        searcher_factory,
     ):
         self._data_dir = data_dir
         self._embedder = embedder
         self._path_factory = path_factory
+        self._searcher_factory = searcher_factory
 
     async def search(
         self,
@@ -67,12 +68,7 @@ class AggregateIndexSearchStrategy:
         bm25_index = bm25_data[0] if isinstance(bm25_data, tuple) else bm25_data
         texts = bm25_data[1] if isinstance(bm25_data, tuple) else bm25_data
 
-        searcher = HybridSearcher(
-            dense=DenseRetriever(faiss_index, texts, self._embedder),
-            sparse=SparseRetriever(bm25_index, texts),
-            fusion=WeightedFusion(),
-            reranker=None,
-        )
+        searcher = self._searcher_factory(faiss_index, bm25_index, texts, self._embedder)
 
         results = await searcher.search(
             query=query,

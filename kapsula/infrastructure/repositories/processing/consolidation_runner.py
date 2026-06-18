@@ -23,9 +23,7 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session, joinedload
 
-from kapsula.core.application.use_cases.planning.query_planner import (
-    _parse_json_safely,
-)
+from kapsula.core.domain.json_utils import _parse_json_safely
 from kapsula.core.domain.interfaces.chat_client import ChatClient
 from kapsula.infrastructure.data import (
     CardReference,

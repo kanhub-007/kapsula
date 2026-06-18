@@ -135,6 +135,23 @@ def create_multi_index_searcher(
     )
 
 
+def _make_aggregate_searcher(faiss_index, bm25_index, texts, embedder):
+    """Factory to create a HybridSearcher for aggregate index strategies.
+
+    Kept in startup/ to avoid infrastructure importing from application.
+    """
+    from kapsula.core.application.use_cases.hybrid_searcher import HybridSearcher
+    from kapsula.core.domain.fusion.weighted_fusion import WeightedFusion
+    from kapsula.infrastructure.repositories.retrieval import DenseRetriever, SparseRetriever
+
+    return HybridSearcher(
+        dense=DenseRetriever(faiss_index, texts, embedder),
+        sparse=SparseRetriever(bm25_index, texts),
+        fusion=WeightedFusion(),
+        reranker=None,
+    )
+
+
 def create_aggregate_search_strategy(embedder=None):
     from kapsula.infrastructure.data.connection import DATA_DIR
     from kapsula.infrastructure.repositories.indexing.aggregate_index_search_strategy import (
@@ -154,7 +171,8 @@ def create_aggregate_search_strategy(embedder=None):
         )
 
     return AggregateIndexSearchStrategy(
-        data_dir=DATA_DIR, embedder=embedder, path_factory=_collection_paths
+        data_dir=DATA_DIR, embedder=embedder, path_factory=_collection_paths,
+        searcher_factory=_make_aggregate_searcher,
     )
 
 
@@ -176,7 +194,8 @@ def create_account_search_strategy(embedder=None):
         return AggregateIndexPaths.for_account(DATA_DIR, guid)
 
     return AggregateIndexSearchStrategy(
-        data_dir=DATA_DIR, embedder=embedder, path_factory=_account_paths
+        data_dir=DATA_DIR, embedder=embedder, path_factory=_account_paths,
+        searcher_factory=_make_aggregate_searcher,
     )
 
 

@@ -1,11 +1,5 @@
-"""Value object for built index paths."""
+"""Re-export: IndexPaths has moved to core.domain.entities.index_paths."""
 
-from dataclasses import dataclass
+from kapsula.core.domain.entities.index_paths import IndexPaths  # noqa: F401
 
-
-@dataclass(frozen=True)
-class IndexPaths:
-    """Paths to built FAISS and BM25 indexes."""
-
-    faiss: str
-    bm25: str
+__all__ = ["IndexPaths"]
