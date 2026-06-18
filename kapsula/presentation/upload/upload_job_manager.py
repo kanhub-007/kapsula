@@ -106,22 +106,7 @@ class UploadJobManager:
             job = db.query(UploadJob).filter(UploadJob.job_id == job_id).first()
             if not job:
                 return None
-            return {
-                "job_id": job.job_id,
-                "filename": job.filename,
-                "collection_name": job.collection_name,
-                "status": job.status,
-                "progress": job.progress,
-                "stage": job.stage,
-                "message": job.message,
-                "ingestion_mode": job.ingestion_mode,
-                "chunk_count": job.chunk_count,
-                "subdocument_count": job.subdocument_count,
-                "duration": job.duration,
-                "error": job.error,
-                "created_at": job.created_at.isoformat() if job.created_at else None,
-                "updated_at": job.updated_at.isoformat() if job.updated_at else None,
-            }
+            return _job_to_dict(job)
         finally:
             db.close()
 
@@ -136,27 +121,28 @@ class UploadJobManager:
                 .all()
             )
             return [
-                {
-                    "job_id": job.job_id,
-                    "filename": job.filename,
-                    "collection_name": job.collection_name,
-                    "status": job.status,
-                    "progress": job.progress,
-                    "stage": job.stage,
-                    "message": job.message,
-                    "ingestion_mode": job.ingestion_mode,
-                    "chunk_count": job.chunk_count,
-                    "subdocument_count": job.subdocument_count,
-                    "duration": job.duration,
-                    "error": job.error,
-                    "created_at": (
-                        job.created_at.isoformat() if job.created_at else None
-                    ),
-                    "updated_at": (
-                        job.updated_at.isoformat() if job.updated_at else None
-                    ),
-                }
+                _job_to_dict(job)
                 for job in jobs
             ]
         finally:
             db.close()
+
+
+def _job_to_dict(job) -> dict:
+    """Serialize an UploadJob ORM instance to a plain dict."""
+    return {
+        "job_id": job.job_id,
+        "filename": job.filename,
+        "collection_name": job.collection_name,
+        "status": job.status,
+        "progress": job.progress,
+        "stage": job.stage,
+        "message": job.message,
+        "ingestion_mode": job.ingestion_mode,
+        "chunk_count": job.chunk_count,
+        "subdocument_count": job.subdocument_count,
+        "duration": job.duration,
+        "error": job.error,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+    }

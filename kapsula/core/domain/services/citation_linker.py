@@ -4,7 +4,6 @@ import logging
 from typing import List, Dict, Any
 
 from kapsula.core.domain.citation_matching import find_chunk_in_markdown
-from kapsula.infrastructure.repositories.chunking.header_matcher import match_header_to_parents  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

@@ -31,7 +31,6 @@ from kapsula.infrastructure.repositories.chunking.header_matcher import (
     match_header_to_parents,
 )
 from kapsula.infrastructure.repositories.indexing import DocumentIndexBuilder
-from kapsula.infrastructure.repositories.embedding import HuggingFaceEmbedder
 from kapsula.infrastructure.external.llm.chat_client import HuggingFaceChatClient
 from kapsula.core.application.use_cases.collection_summary import (
     CollectionSummaryGenerator,
@@ -39,14 +38,14 @@ from kapsula.core.application.use_cases.collection_summary import (
 from kapsula.core.application.use_cases.upload.upload_ingestion_strategy_factory import (
     UploadIngestionStrategyFactory,
 )
-from kapsula.infrastructure.repositories.processing.citation_linker import (
+from kapsula.core.domain.services.citation_linker import (
     add_citation_metadata_to_chunks,
 )
 from kapsula.infrastructure.repositories.processing.collection_summary_stage import (
     update_collection_library_card,
 )
 from kapsula.infrastructure.repositories.processing.aggregate_build_stage import (
-    _rebuild_collection_aggregate_index,
+    rebuild_collection_aggregate_index,
 )
 from kapsula.presentation.upload.maintenance_state_manager import (
     MaintenanceStateManager,
@@ -57,8 +56,7 @@ from kapsula.presentation.upload.sub_document_batch_indexer import (
 from kapsula.presentation.upload.upload_job_manager import UploadJobManager
 from kapsula.presentation.upload.upload_progress_tracker import UploadProgressTracker
 from kapsula.infrastructure.logging_config import get_logger
-
-logger = get_logger(__name__)
+from kapsula.startup import create_embedder
 
 logger = get_logger(__name__)
 
@@ -87,7 +85,6 @@ def _strip_section_images(content: str) -> str:
 
 # Global dictionary to track processing progress
 processing_status = {}
-_embedder_singleton = None
 
 
 _upload_progress = UploadProgressTracker(processing_status, logger)
@@ -379,12 +376,7 @@ def process_document(
                 )
                 collection_id = document.collection.collection_id
 
-                embedder = HuggingFaceEmbedder(
-                    endpoint_url=os.getenv(
-                        "EMBEDDING_MODEL_URL", "Qwen/Qwen3-Embedding-8B"
-                    ),
-                    token=os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN", ""),
-                )
+                embedder = create_embedder()
                 builder = DocumentIndexBuilder(embedder, DATA_DIR)
 
                 index_paths = builder.build(
@@ -429,7 +421,12 @@ def process_document(
 
         if ingestion_strategy.rebuild_aggregate_indexes:
             # Step 4: Rebuild collection aggregate index
-            _rebuild_collection_aggregate_index(db, document, job_id, start_time)
+            rebuild_collection_aggregate_index(
+                db, document, job_id,
+                upload_progress=_upload_progress,
+                embedder=embedder,
+                upload_start_time=start_time,
+            )
         else:
             MaintenanceStateManager().mark_collection_stale(
                 document.collection,
@@ -577,13 +574,9 @@ def process_document_with_subdocuments(
         subdoc_count = 0
 
         builder = None
+        embedder = None
         if ingestion_strategy.build_document_indexes:
-            embedder = HuggingFaceEmbedder(
-                endpoint_url=os.getenv(
-                    "EMBEDDING_MODEL_URL", "Qwen/Qwen3-Embedding-8B"
-                ),
-                token=os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN", ""),
-            )
+            embedder = create_embedder()
             builder = DocumentIndexBuilder(embedder, DATA_DIR)
 
         pending_subdocument_indexes: list[dict[str, Any]] = []
@@ -902,7 +895,12 @@ def process_document_with_subdocuments(
 
         if ingestion_strategy.rebuild_aggregate_indexes:
             # Step 5: Rebuild collection aggregate index
-            _rebuild_collection_aggregate_index(db, document, job_id, start_time)
+            rebuild_collection_aggregate_index(
+                db, document, job_id,
+                upload_progress=_upload_progress,
+                embedder=embedder,
+                upload_start_time=start_time,
+            )
         else:
             MaintenanceStateManager().mark_collection_stale(
                 document.collection,

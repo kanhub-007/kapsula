@@ -11,5 +11,4 @@ class CollectionSearchRequest(BaseModel):
     query: str
     account_id: Optional[str] = None
     top_k: Optional[int] = 10
-    rerank: Optional[bool] = False
     context_mode: Optional[str] = "none"

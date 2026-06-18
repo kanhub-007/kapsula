@@ -28,6 +28,9 @@ class LibraryCard(Base):
     updated_at = Column(DateTime, nullable=True)
     consolidation_run_id = Column(String, nullable=True)
 
+    # Slice 2: optional one-line description for terse structural titles
+    description = Column(Text, nullable=True)
+
     collection = relationship("Collection", back_populates="library_cards")
     document = relationship("Document", back_populates="library_cards")
     sub_document = relationship("SubDocument", back_populates="library_cards")

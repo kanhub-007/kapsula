@@ -34,8 +34,14 @@ class MaintenanceStateManager:
         """Mark collection/account derived artifacts as stale."""
         with _STATE_LOCK:
             states = self._load_states()
-            key = str(collection.id)
+            key = collection.collection_id
             state = states.get(key, self._new_state(collection))
+            self._deduplicate_states(states, collection)
+            # Repair null db_ids from legacy increment_uploads entries
+            if state.get("collection_db_id") is None:
+                state["collection_db_id"] = collection.id
+            if state.get("account_db_id") is None and collection.account_id:
+                state["account_db_id"] = collection.account_id
             state["summary_stale"] = state["summary_stale"] or summary
             state["collection_index_stale"] = (
                 state["collection_index_stale"] or collection_index
@@ -66,8 +72,14 @@ class MaintenanceStateManager:
         """
         with _STATE_LOCK:
             states = self._load_states()
-            key = str(collection.id)
+            key = collection.collection_id
+            self._deduplicate_states(states, collection)
             state = states.get(key, self._new_state(collection))
+            # Repair null db_ids from legacy increment_uploads entries
+            if state.get("collection_db_id") is None:
+                state["collection_db_id"] = collection.id
+            if state.get("account_db_id") is None and collection.account_id:
+                state["account_db_id"] = collection.account_id
             if summary:
                 state["summary_stale"] = False
             if collection_index:
@@ -165,6 +177,29 @@ class MaintenanceStateManager:
             "last_consolidation_at": None,
             "updated_at": datetime.utcnow().isoformat(),
         }
+
+    @staticmethod
+    def _deduplicate_states(
+        states: dict[str, dict[str, Any]], collection: Collection
+    ) -> None:
+        """Remove stale duplicate entries keyed by DB integer ID.
+
+        Historical bug: increment_uploads created entries keyed by GUID
+        while mark_collection_stale/fresh used DB integer ID.
+        This cleans up the orphaned DB-ID-keyed entries.
+        """
+        guid_key = collection.collection_id
+        for key in list(states.keys()):
+            if key == guid_key:
+                continue
+            state = states.get(key)
+            if state and state.get("collection_id") == guid_key:
+                del states[key]
+                logger.info(
+                    "Removed duplicate maintenance state key=%s for collection %s",
+                    key,
+                    guid_key,
+                )
 
     def _load_states(self) -> dict[str, dict[str, Any]]:
         if not os.path.exists(self._path):

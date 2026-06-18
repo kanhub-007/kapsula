@@ -1,19 +1,23 @@
 from .account import Account
+from .aggregate_index_paths import AggregateIndexPaths
+from .chunk import Chunk
 from .collection import Collection
 from .document import Document
 from .document_structure import DocumentStructure
+from .library_card import LibraryCard
+from .rebuild_result import RebuildResult
 from .sub_document import SubDocument
 from .sub_document_page import SubDocumentPage
-from .library_card import LibraryCard
-from .chunk import Chunk
 
 __all__ = [
     "Account",
+    "AggregateIndexPaths",
+    "Chunk",
     "Collection",
     "Document",
     "DocumentStructure",
+    "LibraryCard",
+    "RebuildResult",
     "SubDocument",
     "SubDocumentPage",
-    "LibraryCard",
-    "Chunk",
 ]

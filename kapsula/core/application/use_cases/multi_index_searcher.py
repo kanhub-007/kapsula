@@ -1,7 +1,6 @@
 """Multi-index search aggregator for Russian Doll retrieval."""
 
 import asyncio
-import json
 import logging
 import os
 from time import perf_counter
@@ -20,6 +19,9 @@ from kapsula.core.application.use_cases.ranking.route_confidence_scorer import (
 )
 from kapsula.core.application.use_cases.ranking.source_quota_policy import (
     SourceQuotaPolicy,
+)
+from kapsula.core.application.use_cases.search_metadata_builder import (
+    SearchMetadataBuilder,
 )
 from kapsula.core.application.use_cases.search_strategy.collection_search_strategy import (
     CollectionSearchStrategy,
@@ -44,10 +46,6 @@ from kapsula.core.domain.interfaces.search_data_access import SearchDataAccess
 logger = logging.getLogger(__name__)
 
 
-_quota_policy = SourceQuotaPolicy(per_subdocument_limit=3)
-_route_scorer = RouteConfidenceScorer()
-
-
 class MultiIndexSearcher:
     """Searches across sub-documents, collections, and single indexes with LLM selection."""
 
@@ -59,13 +57,18 @@ class MultiIndexSearcher:
         chat_client: ChatClient,
         make_searcher: Callable,
         strategies: list[CollectionSearchStrategy] | None = None,
+        quota_policy: SourceQuotaPolicy | None = None,
+        route_scorer: RouteConfidenceScorer | None = None,
     ):
         self._data = data
         self._embedder = embedder
         self._reranker = reranker
         self._chat_client = chat_client
         self._make_searcher = make_searcher
+        self._metadata = SearchMetadataBuilder(data)
         self._strategies = strategies or []
+        self._quota_policy = quota_policy or SourceQuotaPolicy(per_subdocument_limit=3)
+        self._route_scorer = route_scorer or RouteConfidenceScorer()
 
     def _get_searcher(self, faiss_path: str, bm25_path: str):
         return self._make_searcher(faiss_path, bm25_path)
@@ -77,7 +80,7 @@ class MultiIndexSearcher:
         if not subdocs:
             return []
 
-        metadata = self._build_subdoc_metadata(subdocs)
+        metadata = self._metadata.build_subdoc_metadata(subdocs)
         selector = SubDocumentSelector(self._chat_client)
         routing_started = perf_counter()
         selected = _select(selector, search.query, metadata)
@@ -101,7 +104,6 @@ class MultiIndexSearcher:
                 results = await searcher.search(
                     query=search.query,
                     top_k=per_k,
-                    rerank=False,
                     node_type_filter=search.node_type_filter,
                     sub_document_id=sd["id"],
                 )
@@ -122,11 +124,6 @@ class MultiIndexSearcher:
 
         all_results.sort(key=lambda r: r.get("score", 0), reverse=True)
 
-        if search.rerank:
-            all_results = await self._reranker.rerank(
-                search.query, all_results, len(all_results)
-            )
-
         top = all_results[: search.top_k]
         if search.context_mode != "none":
             top = expand_context_with_parents(
@@ -141,7 +138,6 @@ class MultiIndexSearcher:
         return await searcher.search(
             query=search.query,
             top_k=search.top_k,
-            rerank=search.rerank,
             node_type_filter=search.node_type_filter,
         )
 
@@ -168,20 +164,19 @@ class MultiIndexSearcher:
 
         # Aggregate fast path: try each injected strategy
         for strategy in self._strategies:
-            metadata = self._build_collection_metadata(collections)
+            metadata = self._metadata.build_collection_metadata(collections)
             aggregate_results = await strategy.search(
                 collection=metadata[0] if metadata else {},
                 query=search.query,
                 top_k=search.top_k,
                 per_document_multiplier=search.per_document_multiplier,
-                rerank=search.rerank,
                 context_mode=search.context_mode,
                 node_type_filter=search.node_type_filter,
             )
             if aggregate_results is not None:
-                _route_scorer.compute_weights(aggregate_results)
+                self._route_scorer.compute_weights(aggregate_results)
                 aggregate_results.sort(key=lambda r: r.get("score", 0), reverse=True)
-                aggregate_results = _quota_policy.apply(aggregate_results, search.top_k)
+                aggregate_results = self._quota_policy.apply(aggregate_results, search.top_k)
                 logger.info(
                     "Collection search total time %.3fs: aggregate fast path returned=%s",
                     perf_counter() - total_started,
@@ -189,7 +184,7 @@ class MultiIndexSearcher:
                 )
                 return aggregate_results
 
-        metadata = self._build_collection_metadata(collections)
+        metadata = self._metadata.build_collection_metadata(collections)
         routing_started = perf_counter()
         if scope.kind == SearchScopeKind.COLLECTION:
             selected = metadata
@@ -252,17 +247,9 @@ class MultiIndexSearcher:
         if not all_results:
             return []
 
-        _route_scorer.compute_weights(all_results)
+        self._route_scorer.compute_weights(all_results)
         all_results.sort(key=lambda r: r.get("score", 0), reverse=True)
-        all_results = _quota_policy.apply(all_results, search.top_k)
-
-        if search.rerank:
-            all_results = await self._reranker.rerank(
-                search.query, all_results, len(all_results)
-            )
-            _route_scorer.apply_to_scores(all_results)
-            all_results.sort(key=lambda r: r.get("score", 0), reverse=True)
-            all_results = _quota_policy.apply(all_results, search.top_k)
+        all_results = self._quota_policy.apply(all_results, search.top_k)
 
         top = all_results[: search.top_k]
         if search.context_mode != "none":
@@ -282,7 +269,7 @@ class MultiIndexSearcher:
         search: CollectionSearch,
         document_semaphore: asyncio.Semaphore,
     ) -> list:
-        subdoc_candidates, single_index_docs = self._collect_collection_search_targets(
+        subdoc_candidates, single_index_docs = self._metadata.collect_collection_search_targets(
             collection, docs
         )
         tasks = []
@@ -308,29 +295,6 @@ class MultiIndexSearcher:
             for doc in single_index_docs
         )
         return await _gather(tasks)
-
-    def _collect_collection_search_targets(
-        self, collection: dict, docs: list[Any]
-    ) -> tuple[list[dict], list[Any]]:
-        subdoc_candidates = []
-        single_index_docs = []
-        for doc in docs:
-            subdocs = self._data.get_sub_documents(doc.id)
-            if subdocs:
-                for subdoc_meta in self._build_subdoc_metadata(subdocs):
-                    subdoc_meta.update(
-                        collection_id=collection["id"],
-                        collection_name=collection["name"],
-                        collection_route_confidence=collection.get(
-                            "collection_route_confidence", 1.0
-                        ),
-                        document_id=doc.id,
-                        document_filename=doc.filename,
-                    )
-                    subdoc_candidates.append(subdoc_meta)
-            elif doc.faiss_index_path and doc.bm25_index_path:
-                single_index_docs.append(doc)
-        return subdoc_candidates, single_index_docs
 
     def _select_batched_subdocuments(
         self, search: CollectionSearch, candidates: list[dict]
@@ -387,7 +351,6 @@ class MultiIndexSearcher:
                 results = await searcher.search(
                     query=search.query,
                     top_k=search.top_k * search.per_document_multiplier * 2,
-                    rerank=False,
                     node_type_filter=search.node_type_filter,
                     sub_document_id=candidate["id"],
                 )
@@ -425,7 +388,6 @@ class MultiIndexSearcher:
                     bm25_path=doc.bm25_index_path,
                     document_id=doc.id,
                     top_k=search.top_k * search.per_document_multiplier,
-                    rerank=False,
                     context_mode="none",
                     node_type_filter=search.node_type_filter,
                 )
@@ -469,48 +431,6 @@ class MultiIndexSearcher:
             metadata_route_confidence=candidate.get("metadata_route_confidence"),
         )
 
-    def _build_subdoc_metadata(self, subdocs: list[Any]) -> list[dict]:
-        metadata = []
-        for sd in subdocs:
-            if not sd.faiss_index_path or not sd.bm25_index_path:
-                continue
-            card = self._data.get_library_card_for_sub_doc(sd.id)
-            page_titles = _parse_page_titles(card)
-            metadata.append(
-                {
-                    "id": sd.id,
-                    "breadcrumb_key": sd.breadcrumb_key,
-                    "page_titles": page_titles,
-                    "page_count": sd.page_count,
-                    "faiss_path": sd.faiss_index_path,
-                    "bm25_path": sd.bm25_index_path,
-                }
-            )
-        return metadata
-
-    def _build_collection_metadata(self, collections: list[Any]) -> list[dict]:
-        metadata = []
-        for coll in collections:
-            card = self._data.get_collection_library_card(coll.id)
-            doc_count, doc_list, summary = _parse_collection_card(card)
-            metadata.append(
-                {
-                    "id": coll.id,
-                    "name": coll.name,
-                    "library_card_summary": summary,
-                    "document_count": doc_count,
-                    "document_list": doc_list,
-                    "collection_route_confidence": 1.0,
-                    "account_guid": (
-                        getattr(coll.account, "account_id", None)
-                        if hasattr(coll, "account") and coll.account
-                        else None
-                    ),
-                    "collection_guid": getattr(coll, "collection_id", None),
-                }
-            )
-        return metadata
-
     async def _search_document(
         self,
         doc: Any,
@@ -526,7 +446,6 @@ class MultiIndexSearcher:
                     query=query,
                     document_id=doc.id,
                     top_k=top_k,
-                    rerank=False,
                     context_mode="none",
                     hf_api_token=hf_api_token,
                     per_subdoc_multiplier=2,
@@ -541,7 +460,6 @@ class MultiIndexSearcher:
                     bm25_path=doc.bm25_index_path,
                     document_id=doc.id,
                     top_k=top_k,
-                    rerank=False,
                     context_mode="none",
                     node_type_filter=node_type_filter,
                 )
@@ -560,29 +478,6 @@ class MultiIndexSearcher:
                 )
             )
         return expanded
-
-
-def _parse_page_titles(card: Any | None) -> list[str]:
-    if not (card and card.extra_metadata):
-        return []
-    try:
-        return json.loads(card.extra_metadata).get("page_titles", [])
-    except json.JSONDecodeError:
-        return []
-
-
-def _parse_collection_card(card: Any | None) -> tuple[int, list[str], str]:
-    if not (card and card.extra_metadata):
-        return 0, [], card.content if card else ""
-    try:
-        meta = json.loads(card.extra_metadata)
-        return (
-            meta.get("total_documents", 0),
-            [d["filename"] for d in meta.get("document_summaries", [])],
-            card.content,
-        )
-    except json.JSONDecodeError:
-        return 0, [], card.content
 
 
 def _select(selector, query: str, metadata: list[dict]) -> list[dict]:

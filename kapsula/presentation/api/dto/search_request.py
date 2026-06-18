@@ -12,4 +12,3 @@ class SearchRequest(BaseModel):
     top_k: Optional[int] = 10
     dense_weight: Optional[float] = 0.5
     sparse_weight: Optional[float] = 0.5
-    rerank: Optional[bool] = False

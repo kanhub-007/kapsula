@@ -20,7 +20,6 @@ class CollectionSearchStrategy(Protocol):
         query: str,
         top_k: int,
         per_document_multiplier: int,
-        rerank: bool,
         context_mode: str,
         node_type_filter: list[str] | None,
     ) -> list[dict] | None: ...

@@ -4,7 +4,13 @@ import json
 
 from sqlalchemy.orm import Session
 
-from kapsula.infrastructure.data import Collection, DATA_DIR, Document, LibraryCard
+from kapsula.infrastructure.data import (
+    Collection,
+    DATA_DIR,
+    Document,
+    LibraryCard,
+    SessionLocal,
+)
 from kapsula.infrastructure.logging_config import get_logger
 from kapsula.infrastructure.repositories.indexing.aggregate_index_builder import (
     AggregateIndexBuilder,
@@ -23,9 +29,20 @@ class CollectionMaintenanceRunner:
     def __init__(self, db: Session):
         self._db = db
 
-    def run(self, collection: Collection) -> dict:
-        """Run collection summary, aggregate-index, and consolidation maintenance."""
-        summary_updates, summary_failures = self._refresh_collection_summary(collection)
+    def run(self, collection: Collection, progress_callback=None) -> dict:
+        """Run collection summary, aggregate-index, and consolidation maintenance.
+
+        Args:
+            collection: The ORM collection to maintain.
+            progress_callback: Optional callable(stage, progress, detail) for progress reporting.
+        """
+        if progress_callback:
+            progress_callback("summarizing", "Counting documents...", "")
+        summary_updates, summary_failures = self._refresh_collection_summary(
+            collection, progress_callback
+        )
+        if progress_callback:
+            progress_callback("indexing", "Rebuilding FAISS+BM25 indexes...", "")
         aggregate_result = self._rebuild_aggregate_indexes(collection)
         state_mgr = MaintenanceStateManager()
 
@@ -39,6 +56,10 @@ class CollectionMaintenanceRunner:
                 and s.get("consolidation_stale")
             ]
             if col_stale:
+                if progress_callback:
+                    progress_callback(
+                        "consolidating", "Running knowledge consolidation...", ""
+                    )
                 try:
                     from kapsula.infrastructure.repositories.processing.consolidation_runner import (
                         ConsolidationRunner,
@@ -49,7 +70,7 @@ class CollectionMaintenanceRunner:
 
                     chat_client = _get_chat_client()
                     runner = ConsolidationRunner(
-                        self._db,
+                        SessionLocal,
                         chat_client,
                         collection.id,
                         collection.collection_id,
@@ -64,6 +85,9 @@ class CollectionMaintenanceRunner:
                         exc_info=True,
                     )
                     consolidation_result = {"error": str(exc)}
+
+        # Slice 2: enrich terse structural titles with one-line descriptions
+        enrichment_result = self._enrich_structural_cards(collection, progress_callback)
 
         # Mark fresh AFTER consolidation attempt
         state_mgr.mark_collection_fresh(
@@ -80,9 +104,42 @@ class CollectionMaintenanceRunner:
             "summary_failures": summary_failures,
             **aggregate_result,
             **consolidation_result,
+            "cards_enriched": enrichment_result.get("enriched", 0),
         }
 
-    def _refresh_collection_summary(self, collection: Collection) -> tuple[int, int]:
+    def _enrich_structural_cards(
+        self, collection: Collection, progress_callback=None
+    ) -> dict:
+        """Enrich terse structural titles with one-line descriptions (Slice 2)."""
+        if progress_callback:
+            progress_callback(
+                "enriching", "Enriching structural card titles...", ""
+            )
+        try:
+            from kapsula.infrastructure.repositories.processing.card_enricher import (
+                CardEnricher,
+            )
+            from kapsula.presentation.mcp.tools._shared import _get_chat_client
+
+            enricher = CardEnricher(
+                SessionLocal,
+                _get_chat_client(),
+                collection.id,
+                collection.collection_id,
+            )
+            return enricher.run()
+        except Exception as exc:
+            logger.error(
+                "Card enrichment failed for collection %s: %s",
+                collection.collection_id,
+                exc,
+                exc_info=True,
+            )
+            return {"enriched": 0, "failed": 0}
+
+    def _refresh_collection_summary(
+        self, collection: Collection, progress_callback=None
+    ) -> tuple[int, int]:
         from kapsula.presentation.api.tasks import update_collection_library_card
 
         existing_document_ids = self._existing_summary_document_ids(collection)
@@ -98,9 +155,18 @@ class CollectionMaintenanceRunner:
         missing_docs = [
             doc for doc in completed_docs if doc.id not in existing_document_ids
         ]
+        total = len(missing_docs)
+        if total == 0 and progress_callback:
+            progress_callback("summarizing", "All documents already summarized", "")
         successes = 0
         failures = 0
-        for document in missing_docs:
+        for i, document in enumerate(missing_docs):
+            if progress_callback:
+                progress_callback(
+                    "summarizing",
+                    f"Summarizing document {i + 1}/{total}",
+                    document.filename,
+                )
             try:
                 update_collection_library_card(document.id, self._db)
                 successes += 1

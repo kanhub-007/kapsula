@@ -1,14 +1,24 @@
 """Search result node-type filtering (application-level)."""
 
+import logging
 from typing import List, Dict, Any
 
-logger = __import__("logging").getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def filter_by_node_type(
     results: List[Dict[str, Any]],
     node_types: List[str] | None = None,
 ) -> List[Dict[str, Any]]:
+    """Filter search results by node type.
+
+    Args:
+        results: List of search result dicts, each with a ``metadata`` key.
+        node_types: List of node types to keep (e.g., ``["table", "code"]``).
+
+    Returns:
+        Filtered list. If *node_types* is empty or None, returns all results.
+    """
     if not node_types:
         return results
 

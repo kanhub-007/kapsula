@@ -140,7 +140,7 @@ def create_aggregate_search_strategy(embedder=None):
     from kapsula.infrastructure.repositories.indexing.aggregate_index_search_strategy import (
         AggregateIndexSearchStrategy,
     )
-    from kapsula.core.application.dto.aggregate_index_paths import (
+    from kapsula.core.domain.entities.aggregate_index_paths import (
         AggregateIndexPaths,
     )
 
@@ -163,7 +163,7 @@ def create_account_search_strategy(embedder=None):
     from kapsula.infrastructure.repositories.indexing.aggregate_index_search_strategy import (
         AggregateIndexSearchStrategy,
     )
-    from kapsula.core.application.dto.aggregate_index_paths import (
+    from kapsula.core.domain.entities.aggregate_index_paths import (
         AggregateIndexPaths,
     )
 

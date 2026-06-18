@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from kapsula.infrastructure.data.tables.collection import Collection as OrmCollection
 from kapsula.infrastructure.data.tables.document import Document as OrmDocument
-from kapsula.infrastructure.data.tables.library_card import LibraryCard
+from kapsula.infrastructure.data.tables.library_card import LibraryCard as OrmLibraryCard
 from kapsula.infrastructure.logging_config import get_logger
 from kapsula.core.application.use_cases.collection_summary import CollectionSummaryGenerator
 from kapsula.infrastructure.external.llm.chat_client import HuggingFaceChatClient
@@ -32,8 +32,8 @@ def update_collection_library_card(document_id: int, db: Session):
 
     # Get document's main library card
     doc_card = (
-        db.query(LibraryCard)
-        .filter(LibraryCard.document_id == document_id, LibraryCard.level == "document")
+        db.query(OrmLibraryCard)
+        .filter(OrmLibraryCard.document_id == document_id, OrmLibraryCard.level == "document")
         .first()
     )
 
@@ -51,10 +51,10 @@ def update_collection_library_card(document_id: int, db: Session):
 
     # Get existing collection library card
     existing_collection_card = (
-        db.query(LibraryCard)
+        db.query(OrmLibraryCard)
         .filter(
-            LibraryCard.collection_id == collection.id,
-            LibraryCard.level == "collection",
+            OrmLibraryCard.collection_id == collection.id,
+            OrmLibraryCard.level == "collection",
         )
         .first()
     )
@@ -92,7 +92,7 @@ def update_collection_library_card(document_id: int, db: Session):
             document_metadata=doc_metadata,
         )
 
-        new_card = LibraryCard(
+        new_card = OrmLibraryCard(
             collection_id=collection.id,
             doc_id=f"collection_{collection.id}",
             level="collection",

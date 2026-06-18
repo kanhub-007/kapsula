@@ -6,6 +6,21 @@ from typing import List
 _STEM_CACHE: dict[str, str] = {}
 
 
+def parse_node_type_filter(node_type_filter: str | None) -> list[str] | None:
+    """Parse a comma-separated node type filter string.
+
+    Args:
+        node_type_filter: Comma-separated string like ``"table,code"``.
+
+    Returns:
+        List of node type strings, or None if input is empty/None.
+    """
+    if not node_type_filter:
+        return None
+    parsed = [item.strip() for item in node_type_filter.split(",") if item.strip()]
+    return parsed or None
+
+
 def simple_stem(word: str) -> str:
     """Apply simple stemming to improve BM25 matching."""
     if word in _STEM_CACHE:
@@ -44,7 +59,18 @@ def tokenize(text: str) -> List[str]:
 
 
 def is_meaningful_chunk(content: str, min_words: int = 5) -> bool:
-    """Check if a chunk contains meaningful content."""
+    """Check if a chunk contains meaningful content.
+
+    A chunk is meaningful if it is at least 50 characters long and contains
+    at least *min_words* words of 2+ characters.
+
+    Args:
+        content: Chunk text to evaluate.
+        min_words: Minimum number of words required (default 5).
+
+    Returns:
+        True if the chunk passes both length and word-count thresholds.
+    """
     text = content.strip()
 
     if len(text) < 50:

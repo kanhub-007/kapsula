@@ -6,7 +6,7 @@ import json
 import os
 from typing import Callable
 
-from kapsula.core.application.dto.aggregate_index_paths import (
+from kapsula.core.domain.entities.aggregate_index_paths import (
     AggregateIndexPaths,
 )
 from kapsula.core.application.use_cases.hybrid_searcher import HybridSearcher
@@ -52,7 +52,6 @@ class AggregateIndexSearchStrategy:
         query: str,
         top_k: int,
         per_document_multiplier: int,
-        rerank: bool,
         context_mode: str,
         node_type_filter: list[str] | None,
     ) -> list[dict] | None:

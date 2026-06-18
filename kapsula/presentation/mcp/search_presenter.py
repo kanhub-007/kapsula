@@ -16,6 +16,21 @@ def format_search_results(
     Each result includes: score breakdown (dense/sparse/fused), signal
     indicators, context mode, and source info — so the LLM can judge
     relevance without guessing.
+
+    Args:
+        query: Original search query.
+        results: List of search result dicts with keys ``score``, ``content``, etc.
+        scope: Optional scope label (e.g., ``"in collection 'Foo'"``).
+        context_mode: Context expansion mode (``none``, ``narrow``, ``deep``).
+
+    Returns:
+        Formatted multi-line string suitable for LLM consumption.
+    """
+    """Format search results as self-documenting plain text for MCP clients.
+
+    Each result includes: score breakdown (dense/sparse/fused), signal
+    indicators, context mode, and source info — so the LLM can judge
+    relevance without guessing.
     """
     if not results:
         return "No results found."

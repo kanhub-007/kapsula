@@ -10,7 +10,7 @@ from typing import Iterator
 
 @dataclass
 class Timing:
-    """Elapsed-time holder yielded by ``log_timing``."""
+    """Elapsed-time holder yielded by ``log_timing`` context manager."""
 
     elapsed: float = 0.0
 

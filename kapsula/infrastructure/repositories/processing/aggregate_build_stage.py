@@ -1,34 +1,43 @@
-"""Rebuild collection and account aggregate search indexes."""
+"""Rebuild collection and account aggregate search indexes.
+
+Extracted from ``presentation/api/tasks.py``.
+"""
 
 import os
 import time
 
 from sqlalchemy.orm import Session
 
-from kapsula.infrastructure.data.tables.collection import Collection
-from kapsula.infrastructure.data.tables.document import Document
 from kapsula.infrastructure.data.connection import DATA_DIR
+from kapsula.infrastructure.data.tables.chunk import Chunk
+from kapsula.infrastructure.data.tables.collection import Collection as OrmCollection
+from kapsula.infrastructure.data.tables.document import Document as OrmDocument
 from kapsula.infrastructure.repositories.indexing.aggregate_index_builder import AggregateIndexBuilder
-from kapsula.infrastructure.repositories.embedding.huggingface_embedder import HuggingFaceEmbedder
-from kapsula.presentation.upload.maintenance_state_manager import MaintenanceStateManager
 from kapsula.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
-def _rebuild_collection_aggregate_index(
+def rebuild_collection_aggregate_index(
     db: Session,
-    document: Document,
+    document: OrmDocument,
     job_id: str,
+    *,
+    upload_progress,
+    embedder,
     upload_start_time: float | None = None,
 ) -> None:
-    """Rebuild collection/account aggregate indexes after a full ingestion."""
-    global _embedder_singleton
-    try:
-        from kapsula.infrastructure.repositories.indexing.aggregate_index_builder import (
-            AggregateIndexBuilder,
-        )
+    """Rebuild collection/account aggregate indexes after a full ingestion.
 
+    Args:
+        db: Database session.
+        document: The ORM document whose collection's aggregates need rebuilding.
+        job_id: Upload job ID for progress tracking.
+        upload_progress: ``UploadProgressTracker`` instance for progress updates.
+        embedder: An ``Embedder`` instance for building FAISS indexes.
+        upload_start_time: Timestamp when the upload started (for elapsed messages).
+    """
+    try:
         collection = document.collection
         if not collection:
             return
@@ -36,24 +45,19 @@ def _rebuild_collection_aggregate_index(
         account = collection.account
         account_guid = account.account_id if account else None
 
-        if _embedder_singleton is None:
-            from kapsula.startup import create_embedder
-
-            _embedder_singleton = create_embedder()
-
-        builder = AggregateIndexBuilder(_embedder_singleton, DATA_DIR)
+        builder = AggregateIndexBuilder(embedder, DATA_DIR)
 
         completed_collection_chunks = (
             db.query(Chunk)
-            .join(Document, Chunk.document_id == Document.id)
+            .join(OrmDocument, Chunk.document_id == OrmDocument.id)
             .filter(
-                Document.collection_id == collection.id,
-                Document.status == "completed",
+                OrmDocument.collection_id == collection.id,
+                OrmDocument.status == "completed",
             )
             .count()
         )
         collection_stage_start = time.time()
-        _upload_progress.set(
+        upload_progress.set(
             job_id,
             status="processing",
             progress=90,
@@ -61,7 +65,7 @@ def _rebuild_collection_aggregate_index(
             message=(
                 f"Rebuilding collection aggregate index: {completed_collection_chunks} chunks "
                 f"from collection '{collection.name}' "
-                f"({_upload_progress.elapsed_message(upload_start_time or collection_stage_start)})."
+                f"({upload_progress.elapsed_message(upload_start_time or collection_stage_start)})."
             ),
         )
         builder.build(
@@ -70,7 +74,7 @@ def _rebuild_collection_aggregate_index(
             account_id=account_guid,
             collection_guid=collection.collection_id,
         )
-        _upload_progress.log_stage(
+        upload_progress.log_stage(
             job_id,
             "aggregate_collection",
             collection_stage_start,
@@ -84,22 +88,18 @@ def _rebuild_collection_aggregate_index(
         )
 
         if account:
-            from kapsula.infrastructure.data.tables.collection import (
-                Collection as CollectionTable,
-            )
-
             completed_account_chunks = (
                 db.query(Chunk)
-                .join(Document, Chunk.document_id == Document.id)
-                .join(CollectionTable, Document.collection_id == CollectionTable.id)
+                .join(OrmDocument, Chunk.document_id == OrmDocument.id)
+                .join(OrmCollection, OrmDocument.collection_id == OrmCollection.id)
                 .filter(
-                    CollectionTable.account_id == account.id,
-                    Document.status == "completed",
+                    OrmCollection.account_id == account.id,
+                    OrmDocument.status == "completed",
                 )
                 .count()
             )
             account_stage_start = time.time()
-            _upload_progress.set(
+            upload_progress.set(
                 job_id,
                 status="processing",
                 progress=95,
@@ -107,7 +107,7 @@ def _rebuild_collection_aggregate_index(
                 message=(
                     f"Rebuilding account aggregate index: {completed_account_chunks} chunks "
                     f"for account '{account.name}' "
-                    f"({_upload_progress.elapsed_message(upload_start_time or account_stage_start)})."
+                    f"({upload_progress.elapsed_message(upload_start_time or account_stage_start)})."
                 ),
             )
             builder.build_account(
@@ -115,7 +115,7 @@ def _rebuild_collection_aggregate_index(
                 account_id=account.id,
                 account_guid=account.account_id,
             )
-            _upload_progress.log_stage(
+            upload_progress.log_stage(
                 job_id,
                 "aggregate_account",
                 account_stage_start,
@@ -128,7 +128,7 @@ def _rebuild_collection_aggregate_index(
                 account.name,
             )
 
-        _upload_progress.set(
+        upload_progress.set(
             job_id,
             status="processing",
             progress=98,
@@ -141,7 +141,7 @@ def _rebuild_collection_aggregate_index(
             job_id,
             exc,
         )
-        _upload_progress.set(
+        upload_progress.set(
             job_id,
             status="processing",
             progress=98,
@@ -151,5 +151,3 @@ def _rebuild_collection_aggregate_index(
                 "finalizing upload."
             ),
         )
-
-

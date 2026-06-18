@@ -13,7 +13,7 @@ import numpy as np
 from rank_bm25 import BM25Plus
 from sqlalchemy.orm import Session
 
-from kapsula.core.application.dto.aggregate_index_paths import (
+from kapsula.core.domain.entities.aggregate_index_paths import (
     AggregateIndexPaths,
 )
 from kapsula.core.domain.interfaces.embedder import Embedder
@@ -117,6 +117,13 @@ class AggregateIndexBuilder:
         )
 
         if not all_texts:
+            # All chunks already indexed in existing mapping — return existing paths
+            if os.path.exists(paths.faiss) and os.path.exists(paths.bm25):
+                logger.info(
+                    "All chunks for %s already indexed; reusing existing indexes",
+                    label,
+                )
+                return paths.faiss, paths.bm25
             return None, None
 
         new_count = len(new_texts)

@@ -10,6 +10,5 @@ class SingleIndexSearch:
     bm25_path: str
     document_id: int
     top_k: int = 10
-    rerank: bool = False
     context_mode: str = "narrow"
     node_type_filter: list[str] | None = None

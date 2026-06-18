@@ -11,7 +11,6 @@ class CollectionSearch:
     account_id: str | None = None
     collection_id: str | None = None
     top_k: int = 10
-    rerank: bool = False
     context_mode: str = "narrow"
     hf_api_token: str | None = None
     per_document_multiplier: int = 2

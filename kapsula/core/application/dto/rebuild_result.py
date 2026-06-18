@@ -1,13 +1,5 @@
-"""DTO for aggregate index rebuild results."""
+"""Re-export: RebuildResult has moved to core.domain.entities.rebuild_result."""
 
-from dataclasses import dataclass
+from kapsula.core.domain.entities.rebuild_result import RebuildResult  # noqa: F401
 
-
-@dataclass
-class RebuildResult:
-    """Result of rebuilding collection and account aggregate indexes."""
-
-    collection_faiss: str | None = None
-    collection_bm25: str | None = None
-    account_faiss: str | None = None
-    account_bm25: str | None = None
+__all__ = ["RebuildResult"]

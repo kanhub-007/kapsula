@@ -11,10 +11,10 @@ from kapsula.core.domain.interfaces.index_manager import (
     IndexableSubDocument,
     IndexableCollection,
 )
-from kapsula.core.application.dto.aggregate_index_paths import (
+from kapsula.core.domain.entities.aggregate_index_paths import (
     AggregateIndexPaths,
 )
-from kapsula.core.application.dto.rebuild_result import RebuildResult
+from kapsula.core.domain.entities.rebuild_result import RebuildResult
 from kapsula.infrastructure.repositories.indexing.aggregate_index_builder import (
     AggregateIndexBuilder,
 )
