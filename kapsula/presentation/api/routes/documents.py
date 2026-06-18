@@ -1,7 +1,6 @@
 """Document processing routes."""
 
 import json
-import uuid
 
 from fastapi import (
     APIRouter,
@@ -22,7 +21,6 @@ from kapsula.infrastructure.data import (
 from kapsula.infrastructure.data.tables.document import Document as OrmDocument
 from kapsula.infrastructure.data.tables.document_structure import DocumentStructure as OrmDocumentStructure
 from kapsula.infrastructure.data.tables.chunk import Chunk as OrmChunk
-from kapsula.infrastructure.data.tables.collection import Collection as OrmCollection
 from kapsula.infrastructure.logging_config import get_logger
 from ..models import (
     UploadResponse,
@@ -31,13 +29,10 @@ from ..models import (
     DocumentDetailResponse,
     DocumentListItem,
 )
-from kapsula.core.application.dto.upload_ingestion_mode import UploadIngestionMode
 from kapsula.presentation.upload.stale_progress_guard import StaleProgressGuard
-from kapsula.presentation.upload.upload_job_manager import UploadJobManager
 from ..tasks import (
     process_document_with_subdocuments,
     get_processing_status,
-    processing_status,
 )
 
 logger = get_logger(__name__)
@@ -47,7 +42,6 @@ router = APIRouter()
 @router.post("/upload", response_model=UploadResponse)
 async def upload_document(
     background_tasks: BackgroundTasks,
-    request: Request,
     collection_id: str,
     file: UploadFile = File(...),
     max_tokens: int = 512,
@@ -68,97 +62,44 @@ async def upload_document(
 
     Returns job ID for tracking progress via GET /documents/progress/{job_id}.
     """
+    content = await file.read()
+
+    from kapsula.startup import create_upload_document_use_case
+    use_case = create_upload_document_use_case()
+
     try:
-        ingestion_mode = UploadIngestionMode.normalize(ingestion_mode)
+        result = use_case.execute_from_content(
+            db=db,
+            content_bytes=content,
+            filename=file.filename or "upload.md",
+            collection_id=collection_id,
+            max_tokens=max_tokens,
+            ingestion_mode=ingestion_mode,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    logger.info(
-        "Received upload request: collection_id=%s, filename=%s, max_tokens=%s, ingestion_mode=%s",
-        collection_id,
-        file.filename,
-        max_tokens,
-        ingestion_mode,
-    )
-
-    # Verify collection exists
-    collection = (
-        db.query(OrmCollection).filter(OrmOrmCollection.collection_id == collection_id).first()
-    )
-    if not collection:
-        logger.warning(f"Collection not found: {collection_id}")
-        raise HTTPException(status_code=404, detail="Collection not found")
-
-    # Validate file type
-    if not file.filename.endswith(".md"):
-        logger.warning(f"Invalid file type rejected: {file.filename}")
-        raise HTTPException(
-            status_code=400, detail="Only markdown (.md) files are allowed"
-        )
-
-    # Read file content
-    content = await file.read()
-    markdown_content = content.decode("utf-8")
-    logger.debug(f"File content read: {len(content)} bytes")
-
-    # Get client IP
-    client_ip = request.client.host
-    logger.debug(f"Client IP: {client_ip}")
-
-    # Generate unique job ID (GUID)
-    job_id = str(uuid.uuid4())
-    logger.info(f"Generated job ID: {job_id}")
-
-    # Create document record
-    document = OrmDocument(
-        job_id=job_id,
-        collection_id=collection.id,
-        filename=file.filename,
-        size=len(content),
-        ip_address=client_ip,
-        content=markdown_content,
-        status="processing",
-    )
-
-    db.add(document)
-    db.commit()
-    db.refresh(document)
-    logger.info(
-        f"Document created with job_id: {job_id}, db_id: {document.id}, collection: {collection.name}"
-    )
-
-    # Initialize progress tracking
-    processing_status[job_id] = {
-        "status": "processing",
-        "progress": 0,
-        "stage": "queued",
-        "message": f"Document queued for {ingestion_mode} ingestion...",
-        "ingestion_mode": ingestion_mode,
-    }
-    UploadJobManager().create(
-        job_id,
-        filename=file.filename,
-        collection_id=collection.id,
-        collection_name=collection.name,
-        ingestion_mode=ingestion_mode,
-    )
-
-    # Process document in background using Russian Doll architecture
+    # Background processing (FastAPI-specific, stays in route)
     background_tasks.add_task(
         process_document_with_subdocuments,
-        job_id=job_id,
-        markdown_content=markdown_content,
+        job_id=result.job_id,
+        markdown_content=content.decode("utf-8"),
         max_tokens=max_tokens,
         db=SessionLocal(),
-        ingestion_mode=ingestion_mode,
+        ingestion_mode=result.ingestion_mode,
+    )
+
+    logger.info(
+        "Upload started: job_id=%s filename=%s collection=%s mode=%s",
+        result.job_id, result.filename, result.collection_name, result.ingestion_mode,
     )
 
     return UploadResponse(
-        job_id=job_id,
+        job_id=result.job_id,
         collection_id=collection_id,
         status="processing",
-        message=f"Document uploaded successfully. Processing started with ingestion_mode={ingestion_mode}.",
-        ingestion_mode=ingestion_mode,
+        message=f"Document uploaded successfully. Processing started with ingestion_mode={result.ingestion_mode}.",
+        ingestion_mode=result.ingestion_mode,
     )
 
 
@@ -174,7 +115,7 @@ async def get_progress(job_id: str, db: Session = Depends(get_db)):
     logger.debug(f"Progress check for job: {job_id}")
 
     # Check if document exists
-    document = db.query(OrmDocument).filter(OrmOrmDocument.job_id == job_id).first()
+    document = db.query(OrmDocument).filter(OrmDocument.job_id == job_id).first()
     if not document:
         logger.warning(f"Job not found: {job_id}")
         raise HTTPException(status_code=404, detail="Job not found")
@@ -222,7 +163,7 @@ async def download_structure(job_id: str, db: Session = Depends(get_db)):
     logger.info(f"Structure download request for job: {job_id}")
 
     # Check if document exists and is completed
-    document = db.query(OrmDocument).filter(OrmOrmDocument.job_id == job_id).first()
+    document = db.query(OrmDocument).filter(OrmDocument.job_id == job_id).first()
     if not document:
         logger.warning(f"Job not found: {job_id}")
         raise HTTPException(status_code=404, detail="Job not found")
@@ -237,7 +178,7 @@ async def download_structure(job_id: str, db: Session = Depends(get_db)):
     # Get document structure
     structure = (
         db.query(OrmDocumentStructure)
-        .filter(OrmOrmDocumentStructure.document_id == document.id)
+        .filter(OrmDocumentStructure.document_id == document.id)
         .first()
     )
 
@@ -268,7 +209,7 @@ async def download_chunks(job_id: str, db: Session = Depends(get_db)):
     logger.info(f"Chunks download request for job: {job_id}")
 
     # Check if document exists and is completed
-    document = db.query(OrmDocument).filter(OrmOrmDocument.job_id == job_id).first()
+    document = db.query(OrmDocument).filter(OrmDocument.job_id == job_id).first()
     if not document:
         logger.warning(f"Job not found: {job_id}")
         raise HTTPException(status_code=404, detail="Job not found")
@@ -283,7 +224,7 @@ async def download_chunks(job_id: str, db: Session = Depends(get_db)):
     # Get all chunks
     chunks = (
         db.query(OrmChunk)
-        .filter(OrmOrmChunk.document_id == document.id)
+        .filter(OrmChunk.document_id == document.id)
         .order_by(OrmChunk.chunk_index)
         .all()
     )
@@ -366,14 +307,14 @@ async def get_document(job_id: str, db: Session = Depends(get_db)):
     """
     logger.debug(f"Getting details for job: {job_id}")
 
-    document = db.query(OrmDocument).filter(OrmOrmDocument.job_id == job_id).first()
+    document = db.query(OrmDocument).filter(OrmDocument.job_id == job_id).first()
     if not document:
         logger.warning(f"Job not found: {job_id}")
         raise HTTPException(status_code=404, detail="Job not found")
 
     structure = (
         db.query(OrmDocumentStructure)
-        .filter(OrmOrmDocumentStructure.document_id == document.id)
+        .filter(OrmDocumentStructure.document_id == document.id)
         .first()
     )
 

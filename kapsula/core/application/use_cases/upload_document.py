@@ -116,3 +116,33 @@ class UploadDocumentUseCase:
             collection_name=col.name,
             ingestion_mode=ingestion_mode,
         )
+
+    def execute_from_content(
+        self,
+        db,
+        content_bytes: bytes,
+        filename: str,
+        collection_id: str,
+        max_tokens: int = 512,
+        ingestion_mode: str = "indexed",
+    ) -> UploadDocumentResult:
+        """Execute upload from raw content bytes (for HTTP upload routes).
+
+        Writes content to a temp file, delegates to execute(), cleans up.
+        """
+        import tempfile
+
+        suffix = Path(filename).suffix if Path(filename).suffix else ".md"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, mode="wb") as tmp:
+            tmp.write(content_bytes)
+            tmp_path = tmp.name
+        try:
+            result = self.execute(db, tmp_path, collection_id, max_tokens, ingestion_mode)
+            return UploadDocumentResult(
+                job_id=result.job_id,
+                filename=filename,
+                collection_name=result.collection_name,
+                ingestion_mode=result.ingestion_mode,
+            )
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
