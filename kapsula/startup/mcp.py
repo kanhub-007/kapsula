@@ -4,17 +4,17 @@ Clean architecture: this module creates the FastMCP server, wires dependencies,
 and provides the CLI runner. The presentation/mcp/ layer only declares tools.
 """
 
-import logging
 import os
 
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
+from kapsula.infrastructure.logging_config import get_logger
 from kapsula.startup import bootstrap
 
 load_dotenv()
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def create_server() -> FastMCP:

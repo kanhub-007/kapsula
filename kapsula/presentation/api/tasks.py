@@ -7,9 +7,6 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from kapsula.core.application.use_cases.collection_summary import (
-    CollectionSummaryGenerator,
-)
 from kapsula.core.application.use_cases.upload.upload_ingestion_strategy_factory import (
     UploadIngestionStrategyFactory,
 )
@@ -25,7 +22,6 @@ from kapsula.infrastructure.data import (
     SubDocument,
     SubDocumentPage,
 )
-from kapsula.infrastructure.external.llm.chat_client import HuggingFaceChatClient
 from kapsula.infrastructure.logging_config import get_logger
 from kapsula.infrastructure.repositories.chunking import (
     MarkdownChunker,
@@ -66,7 +62,10 @@ from kapsula.infrastructure.repositories.processing.upload_progress_tracker impo
 from kapsula.presentation.upload.sub_document_batch_indexer import (
     SubDocumentBatchIndexer,
 )
-from kapsula.startup import create_embedder
+from kapsula.startup import (
+    create_collection_summary_generator,
+    create_embedder,
+)
 
 logger = get_logger(__name__)
 
@@ -761,16 +760,7 @@ def process_document_with_subdocuments(
             )
             logger.info(f"Job {job_id}: Updating collection library card")
             try:
-                import os
-
-                summary_generator = CollectionSummaryGenerator(
-                    HuggingFaceChatClient(
-                        token=os.getenv("HF_TOKEN", ""),
-                        model=os.getenv(
-                            "INTELLIGENT_SEARCH_MODEL", "deepseek-ai/DeepSeek-V3.2-Exp"
-                        ),
-                    )
-                )
+                summary_generator = create_collection_summary_generator()
                 update_collection_library_card(
                     document.id, db, summary_generator=summary_generator
                 )

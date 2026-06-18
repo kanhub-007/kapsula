@@ -4,7 +4,6 @@ Clean architecture: the startup/ layer (composition root) creates the FastAPI
 app and wires all dependencies. The presentation/ layer only declares routes.
 """
 
-import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -12,13 +11,14 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from kapsula.infrastructure.logging_config import get_logger
 from kapsula.presentation.api.auth import require_api_key
 from kapsula.presentation.api.routes import api_router
 from kapsula.startup import bootstrap
 
 load_dotenv()
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _cors_origins() -> list[str]:

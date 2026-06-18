@@ -27,8 +27,10 @@ router = APIRouter()
 LOGOS_DIR = os.path.join(DATA_DIR, "logos")
 os.makedirs(LOGOS_DIR, exist_ok=True)
 
-# Allowed image extensions
-ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
+# Allowed image extensions. SVG is intentionally excluded: user-supplied
+# SVG can carry <script>/event handlers and is served back to browsers as
+# stored XSS. Add SVG only behind a dedicated sanitiser if needed.
+ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
 
 def save_logo(file: UploadFile, collection_id: str) -> str:

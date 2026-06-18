@@ -1,12 +1,13 @@
 """Shared LLM chat completion wrapper."""
 
-import logging
 import os
 
 from huggingface_hub import InferenceClient
 from huggingface_hub.errors import HfHubHTTPError
 
-logger = logging.getLogger(__name__)
+from kapsula.infrastructure.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 # Default timeout in seconds for all LLM calls (5 min for planning sub-queries)
 DEFAULT_LLM_TIMEOUT = int(os.environ.get("KAPSULA_LLM_TIMEOUT", "300"))

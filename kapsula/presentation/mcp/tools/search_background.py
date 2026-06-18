@@ -1,9 +1,10 @@
 """MCP background search tools — async search job management."""
 
 import asyncio
-import logging
 
 from fastmcp import FastMCP
+
+from kapsula.infrastructure.logging_config import get_logger
 
 from ._search_helpers import (
     run_intelligent_collection_search,
@@ -11,7 +12,7 @@ from ._search_helpers import (
 )
 from ._shared import _get_search_job_manager
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def register_search_background_tools(mcp: FastMCP):

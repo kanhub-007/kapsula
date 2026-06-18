@@ -12,15 +12,15 @@ consolidation runner's short-lived-transaction pattern). The LLM call happens
 outside any session.
 """
 
-import logging
 from collections.abc import Callable
 
 from sqlalchemy.orm import Session
 
 from kapsula.core.domain.interfaces.chat_client import ChatClient
 from kapsula.infrastructure.data import LibraryCard
+from kapsula.infrastructure.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _ENRICH_SYSTEM = """You write one-line library card descriptions.
 

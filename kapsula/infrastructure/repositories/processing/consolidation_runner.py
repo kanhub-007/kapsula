@@ -16,7 +16,6 @@ long LLM network calls. See spec 2026-06-17_short-lived-write-transactions.
 """
 
 import json
-import logging
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -32,8 +31,9 @@ from kapsula.infrastructure.data import (
     LibraryCard,
     SearchMissLog,
 )
+from kapsula.infrastructure.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # ── LLM prompts ─────────────────────────────────────────────
 

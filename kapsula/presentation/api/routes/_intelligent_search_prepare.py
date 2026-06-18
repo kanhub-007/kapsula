@@ -1,7 +1,5 @@
 """Shared intelligent search preparation logic."""
 
-import logging
-
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
@@ -13,9 +11,10 @@ from kapsula.infrastructure.data.tables.library_card import (
 from kapsula.infrastructure.data.tables.sub_document import (
     SubDocument as OrmSubDocument,
 )
+from kapsula.infrastructure.logging_config import get_logger
 from kapsula.startup import create_chat_client, create_query_planner
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def _prepare_intelligent_search(

@@ -1,11 +1,12 @@
 """Document management MCP tools."""
 
 import json
-import logging
 
 from fastmcp import FastMCP
 
-logger = logging.getLogger(__name__)
+from kapsula.infrastructure.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 from kapsula.infrastructure.data import (
     DocumentStructure as OrmDocumentStructure,

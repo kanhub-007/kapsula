@@ -3,11 +3,12 @@ Breadcrumb parser for extracting hierarchical document structure from H1 headers
 """
 
 import hashlib
-import logging
 import re
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from kapsula.infrastructure.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def parse_breadcrumb(header: str) -> dict[str, Any]:

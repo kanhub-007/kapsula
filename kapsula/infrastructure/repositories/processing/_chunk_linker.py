@@ -1,14 +1,40 @@
 """Chunk-to-parent linking extracted from tasks.py."""
 
 import json
-import logging
 
 from kapsula.infrastructure.data import Chunk, LibraryCard
+from kapsula.infrastructure.logging_config import get_logger
 from kapsula.infrastructure.repositories.chunking.header_matcher import (
     match_header_to_parents,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+
+def _resolve_chunk_citation(
+    chunk_index: int, metadata: dict, library_cards_map: dict[str, int]
+) -> None:
+    """Resolve a chunk's citation library_card_doc_id to a DB id, in place."""
+    citation = metadata.get("citation")
+    if not citation or not citation.get("library_card_doc_id"):
+        return
+    doc_id = citation["library_card_doc_id"]
+    if doc_id in library_cards_map:
+        citation["library_card_id"] = library_cards_map[doc_id]
+        del citation["library_card_doc_id"]
+        logger.debug(
+            "Chunk %s: Resolved citation library_card_id=%s",
+            chunk_index,
+            citation["library_card_id"],
+        )
+    else:
+        logger.warning(
+            "Chunk %s: Could not resolve library_card_doc_id '%s'",
+            chunk_index,
+            doc_id,
+        )
+        citation["library_card_id"] = None
+        del citation["library_card_doc_id"]
 
 
 def _link_chunks_to_parents(job_id, document, parent_sections, db, processing_status):
@@ -70,25 +96,8 @@ def _link_chunks_to_parents(job_id, document, parent_sections, db, processing_st
                     f"Job {job_id}: Chunk {chunk.chunk_index} with header '{header}' has NO parent matches!"
                 )
 
-            # Resolve citation library_card_id if citation exists
-            citation = metadata.get("citation")
-            if citation and citation.get("library_card_doc_id"):
-                doc_id = citation["library_card_doc_id"]
-                if doc_id in library_cards_map:
-                    citation["library_card_id"] = library_cards_map[doc_id]
-                    # Remove the temporary doc_id field
-                    del citation["library_card_doc_id"]
-                    logger.debug(
-                        f"Chunk {chunk.chunk_index}: Resolved citation library_card_id={citation['library_card_id']}"
-                    )
-                else:
-                    logger.warning(
-                        f"Chunk {chunk.chunk_index}: Could not resolve library_card_doc_id '{doc_id}'"
-                    )
-                    citation["library_card_id"] = None
-                    del citation["library_card_doc_id"]
-
-            metadata["citation"] = citation
+            # Resolve citation library_card_id if a citation exists
+            _resolve_chunk_citation(chunk.chunk_index, metadata, library_cards_map)
 
             # Save updated metadata back to chunk
             chunk.chunk_metadata = json.dumps(metadata)

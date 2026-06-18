@@ -6,9 +6,9 @@ where it belongs — it operates on parent-section data (chunking output).
 
 from __future__ import annotations
 
-import logging
+from kapsula.infrastructure.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def match_header_to_parents(header: str, parent_sections: dict) -> dict:

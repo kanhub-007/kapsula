@@ -214,9 +214,10 @@ class IntelligentSearcher:
                 temperature=0.3,
             )
         except Exception as e:
-            logger.exception(f"Intelligent search failed: {e}")
+            logger.exception("Intelligent search failed: %s", e)
             return {
-                "answer": f"An error occurred while processing your query: {e}",
+                "answer": "An error occurred while processing your query.",
+                "error": f"Intelligent search failed: {e}",
                 "relevant_results": [],
                 "total_evaluated": evaluated,
                 "has_answer": False,
@@ -320,9 +321,10 @@ class IntelligentSearcher:
                 temperature=0.3,
             )
         except Exception as e:
-            logger.exception(f"Failed to combine sub-answers: {e}")
+            logger.exception("Failed to combine sub-answers: %s", e)
             return {
-                "answer": f"An error occurred while synthesizing the answer: {e}",
+                "answer": None,
+                "error": f"Failed to synthesize the answer: {e}",
                 "relevant_results": [],
                 "total_evaluated": total,
                 "has_answer": False,
