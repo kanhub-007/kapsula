@@ -132,7 +132,28 @@ def create_multi_index_searcher(
             create_aggregate_search_strategy(embedder),
             create_account_search_strategy(embedder),
         ],
+        document_concurrency=_document_concurrency_from_env(),
     )
+
+
+def _document_concurrency_from_env() -> int:
+    """Read KAPSULA_DOCUMENT_CONCURRENCY once at wiring time (not per search)."""
+    from kapsula.core.application.use_cases.search_runtime_helpers import (
+        DEFAULT_DOCUMENT_CONCURRENCY,
+    )
+
+    raw = os.getenv("KAPSULA_DOCUMENT_CONCURRENCY")
+    if not raw:
+        return DEFAULT_DOCUMENT_CONCURRENCY
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        logger.warning(
+            "Invalid KAPSULA_DOCUMENT_CONCURRENCY=%r; falling back to %s",
+            raw,
+            DEFAULT_DOCUMENT_CONCURRENCY,
+        )
+        return DEFAULT_DOCUMENT_CONCURRENCY
 
 
 def _make_aggregate_searcher(faiss_index, bm25_index, texts, embedder):

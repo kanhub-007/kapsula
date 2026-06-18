@@ -18,9 +18,6 @@ from kapsula.infrastructure.data import (
 from kapsula.infrastructure.data import (
     LibraryCard as OrmLibraryCard,
 )
-from kapsula.infrastructure.data import (
-    SearchMissLog as OrmSearchMissLog,
-)
 
 from ._shared import (
     _get_chat_client,
@@ -42,15 +39,17 @@ def log_search_miss(
     results: list[dict],
 ) -> None:
     """Log a search that returned few results for gap detection (Phase 3)."""
+    from kapsula.infrastructure.repositories.data.sql_search_miss_repository import (
+        SqlSearchMissLogRepository,
+    )
+
     top_score = results[0].get("score", 0) if results else 0.0
-    miss = OrmSearchMissLog(
+    SqlSearchMissLogRepository(db).log(
         collection_id=collection_id,
-        query=query[:500],
+        query=query,
         result_count=result_count,
         top_score=top_score,
     )
-    db.add(miss)
-    db.commit()
 
 
 def get_topic_card_summary(db, collection_db_id: int) -> str:

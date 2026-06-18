@@ -33,7 +33,9 @@ ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
 
 def save_logo(file: UploadFile, collection_id: str) -> str:
     """Save logo file and return filename."""
-    # Validate file extension
+    # Validate file extension (filename can be None for unnamed uploads)
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Logo file has no filename")
     file_ext = Path(file.filename).suffix.lower()
     if file_ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -75,8 +77,8 @@ async def create_collection(
     """
     logger.info(f"Creating collection: {name}")
 
-    # Get client IP
-    client_ip = request.client.host
+    # Get client IP (request.client may be None behind some proxies)
+    client_ip = request.client.host if request.client else "unknown"
 
     # Generate unique collection ID (GUID)
     collection_id = str(uuid.uuid4())

@@ -37,6 +37,28 @@ from ..tasks import (
     process_document_with_subdocuments,
 )
 
+
+def _require_document(db: Session, job_id: str):
+    """Load a document by job_id or raise 404."""
+    document = db.query(OrmDocument).filter(OrmDocument.job_id == job_id).first()
+    if not document:
+        logger.warning(f"Job not found: {job_id}")
+        raise HTTPException(status_code=404, detail="Job not found")
+    return document
+
+
+def _require_completed_document(db: Session, job_id: str):
+    """Load a completed document by job_id or raise 404/400."""
+    document = _require_document(db, job_id)
+    if document.status != "completed":
+        logger.warning(f"Job {job_id} not completed, status: {document.status}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Document processing not completed. Current status: {document.status}",
+        )
+    return document
+
+
 logger = get_logger(__name__)
 router = APIRouter()
 
@@ -120,11 +142,7 @@ async def get_progress(job_id: str, db: Session = Depends(get_db)):
     """
     logger.debug(f"Progress check for job: {job_id}")
 
-    # Check if document exists
-    document = db.query(OrmDocument).filter(OrmDocument.job_id == job_id).first()
-    if not document:
-        logger.warning(f"Job not found: {job_id}")
-        raise HTTPException(status_code=404, detail="Job not found")
+    document = _require_document(db, job_id)
 
     # Get progress from in-memory status. If the database already reached a
     # terminal state, never let stale in-memory progress look stuck forever.
@@ -168,18 +186,7 @@ async def download_structure(job_id: str, db: Session = Depends(get_db)):
 
     logger.info(f"Structure download request for job: {job_id}")
 
-    # Check if document exists and is completed
-    document = db.query(OrmDocument).filter(OrmDocument.job_id == job_id).first()
-    if not document:
-        logger.warning(f"Job not found: {job_id}")
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    if document.status != "completed":
-        logger.warning(f"Job {job_id} not completed, status: {document.status}")
-        raise HTTPException(
-            status_code=400,
-            detail=f"Document processing not completed. Current status: {document.status}",
-        )
+    document = _require_completed_document(db, job_id)
 
     # Get document structure
     structure = (
@@ -214,18 +221,7 @@ async def download_chunks(job_id: str, db: Session = Depends(get_db)):
     """
     logger.info(f"Chunks download request for job: {job_id}")
 
-    # Check if document exists and is completed
-    document = db.query(OrmDocument).filter(OrmDocument.job_id == job_id).first()
-    if not document:
-        logger.warning(f"Job not found: {job_id}")
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    if document.status != "completed":
-        logger.warning(f"Job {job_id} not completed, status: {document.status}")
-        raise HTTPException(
-            status_code=400,
-            detail=f"Document processing not completed. Current status: {document.status}",
-        )
+    document = _require_completed_document(db, job_id)
 
     # Get all chunks
     chunks = (
@@ -313,10 +309,7 @@ async def get_document(job_id: str, db: Session = Depends(get_db)):
     """
     logger.debug(f"Getting details for job: {job_id}")
 
-    document = db.query(OrmDocument).filter(OrmDocument.job_id == job_id).first()
-    if not document:
-        logger.warning(f"Job not found: {job_id}")
-        raise HTTPException(status_code=404, detail="Job not found")
+    document = _require_document(db, job_id)
 
     structure = (
         db.query(OrmDocumentStructure)

@@ -23,7 +23,7 @@ from kapsula.core.application.use_cases.search_metadata_builder import (
     SearchMetadataBuilder,
 )
 from kapsula.core.application.use_cases.search_runtime_helpers import (
-    _document_concurrency,
+    DEFAULT_DOCUMENT_CONCURRENCY,
     _gather,
     _select,
 )
@@ -63,6 +63,7 @@ class MultiIndexSearcher:
         strategies: list[CollectionSearchStrategy] | None = None,
         quota_policy: SourceQuotaPolicy | None = None,
         route_scorer: RouteConfidenceScorer | None = None,
+        document_concurrency: int = DEFAULT_DOCUMENT_CONCURRENCY,
     ):
         self._data = data
         self._embedder = embedder
@@ -73,6 +74,7 @@ class MultiIndexSearcher:
         self._strategies = strategies or []
         self._quota_policy = quota_policy or SourceQuotaPolicy(per_subdocument_limit=3)
         self._route_scorer = route_scorer or RouteConfidenceScorer()
+        self._document_concurrency = max(1, document_concurrency)
 
     def _get_searcher(self, faiss_path: str, bm25_path: str):
         return self._make_searcher(faiss_path, bm25_path)
@@ -217,7 +219,7 @@ class MultiIndexSearcher:
             search.account_id,
         )
 
-        document_concurrency = _document_concurrency()
+        document_concurrency = self._document_concurrency
         document_semaphore = asyncio.Semaphore(document_concurrency)
 
         async def _search_coll(cd: dict) -> list:
@@ -436,40 +438,6 @@ class MultiIndexSearcher:
             ),
             metadata_route_confidence=candidate.get("metadata_route_confidence"),
         )
-
-    async def _search_document(
-        self,
-        doc: Any,
-        query: str,
-        top_k: int,
-        node_type_filter: list[str] | None = None,
-    ) -> list:
-        """Search a single document via sub-documents or its own index."""
-        subdoc_count = self._data.count_sub_documents(doc.id)
-        if subdoc_count > 0:
-            return await self.search_subdocuments(
-                SubDocumentSearch(
-                    query=query,
-                    document_id=doc.id,
-                    top_k=top_k,
-                    context_mode="none",
-                    per_subdoc_multiplier=2,
-                    node_type_filter=node_type_filter,
-                )
-            )
-        if doc.faiss_index_path and doc.bm25_index_path:
-            return await self.search_single_index(
-                SingleIndexSearch(
-                    query=query,
-                    faiss_path=doc.faiss_index_path,
-                    bm25_path=doc.bm25_index_path,
-                    document_id=doc.id,
-                    top_k=top_k,
-                    context_mode="none",
-                    node_type_filter=node_type_filter,
-                )
-            )
-        return []
 
     def _expand_by_document(self, results: list, context_mode: str) -> list:
         by_doc: dict[int, list] = {}

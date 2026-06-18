@@ -1,8 +1,11 @@
 """Document management MCP tools."""
 
 import json
+import logging
 
 from fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
 
 from kapsula.infrastructure.data import (
     DocumentStructure as OrmDocumentStructure,
@@ -59,8 +62,13 @@ def register_document_tools(mcp: FastMCP):
                 )
 
                 MaintenanceStateManager().increment_uploads(collection_id)
-            except Exception:
-                pass  # best-effort: don't break the tool on state-tracking failure
+            except (OSError, ValueError, KeyError) as state_exc:
+                # Best-effort: don't break the upload tool on state-tracking
+                # failure, but surface it so silent staleness is detectable.
+                logger.warning(
+                    "upload_document: maintenance state update failed: %s",
+                    state_exc,
+                )
         except ValueError as exc:
             return f"Error: {exc}"
         finally:
@@ -110,8 +118,11 @@ def register_document_tools(mcp: FastMCP):
                     )
 
                     MaintenanceStateManager().increment_uploads(collection_id)
-                except Exception:
-                    pass  # best-effort
+                except (OSError, ValueError, KeyError) as state_exc:
+                    logger.warning(
+                        "delete_document: maintenance state update failed: %s",
+                        state_exc,
+                    )
         except ValueError as exc:
             return str(exc)
         finally:

@@ -97,28 +97,34 @@ async def list_account_collections(account_id: str, db: Session = Depends(get_db
     orm_acc = db.query(OrmAccount).filter(OrmAccount.account_id == account_id).first()
     if not orm_acc:
         return CollectionListResponse(collections=[], total=0)
-    collections_with_summary = []
-    for col in orm_acc.collections:
-        card = (
-            db.query(OrmLibraryCard)
-            .filter(
-                OrmLibraryCard.collection_id == col.id,
-                OrmLibraryCard.document_id.is_(None),
-            )
-            .order_by(OrmLibraryCard.created_at.desc())
-            .first()
+    collections = list(orm_acc.collections)
+    col_ids = [c.id for c in collections]
+    # Batch: one query for all collection-level summary cards instead of N.
+    summary_cards = (
+        db.query(OrmLibraryCard)
+        .filter(
+            OrmLibraryCard.collection_id.in_(col_ids),
+            OrmLibraryCard.document_id.is_(None),
         )
-        collections_with_summary.append(
-            CollResponse(
-                collection_id=col.collection_id,
-                name=col.name,
-                created_at=col.created_at.isoformat(),
-                document_count=len(col.documents),
-                library_card_summary=card.content if card else None,
-            )
+        .order_by(OrmLibraryCard.created_at.desc())
+        .all()
+    )
+    summary_by_col: dict[int, str] = {}
+    for card in summary_cards:
+        # first (newest) wins per collection due to the order_by above
+        summary_by_col.setdefault(card.collection_id, card.content)
+    collections_with_summary = [
+        CollResponse(
+            collection_id=col.collection_id,
+            name=col.name,
+            created_at=col.created_at.isoformat(),
+            document_count=len(col.documents),
+            library_card_summary=summary_by_col.get(col.id),
         )
+        for col in collections
+    ]
     return CollectionListResponse(
-        collections=collections_with_summary, total=len(orm_acc.collections)
+        collections=collections_with_summary, total=len(collections)
     )
 
 
@@ -137,20 +143,54 @@ async def export_account_data(account_id: str, db: Session = Depends(get_db)):
     orm_acc = db.query(OrmAccount).filter(OrmAccount.account_id == account_id).first()
     if not orm_acc:
         raise HTTPException(status_code=404, detail="Account not found")
+    collections = list(orm_acc.collections)
+    col_ids = [c.id for c in collections]
+    doc_ids = [d.id for c in collections for d in c.documents]
+
+    # Batch the card queries: two queries instead of (collections + documents).
+    col_cards = (
+        db.query(OrmLibraryCard)
+        .filter(
+            OrmLibraryCard.collection_id.in_(col_ids),
+            OrmLibraryCard.document_id.is_(None),
+        )
+        .all()
+        if col_ids
+        else []
+    )
+    doc_cards = (
+        db.query(OrmLibraryCard)
+        .filter(
+            OrmLibraryCard.document_id.in_(doc_ids),
+            OrmLibraryCard.collection_id.is_(None),
+        )
+        .all()
+        if doc_ids
+        else []
+    )
+    col_cards_by_col: dict[int, list] = {}
+    for card in col_cards:
+        col_cards_by_col.setdefault(card.collection_id, []).append(card)
+    doc_cards_by_doc: dict[int, list] = {}
+    for card in doc_cards:
+        doc_cards_by_doc.setdefault(card.document_id, []).append(card)
+
+    def _card_info(c) -> LibraryCardInfo:
+        return LibraryCardInfo(
+            id=c.id,
+            level=c.level,
+            title=c.title,
+            content=c.content,
+            created_at=c.created_at.isoformat(),
+        )
+
     collections_data = []
     total_docs = 0
     total_cards = 0
-    for col in orm_acc.collections:
+    for col in collections:
         docs_data = []
         for doc in col.documents:
-            doc_cards = (
-                db.query(OrmLibraryCard)
-                .filter(
-                    OrmLibraryCard.document_id == doc.id,
-                    OrmLibraryCard.collection_id.is_(None),
-                )
-                .all()
-            )
+            these_doc_cards = doc_cards_by_doc.get(doc.id, [])
             docs_data.append(
                 DocumentExportInfo(
                     id=doc.id,
@@ -161,29 +201,13 @@ async def export_account_data(account_id: str, db: Session = Depends(get_db)):
                     created_at=doc.created_at.isoformat(),
                     duration=doc.duration,
                     chunk_count=len(doc.chunks),
-                    library_cards=[
-                        LibraryCardInfo(
-                            id=c.id,
-                            level=c.level,
-                            title=c.title,
-                            content=c.content,
-                            created_at=c.created_at.isoformat(),
-                        )
-                        for c in doc_cards
-                    ],
+                    library_cards=[_card_info(c) for c in these_doc_cards],
                 )
             )
             total_docs += 1
-            total_cards += len(doc_cards)
-        col_cards = (
-            db.query(OrmLibraryCard)
-            .filter(
-                OrmLibraryCard.collection_id == col.id,
-                OrmLibraryCard.document_id.is_(None),
-            )
-            .all()
-        )
-        total_cards += len(col_cards)
+            total_cards += len(these_doc_cards)
+        these_col_cards = col_cards_by_col.get(col.id, [])
+        total_cards += len(these_col_cards)
         collections_data.append(
             CollectionExportInfo(
                 collection_id=col.collection_id,
@@ -191,16 +215,7 @@ async def export_account_data(account_id: str, db: Session = Depends(get_db)):
                 created_at=col.created_at.isoformat(),
                 document_count=len(col.documents),
                 documents=docs_data,
-                library_cards=[
-                    LibraryCardInfo(
-                        id=c.id,
-                        level=c.level,
-                        title=c.title,
-                        content=c.content,
-                        created_at=c.created_at.isoformat(),
-                    )
-                    for c in col_cards
-                ],
+                library_cards=[_card_info(c) for c in these_col_cards],
             )
         )
     return AccountExportResponse(
