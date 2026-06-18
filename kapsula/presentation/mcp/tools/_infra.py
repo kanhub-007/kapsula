@@ -96,3 +96,19 @@ def _get_search_job_manager():
         return SearchJobManager()
 
     return _cached("search_job_manager", _create)
+
+
+def _get_maintenance_state_manager():
+    """Return the shared MaintenanceStateManager (cached).
+
+    Closes A3: MCP tool modules use a module-level cached singleton,
+    which is the documented exception in AGENTS.md for the presentation
+    (outermost) layer.
+    """
+
+    def _create():
+        from kapsula.startup import create_maintenance_state_manager
+
+        return create_maintenance_state_manager()
+
+    return _cached("maintenance_state_manager", _create)

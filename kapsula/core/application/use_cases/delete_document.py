@@ -2,6 +2,8 @@
 
 import logging
 
+from sqlalchemy.orm import Session
+
 from kapsula.core.application.dto.delete_document_result import (
     DeleteDocumentResult,
 )
@@ -26,7 +28,7 @@ class DeleteDocumentUseCase:
         self._index_manager = index_manager
         self._document_repository = document_repository
 
-    def execute(self, db, job_id: str) -> DeleteDocumentResult:
+    def execute(self, db: "Session", job_id: str) -> DeleteDocumentResult:
         """Execute the delete operation.
 
         Args:

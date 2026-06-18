@@ -1,6 +1,8 @@
-"""Shared helpers for MCP tools — re-exports from focused modules.
+"""Shared helpers for MCP tools — re-export facade.
 
-.. deprecated:: use ``_db`` and ``_infra`` directly in new code.
+Groups the DB and infrastructure helpers so tool modules can import
+everything from one place (``from ._shared import _get_db, ...``).
+Underlying implementations live in :mod:`._db` and :mod:`._infra`.
 """
 
 # ruff: noqa: F401  — this file is a re-export facade; all imports are public API
@@ -16,6 +18,7 @@ from ._infra import (
     _get_chat_client,
     _get_embedder,
     _get_intelligent_searcher,
+    _get_maintenance_state_manager,
     _get_multi_index_searcher,
     _get_query_planner,
     _get_reranker,

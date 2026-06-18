@@ -1,4 +1,4 @@
-"""Daemon-thread background processor implementation."""
+"""Daemon-thread and no-op background processor implementations."""
 
 import threading
 from collections.abc import Callable
@@ -50,3 +50,28 @@ class ThreadPoolBackgroundProcessor(BackgroundProcessor):
             args=(job_id, content, max_tokens, self._session_factory(), ingestion_mode),
             daemon=True,
         ).start()
+
+
+class NoOpBackgroundProcessor(BackgroundProcessor):
+    """No-op processor: the caller dispatches the task itself.
+
+    Used by the HTTP upload route, which keeps FastAPI ``BackgroundTasks``
+    as the single dispatch point (per the ``wire-upload-usecase`` spec).
+    Without this, the use case would dispatch the task AND the route
+    would dispatch it again via ``BackgroundTasks.add_task`` — processing
+    every document twice.
+    """
+
+    def start_processing(
+        self,
+        job_id: str,
+        content: str,
+        max_tokens: int,
+        ingestion_mode: str,
+    ) -> None:
+        logger.debug(
+            "NoOpBackgroundProcessor.start_processing: job_id=%s mode=%s "
+            "(caller is responsible for dispatching the task)",
+            job_id,
+            ingestion_mode,
+        )

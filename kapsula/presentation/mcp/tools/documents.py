@@ -18,7 +18,7 @@ from kapsula.infrastructure.repositories.data.sql_query_repositories import (
     SqlChunkRepository,
 )
 
-from ._shared import _get_db
+from ._shared import _get_db, _get_maintenance_state_manager
 
 _doc_repo = SqlDocumentRepository()
 _chunk_repo = SqlChunkRepository()
@@ -58,11 +58,7 @@ def register_document_tools(mcp: FastMCP):
             )
             # Mark consolidation as stale after successful upload
             try:
-                from kapsula.infrastructure.repositories.processing.maintenance_state_manager import (
-                    MaintenanceStateManager,
-                )
-
-                MaintenanceStateManager().increment_uploads(collection_id)
+                _get_maintenance_state_manager().increment_uploads(collection_id)
             except (OSError, ValueError, KeyError) as state_exc:
                 # Best-effort: don't break the upload tool on state-tracking
                 # failure, but surface it so silent staleness is detectable.
@@ -114,11 +110,7 @@ def register_document_tools(mcp: FastMCP):
             # Mark consolidation as stale after successful deletion
             if collection_id:
                 try:
-                    from kapsula.infrastructure.repositories.processing.maintenance_state_manager import (
-                        MaintenanceStateManager,
-                    )
-
-                    MaintenanceStateManager().increment_uploads(collection_id)
+                    _get_maintenance_state_manager().increment_uploads(collection_id)
                 except (OSError, ValueError, KeyError) as state_exc:
                     logger.warning(
                         "delete_document: maintenance state update failed: %s",

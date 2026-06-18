@@ -10,21 +10,13 @@ Functions that are used by multiple tool registration modules:
 import asyncio
 
 from kapsula.infrastructure.data import (
-    Account as OrmAccount,
-)
-from kapsula.infrastructure.data import (
-    Collection as OrmCollection,
-)
-from kapsula.infrastructure.data import (
     LibraryCard as OrmLibraryCard,
 )
 
 from ._shared import (
-    _get_chat_client,
     _get_db,
     _get_intelligent_searcher,
     _get_multi_index_searcher,
-    _get_query_planner,
     _hf_token,
     _parse_node_type_filter,
     _resolve_collection,
@@ -130,76 +122,62 @@ async def run_intelligent_collection_search(
     node_type_filter: str | None,
     db=None,
 ) -> str:
-    from kapsula.core.application.dto.collection_search import CollectionSearch
-    from kapsula.core.application.use_cases.selectors.collection_selector import (
-        CollectionSelector,
-    )
+    """Thin wrapper: acquire a DB session if needed and guarantee closure.
 
+    The real work lives in :func:`_run_intelligent_collection_search` so the
+    try/finally is one line regardless of how complex the body grows.
+    """
     own_db = db is None
     if own_db:
         db = _get_db()
+    try:
+        return await _run_intelligent_collection_search(
+            db=db,
+            query=query,
+            top_k=top_k,
+            context_mode=context_mode,
+            account_id=account_id,
+            enable_planning=enable_planning,
+            node_type_filter=node_type_filter,
+        )
+    finally:
+        if own_db:
+            db.close()
+
+
+async def _run_intelligent_collection_search(
+    *,
+    db,
+    query: str,
+    top_k: int,
+    context_mode: str,
+    account_id: str | None,
+    enable_planning: bool,
+    node_type_filter: str | None,
+) -> str:
+    """Real body of :func:`run_intelligent_collection_search`.
+
+    Split out so the caller's try/finally is trivial regardless of body size.
+    """
+    from kapsula.core.application.dto.collection_search import CollectionSearch
+    from kapsula.startup import create_prepare_intelligent_search_use_case
+
     token = _hf_token()
     if not token:
         return "Error: HF_TOKEN not set."
 
-    def _db_work():
-        q = db.query(OrmCollection)
-        if account_id:
-            q = q.join(OrmAccount).filter(OrmAccount.account_id == account_id)
-        collections = q.all()
-        if not collections:
-            return None, None, None, None
-
-        router = CollectionSelector(_get_chat_client())
-        meta = []
-        for c in collections:
-            card = (
-                db.query(OrmLibraryCard)
-                .filter(
-                    OrmLibraryCard.collection_id == c.id,
-                    OrmLibraryCard.level == "collection",
-                )
-                .first()
+    # Shared preparation (closes A6/D5): the same use case the API route uses.
+    try:
+        preparation = await asyncio.to_thread(
+            lambda: create_prepare_intelligent_search_use_case(db).prepare(
+                query, account_id, enable_planning
             )
-            meta.append(
-                {
-                    "id": c.id,
-                    "name": c.name,
-                    "library_card_summary": card.content[:500] if card else c.name,
-                    "document_count": len(c.documents),
-                }
-            )
-
-        routed_ids = router.select(query, meta)
-        routed_id = routed_ids[0] if routed_ids else collections[0].id
-        routed_coll = (
-            db.query(OrmCollection).filter(OrmCollection.id == routed_id).first()
         )
-
-        from kapsula.presentation.shared.document_structure_builder import (
-            build_document_structure_from_subdocs,
-        )
-
-        document_structure = []
-        if routed_coll:
-            for doc in routed_coll.documents:
-                document_structure.extend(
-                    build_document_structure_from_subdocs(doc.sub_documents, db)
-                )
-
-        search_plan = None
-        if enable_planning and document_structure:
-            planner = _get_query_planner()
-            search_plan = planner.plan_document_search(
-                query, document_structure=document_structure
-            )
-
-        return collections, routed_coll, document_structure, search_plan
-
-    result_tuple = await asyncio.to_thread(_db_work)
-    if result_tuple[0] is None:
+    except ValueError:
         return "No collections found."
-    collections, routed_coll, document_structure, search_plan = result_tuple
+
+    routed_coll = preparation.routed_collection
+    search_plan = preparation.plan
 
     coll_searcher = _get_multi_index_searcher(db)
 
@@ -238,6 +216,4 @@ async def run_intelligent_collection_search(
         parts.append("")
     parts.append(result.get("answer", "No answer generated."))
     result_text = "\n".join(parts)
-    if own_db:
-        db.close()
     return result_text

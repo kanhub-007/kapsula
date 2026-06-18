@@ -19,7 +19,7 @@ class CollectionRoutingStrategy(Protocol):
         ...
 
 
-def _annotate_collection(collection: dict, confidence: float, reason: str = "") -> dict:
+def annotate_collection(collection: dict, confidence: float, reason: str = "") -> dict:
     annotated = dict(collection)
     annotated["collection_route_confidence"] = confidence
     if reason:

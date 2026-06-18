@@ -9,12 +9,12 @@ logger = logging.getLogger(__name__)
 DEFAULT_DOCUMENT_CONCURRENCY = 4
 
 
-def _select(selector, query: str, metadata: list[dict]) -> list[dict]:
+def select_metadata(selector, query: str, metadata: list[dict]) -> list[dict]:
     ids = selector.select(query, metadata)
     return [m for m in metadata if m["id"] in ids]
 
 
-async def _gather(tasks: list) -> list:
+async def gather_flattened(tasks: list) -> list:
     """Flatten gather() results; log and drop exceptions (never raise).
 
     Each sub-task already catches its own errors and returns ``[]``; this

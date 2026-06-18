@@ -15,22 +15,14 @@ keeps SQLite write locks held only for the brief write (ms), never across
 long LLM network calls. See spec 2026-06-17_short-lived-write-transactions.
 """
 
-import json
 import uuid
-from collections.abc import Callable
-from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy.orm import Session, joinedload
-
 from kapsula.core.domain.interfaces.chat_client import ChatClient
-from kapsula.core.domain.json_utils import _parse_json_safely
-from kapsula.infrastructure.data import (
-    CardReference,
-    ConsolidationRun,
-    LibraryCard,
-    SearchMissLog,
+from kapsula.core.domain.interfaces.consolidation_card_repository import (
+    ConsolidationCardRepository,
 )
+from kapsula.core.domain.json_utils import parse_json_safely
 from kapsula.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -124,18 +116,20 @@ Output ONLY valid JSON:
 class ConsolidationRunner:
     """Runs cross-document knowledge consolidation for a collection.
 
-    Uses a session factory so each write step opens a short transaction
-    after the LLM call returns, keeping SQLite write locks brief.
+    Pure orchestration: every DB read/write is delegated to an injected
+    :class:`ConsolidationCardRepository` (closes A2/S4). The runner holds
+    no session and performs no ``session.add`` / ``session.query`` calls,
+    so it is unit-testable with an in-memory repository fake.
     """
 
     def __init__(
         self,
-        session_factory: Callable[[], Session],
+        card_repository: ConsolidationCardRepository,
         chat_client: ChatClient,
         collection_id: int,
         collection_guid: str,
     ):
-        self._session_factory = session_factory
+        self._cards = card_repository
         self._chat_client = chat_client
         self._collection_id = collection_id
         self._collection_guid = collection_guid
@@ -155,21 +149,36 @@ class ConsolidationRunner:
         )
 
         try:
-            cards = self._gather_extractive_cards()
+            cards = self._cards.fetch_extractive_cards(self._collection_id)
             if not cards:
                 logger.info("No extractive cards to consolidate")
-                self._record_run(error=None)
+                self._cards.record_run(
+                    self._run_id,
+                    self._collection_guid,
+                    self._cards_created,
+                    self._cards_updated,
+                    self._conflicts_found,
+                    self._gaps_found,
+                    error=None,
+                )
                 return self._result()
 
             # Step 1: cluster into topics (LLM call — no session held)
             clusters = self._cluster_topics(cards)
             if not clusters:
                 logger.info("No topic clusters formed")
-                self._record_run(error=None)
+                self._cards.record_run(
+                    self._run_id,
+                    self._collection_guid,
+                    self._cards_created,
+                    self._cards_updated,
+                    self._conflicts_found,
+                    self._gaps_found,
+                    error=None,
+                )
                 return self._result()
 
-            # Step 2: generate topic cards per cluster (each writes in its
-            # own short transaction, so a per-card failure is isolated).
+            # Step 2: generate topic cards per cluster.
             for cluster in clusters:
                 try:
                     self._generate_topic_card(cluster)
@@ -192,7 +201,15 @@ class ConsolidationRunner:
             except Exception as exc:
                 logger.error("Gap card generation failed: %s", exc)
 
-            self._record_run(error=None)
+            self._cards.record_run(
+                self._run_id,
+                self._collection_guid,
+                self._cards_created,
+                self._cards_updated,
+                self._conflicts_found,
+                self._gaps_found,
+                error=None,
+            )
             logger.info(
                 "Consolidation complete: %d created, %d updated, "
                 "%d conflicts, %d gaps",
@@ -205,63 +222,23 @@ class ConsolidationRunner:
 
         except Exception as exc:
             logger.exception("Consolidation failed: %s", exc)
-            self._record_run(error=str(exc))
+            self._cards.record_run(
+                self._run_id,
+                self._collection_guid,
+                self._cards_created,
+                self._cards_updated,
+                self._conflicts_found,
+                self._gaps_found,
+                error=str(exc),
+            )
             return self._result()
-
-    # ── helpers ──────────────────────────────────────────────
-
-    def _short_session(self) -> Session:
-        """Open a fresh session for a short transaction. Caller MUST close."""
-        return self._session_factory()
 
     # ── step implementations ─────────────────────────────────
 
-    def _gather_extractive_cards(self) -> list[LibraryCard]:
-        """Return all H2/H3 extractive cards for the collection (detached)."""
-        session = self._short_session()
-        try:
-            cards = (
-                session.query(LibraryCard)
-                .options(joinedload(LibraryCard.document))
-                .filter(
-                    LibraryCard.collection_id == self._collection_id,
-                    LibraryCard.card_type == "extractive",
-                    LibraryCard.level.in_(["level_2", "level_3"]),
-                )
-                .order_by(LibraryCard.title)
-                .all()
-            )
-            for card in cards:
-                session.expunge(card)  # detach so it survives session close
-            return cards
-        finally:
-            session.close()
+    def _cluster_topics(self, cards: list) -> list[dict]:
+        """Cluster cards into topics via LLM. No session held during the call."""
+        existing_labels = self._cards.fetch_existing_topic_labels(self._collection_id)
 
-    def _fetch_existing_topic_labels(self) -> list[str]:
-        """Return existing topic card labels for this collection (for dedup)."""
-        session = self._short_session()
-        try:
-            rows = (
-                session.query(LibraryCard.title)
-                .filter(
-                    LibraryCard.collection_id == self._collection_id,
-                    LibraryCard.card_type == "topic",
-                )
-                .all()
-            )
-            return [r[0] for r in rows if r[0]]
-        finally:
-            session.close()
-
-    def _cluster_topics(self, cards: list[LibraryCard]) -> list[dict]:
-        """Cluster cards into topics via LLM. No session held during the call.
-
-        Existing topic labels are passed to the prompt so the LLM reuses them
-        rather than inventing near-duplicate labels across runs.
-        """
-        existing_labels = self._fetch_existing_topic_labels()
-
-        # Build flat card list for the LLM
         card_entries = []
         for i, card in enumerate(cards):
             preview = card.content[:200].replace("\n", " ").strip()
@@ -281,7 +258,7 @@ class ConsolidationRunner:
 
         user_message = (
             "Group these knowledge sections into topics:\n\n"
-            + "\n".join(card_entries[:100])  # limit to 100 cards
+            + "\n".join(card_entries[:100])
             + label_hint
         )
 
@@ -294,10 +271,9 @@ class ConsolidationRunner:
             temperature=0.3,
         )
 
-        plan = _parse_json_safely(response)
+        plan = parse_json_safely(response)
         clusters = plan.get("topics", [])
 
-        # Map LLM indices back to card objects
         for cluster in clusters:
             indices = cluster.get("card_ids", [])
             cluster["_cards"] = [cards[i] for i in indices if 0 <= i < len(cards)]
@@ -307,14 +283,12 @@ class ConsolidationRunner:
     def _generate_topic_card(self, cluster: dict) -> None:
         """Generate a single topic card from a cluster of extractive cards.
 
-        LLM call happens first (no session); the DB write runs in a short
-        transaction that commits before returning.
+        LLM call happens first; the DB write is delegated to the repository.
         """
         source_cards = cluster.get("_cards", [])
         if not source_cards:
             return
 
-        # Build context for the LLM (uses detached card objects)
         sections = []
         for card in source_cards:
             doc_name = card.document.filename if card.document else "?"
@@ -328,7 +302,6 @@ class ConsolidationRunner:
             + "\n\n".join(sections[:10])
         )
 
-        # LLM call — NO session open
         response = self._chat_client.send(
             messages=[
                 {"role": "system", "content": _TOPIC_CARD_SYSTEM},
@@ -338,109 +311,37 @@ class ConsolidationRunner:
             temperature=0.3,
         )
 
-        result = _parse_json_safely(response)
+        result = parse_json_safely(response)
         contradictions = result.get("contradictions", [])
         self._conflicts_found += len(contradictions)
 
-        # Clamp importance to [0.0, 1.0] — defense in depth against LLM returning
-        # negative escape-hatch values or values > 1.
+        # Clamp importance to [0.0, 1.0].
         raw_importance = result.get("importance", 0.5)
         try:
             importance = max(0.0, min(1.0, float(raw_importance)))
         except (TypeError, ValueError):
             importance = 0.5
 
-        # DB write — short transaction
-        session = self._short_session()
-        try:
-            existing = (
-                session.query(LibraryCard)
-                .filter(
-                    LibraryCard.collection_id == self._collection_id,
-                    LibraryCard.card_type == "topic",
-                    LibraryCard.title == cluster.get("label", ""),
-                )
-                .first()
-            )
-
-            if existing:
-                existing.content = result.get("summary", "")
-                existing.importance = importance
-                existing.updated_at = datetime.now(UTC)
-                existing.consolidation_run_id = self._run_id
-                card = existing
-                self._cards_updated += 1
-            else:
-                card = LibraryCard(
-                    collection_id=self._collection_id,
-                    doc_id=str(uuid.uuid4()),
-                    level="topic",
-                    title=cluster.get("label", "Unknown"),
-                    content=result.get("summary", ""),
-                    card_type="topic",
-                    importance=importance,
-                    consolidation_run_id=self._run_id,
-                    created_at=datetime.now(UTC),
-                    updated_at=datetime.now(UTC),
-                )
-                session.add(card)
-                session.flush()  # get card.id
-                self._cards_created += 1
-
-            # Link to source cards
-            for source in source_cards:
-                ref = CardReference(
-                    source_card_id=card.id,
-                    target_card_id=source.id,
-                    relation_type="synthesizes_from",
-                )
-                session.add(ref)
-
-            # Store contradiction details
-            if contradictions:
-                card.extra_metadata = json.dumps({"contradictions": contradictions})
-
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
+        source_ids = [c.id for c in source_cards]
+        status, _card_id = self._cards.upsert_topic_card(
+            collection_id=self._collection_id,
+            run_id=self._run_id,
+            label=cluster.get("label", "Unknown"),
+            summary=result.get("summary", ""),
+            importance=importance,
+            source_card_ids=source_ids,
+            contradictions=contradictions or None,
+        )
+        if status == "created":
+            self._cards_created += 1
+        else:
+            self._cards_updated += 1
 
     def _generate_evolution_card(self, clusters: list[dict]) -> None:
-        """Generate an evolution card showing what changed since last run.
+        """Generate an evolution card showing what changed since last run."""
+        has_previous = self._cards.has_previous_run(self._collection_guid, self._run_id)
 
-        Reads + LLM call + write are split so the write lock is held briefly.
-        """
-        # Read previous run + existing topics in a short session
-        session = self._short_session()
-        try:
-            previous = (
-                session.query(ConsolidationRun)
-                .filter(
-                    ConsolidationRun.collection_id == self._collection_guid,
-                    ConsolidationRun.id != self._run_id,
-                )
-                .order_by(ConsolidationRun.created_at.desc())
-                .first()
-            )
-
-            prev_labels: set[str] = set()
-            if previous:
-                prev_cards = (
-                    session.query(LibraryCard)
-                    .filter(
-                        LibraryCard.collection_id == self._collection_id,
-                        LibraryCard.card_type == "topic",
-                    )
-                    .all()
-                )
-                prev_labels = {c.title for c in prev_cards}
-        finally:
-            session.close()
-
-        # Compute content (no session needed)
-        if not previous:
+        if not has_previous:
             topic_labels = [c.get("label", "?") for c in clusters]
             content = (
                 f"Initial consolidation: {len(clusters)} topics identified. "
@@ -448,6 +349,7 @@ class ConsolidationRunner:
                 + ("..." if len(topic_labels) > 10 else "")
             )
         else:
+            prev_labels = self._cards.fetch_previous_topic_labels(self._collection_id)
             current_labels = {c.get("label", "") for c in clusters}
             added = current_labels - prev_labels
             removed = prev_labels - current_labels
@@ -463,75 +365,26 @@ class ConsolidationRunner:
 
             content = "Consolidation update. " + "; ".join(changes)
 
-        # Write in a short session
-        session = self._short_session()
-        try:
-            existing = (
-                session.query(LibraryCard)
-                .filter(
-                    LibraryCard.collection_id == self._collection_id,
-                    LibraryCard.card_type == "evolution",
-                )
-                .first()
-            )
-
-            if existing:
-                existing.content = content
-                existing.updated_at = datetime.now(UTC)
-                existing.consolidation_run_id = self._run_id
-                self._cards_updated += 1
-            else:
-                card = LibraryCard(
-                    collection_id=self._collection_id,
-                    doc_id=str(uuid.uuid4()),
-                    level="evolution",
-                    title="Knowledge Evolution",
-                    content=content,
-                    card_type="evolution",
-                    importance=0.8,
-                    consolidation_run_id=self._run_id,
-                    created_at=datetime.now(UTC),
-                    updated_at=datetime.now(UTC),
-                )
-                session.add(card)
-                self._cards_created += 1
-
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
+        self._cards.upsert_evolution_card(
+            collection_id=self._collection_id,
+            run_id=self._run_id,
+            content=content,
+        )
+        # The repository decides created vs updated; we count it as one update
+        # for the summary (the exact created/updated split is tracked in topic cards).
+        self._cards_updated += 1
 
     def _generate_gap_cards(self) -> None:
-        """Analyze search miss log and generate gap cards.
-
-        Read misses + LLM call + writes are split into short transactions.
-        """
-        # Read misses in a short session
-        session = self._short_session()
-        try:
-            misses = (
-                session.query(SearchMissLog)
-                .filter(SearchMissLog.collection_id == self._collection_guid)
-                .order_by(SearchMissLog.created_at.desc())
-                .limit(100)
-                .all()
-            )
-            miss_data = [(m.query, m.result_count, m.top_score) for m in misses]
-        finally:
-            session.close()
-
-        if not miss_data:
+        """Analyze search miss log and generate gap cards."""
+        misses = self._cards.fetch_search_misses(self._collection_guid, limit=100)
+        if not misses:
             return
 
-        # Build query list for the LLM
         query_text = "\n".join(
-            f'- "{q}" ({count} results, score={score})'
-            for q, count, score in miss_data[:50]
+            f'- "{m.query}" ({m.result_count} results, score={m.top_score})'
+            for m in misses[:50]
         )
 
-        # LLM call — NO session open
         response = self._chat_client.send(
             messages=[
                 {"role": "system", "content": _GAP_CARD_SYSTEM},
@@ -547,7 +400,7 @@ class ConsolidationRunner:
             temperature=0.3,
         )
 
-        result = _parse_json_safely(response)
+        result = parse_json_safely(response)
         gaps = result.get("gaps", [])
         self._gaps_found = len(gaps)
 
@@ -555,57 +408,12 @@ class ConsolidationRunner:
         if not kept_gaps:
             return
 
-        # Write gap cards in a short session
-        session = self._short_session()
-        try:
-            for gap in kept_gaps:
-                card = LibraryCard(
-                    collection_id=self._collection_id,
-                    doc_id=str(uuid.uuid4()),
-                    level="gap",
-                    title=gap.get("topic", "Unknown Gap"),
-                    content=gap.get("suggestion", ""),
-                    card_type="gap",
-                    importance=0.6,
-                    consolidation_run_id=self._run_id,
-                    created_at=datetime.now(UTC),
-                    updated_at=datetime.now(UTC),
-                )
-                session.add(card)
-                self._cards_created += 1
-
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
-
-    def _record_run(self, error: str | None) -> None:
-        """Persist the consolidation_run row in its own short transaction."""
-        session = self._short_session()
-        try:
-            run = ConsolidationRun(
-                id=self._run_id,
-                collection_id=self._collection_guid,
-                triggered_by="manual",
-                cards_created=self._cards_created,
-                cards_updated=self._cards_updated,
-                conflicts_found=self._conflicts_found,
-                gaps_found=self._gaps_found,
-                error=error,
-                created_at=datetime.now(UTC),
-            )
-            session.add(run)
-            session.commit()
-        except Exception as exc:
-            logger.error("Failed to record consolidation run %s: %s", self._run_id, exc)
-            try:
-                session.rollback()
-            except Exception:
-                pass
-        finally:
-            session.close()
+        inserted = self._cards.add_gap_cards(
+            collection_id=self._collection_id,
+            run_id=self._run_id,
+            gaps=kept_gaps,
+        )
+        self._cards_created += inserted
 
     def _result(self) -> dict[str, Any]:
         return {

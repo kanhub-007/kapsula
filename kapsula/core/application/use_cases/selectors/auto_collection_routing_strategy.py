@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from kapsula.core.application.use_cases.selectors.collection_routing_strategy import (
-    _annotate_collection,
+    annotate_collection,
 )
 from kapsula.core.application.use_cases.selectors.fast_collection_routing_strategy import (
     FastCollectionRoutingStrategy,
@@ -41,7 +41,7 @@ class AutoCollectionRoutingStrategy:
         if self._is_unambiguous(preselected):
             top = preselected[: len(collections)]
             return [
-                _annotate_collection(
+                annotate_collection(
                     candidate,
                     candidate.get("metadata_route_confidence", 0.85),
                     reason="Auto: unambiguous metadata routing",

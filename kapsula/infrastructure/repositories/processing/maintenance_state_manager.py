@@ -22,6 +22,7 @@ class MaintenanceStateManager:
 
     def __init__(self, path: str | None = None):
         self._path = path or os.path.join(DATA_DIR, "maintenance_state.json")
+        self._cache: dict[str, dict[str, Any]] | None = None
 
     def mark_collection_stale(
         self,
@@ -114,8 +115,9 @@ class MaintenanceStateManager:
         """Increment the uploads-since-consolidation counter.
 
         Called after every upload_document or delete_document on a collection.
-        Raises ``KeyError`` if no maintenance state exists for this collection.
-        Callers should ensure ``mark_collection_stale`` was called first.
+        Self-sufficient: if no state exists yet for the collection, creates one
+        with consolidation marked stale (closes O3 — no temporal coupling with
+        ``mark_collection_stale``).
         """
         with _STATE_LOCK:
             states = self._load_states()
@@ -202,8 +204,12 @@ class MaintenanceStateManager:
                 )
 
     def _load_states(self) -> dict[str, dict[str, Any]]:
+        """Return cached state, loading from disk only on first access (PE1)."""
+        if self._cache is not None:
+            return self._cache
         if not os.path.exists(self._path):
-            return {}
+            self._cache = {}
+            return self._cache
         try:
             with open(self._path, encoding="utf-8") as handle:
                 data = json.load(handle)
@@ -211,12 +217,16 @@ class MaintenanceStateManager:
             logger.warning(
                 "Failed to load maintenance state from %s: %s", self._path, exc
             )
-            return {}
+            self._cache = {}
+            return self._cache
         if not isinstance(data, dict):
-            return {}
-        return data
+            self._cache = {}
+            return self._cache
+        self._cache = data
+        return self._cache
 
     def _save_states(self, states: dict[str, dict[str, Any]]) -> None:
+        self._cache = states  # keep cache in sync with what we persist
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
         tmp_path = f"{self._path}.tmp"
         with open(tmp_path, "w", encoding="utf-8") as handle:

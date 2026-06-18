@@ -15,10 +15,10 @@ from kapsula.infrastructure.logging_config import get_logger
 from kapsula.infrastructure.repositories.indexing.aggregate_index_builder import (
     AggregateIndexBuilder,
 )
-from kapsula.infrastructure.repositories.processing.maintenance_state_manager import (
-    MaintenanceStateManager,
+from kapsula.startup import (
+    create_embedder,
+    create_maintenance_state_manager,
 )
-from kapsula.startup import create_embedder
 
 logger = get_logger(__name__)
 
@@ -44,7 +44,7 @@ class CollectionMaintenanceRunner:
         if progress_callback:
             progress_callback("indexing", "Rebuilding FAISS+BM25 indexes...", "")
         aggregate_result = self._rebuild_aggregate_indexes(collection)
-        state_mgr = MaintenanceStateManager()
+        state_mgr = create_maintenance_state_manager()
 
         # Phase 3: consolidation (check BEFORE marking fresh, runs if stale)
         consolidation_result: dict = {}
@@ -61,6 +61,9 @@ class CollectionMaintenanceRunner:
                         "consolidating", "Running knowledge consolidation...", ""
                     )
                 try:
+                    from kapsula.infrastructure.repositories.data.sql_consolidation_card_repository import (
+                        SqlConsolidationCardRepository,
+                    )
                     from kapsula.infrastructure.repositories.processing.consolidation_runner import (
                         ConsolidationRunner,
                     )
@@ -69,8 +72,9 @@ class CollectionMaintenanceRunner:
                     )
 
                     chat_client = _get_chat_client()
+                    card_repository = SqlConsolidationCardRepository(SessionLocal)
                     runner = ConsolidationRunner(
-                        SessionLocal,
+                        card_repository,
                         chat_client,
                         collection.id,
                         collection.collection_id,

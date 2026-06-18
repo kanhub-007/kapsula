@@ -1,13 +1,25 @@
-"""SQLAlchemy implementation of SearchDataAccess."""
+"""SQLAlchemy implementation of SearchDataAccess.
+
+Returns application read-models (DTOs), never ORM instances, so the
+application layer stays decoupled from SQLAlchemy. Account persistence
+lives on ``AccountRepository`` instead.
+"""
 
 from sqlalchemy.orm import Session
 
-from kapsula.infrastructure.data.tables.account import Account
+from kapsula.core.application.dto.collection_read import CollectionRead
+from kapsula.core.application.dto.document_read import DocumentRead
+from kapsula.core.application.dto.sub_document_read import SubDocumentRead
 from kapsula.infrastructure.data.tables.chunk import Chunk
 from kapsula.infrastructure.data.tables.collection import Collection
 from kapsula.infrastructure.data.tables.document import Document
 from kapsula.infrastructure.data.tables.library_card import LibraryCard
 from kapsula.infrastructure.data.tables.sub_document import SubDocument
+from kapsula.infrastructure.repositories.data.mappers import (
+    collection_to_read,
+    document_to_read,
+    sub_document_to_read,
+)
 
 
 class SqlSearchDataAccess:
@@ -16,15 +28,16 @@ class SqlSearchDataAccess:
     def __init__(self, db: Session):
         self._db = db
 
-    def get_sub_documents(self, document_id: int) -> list:
-        return (
+    def get_sub_documents(self, document_id: int) -> list[SubDocumentRead]:
+        orm_list = (
             self._db.query(SubDocument)
             .filter(SubDocument.document_id == document_id)
             .all()
         )
+        return [sub_document_to_read(s) for s in orm_list]
 
-    def get_completed_documents(self, collection_id: int) -> list:
-        return (
+    def get_completed_documents(self, collection_id: int) -> list[DocumentRead]:
+        orm_list = (
             self._db.query(Document)
             .filter(
                 Document.collection_id == collection_id,
@@ -32,24 +45,30 @@ class SqlSearchDataAccess:
             )
             .all()
         )
+        return [document_to_read(d) for d in orm_list]
 
-    def get_collections_by_account(self, account_id: str) -> list:
-        return (
+    def get_collections_by_account(self, account_id: str) -> list[CollectionRead]:
+        orm_list = (
             self._db.query(Collection)
             .join(Collection.account)
             .filter(Collection.account.has(account_id=account_id))
             .all()
         )
+        return [collection_to_read(c) for c in orm_list]
 
-    def get_collection_by_collection_id(self, collection_id: str):
-        return (
+    def get_collection_by_collection_id(
+        self, collection_id: str
+    ) -> CollectionRead | None:
+        orm = (
             self._db.query(Collection)
             .filter(Collection.collection_id == collection_id)
             .first()
         )
+        return collection_to_read(orm) if orm else None
 
-    def get_all_collections(self) -> list:
-        return self._db.query(Collection).all()
+    def get_all_collections(self) -> list[CollectionRead]:
+        orm_list = self._db.query(Collection).all()
+        return [collection_to_read(c) for c in orm_list]
 
     def get_collection_library_card(self, collection_id: int):
         return (
@@ -137,13 +156,3 @@ class SqlSearchDataAccess:
             .filter(SubDocument.document_id == document_id)
             .count()
         )
-
-    def get_account_by_name(self, name: str):
-        return self._db.query(Account).filter(Account.name == name).first()
-
-    def save_account(self, account) -> None:
-        """Persist an account and return it with the generated identity."""
-        self._db.add(account)
-        self._db.commit()
-        self._db.refresh(account)
-        return account

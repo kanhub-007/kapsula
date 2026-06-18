@@ -37,6 +37,9 @@ from ..tasks import (
     process_document_with_subdocuments,
 )
 
+logger = get_logger(__name__)
+router = APIRouter()
+
 
 def _require_document(db: Session, job_id: str):
     """Load a document by job_id or raise 404."""
@@ -57,10 +60,6 @@ def _require_completed_document(db: Session, job_id: str):
             detail=f"Document processing not completed. Current status: {document.status}",
         )
     return document
-
-
-logger = get_logger(__name__)
-router = APIRouter()
 
 
 @router.post("/upload", response_model=UploadResponse)
@@ -88,9 +87,12 @@ async def upload_document(
     """
     content = await file.read()
 
-    from kapsula.startup import create_upload_document_use_case
+    from kapsula.startup import create_api_upload_document_use_case
 
-    use_case = create_upload_document_use_case()
+    # API path: use case is wired with NoOpBackgroundProcessor so it does
+    # NOT dispatch the task itself — the route dispatches once below via
+    # FastAPI BackgroundTasks. (MCP path uses the real processor.)
+    use_case = create_api_upload_document_use_case()
 
     try:
         result = use_case.execute_from_content(

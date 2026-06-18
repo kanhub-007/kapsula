@@ -18,7 +18,7 @@ from kapsula.infrastructure.repositories.data.sql_query_repositories import (
     SqlLibraryCardRepository,
 )
 
-from ._shared import _get_db
+from ._shared import _get_db, _get_maintenance_state_manager
 
 # Library card level constants — the levels used for structural (extractive)
 # heading cards: level_1=H3, level_2=H2, level_3=H1.
@@ -153,11 +153,7 @@ def register_collection_tools(mcp: FastMCP):
     def list_stale_maintenance() -> str:
         db = _get_db()
         try:
-            from kapsula.infrastructure.repositories.processing.maintenance_state_manager import (
-                MaintenanceStateManager,
-            )
-
-            stale_states = MaintenanceStateManager().list_stale()
+            stale_states = _get_maintenance_state_manager().list_stale()
             if not stale_states:
                 return "No stale maintenance state found."
 

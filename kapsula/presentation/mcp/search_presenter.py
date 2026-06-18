@@ -1,8 +1,9 @@
 """MCP-facing search result formatting."""
 
-# Threshold for reporting a dense signal as present in the score breakdown.
-# Must match the dense threshold in quality_filter.py (currently 0.15).
-_DENSE_SIGNAL_THRESHOLD = 0.15
+from kapsula.core.domain.quality_filter import DENSE_SIGNAL_THRESHOLD
+
+# Re-exported for any presenter that wants the same threshold; the single
+# source of truth lives in quality_filter.py (closes D2).
 
 
 def format_search_results(
@@ -25,12 +26,6 @@ def format_search_results(
 
     Returns:
         Formatted multi-line string suitable for LLM consumption.
-    """
-    """Format search results as self-documenting plain text for MCP clients.
-
-    Each result includes: score breakdown (dense/sparse/fused), signal
-    indicators, context mode, and source info — so the LLM can judge
-    relevance without guessing.
     """
     if not results:
         return "No results found."
@@ -60,7 +55,7 @@ def format_search_results(
         score_line = ", ".join(score_parts)
 
         # Signal indicator
-        has_dense = dense is not None and dense > _DENSE_SIGNAL_THRESHOLD
+        has_dense = dense is not None and dense > DENSE_SIGNAL_THRESHOLD
         has_sparse = sparse is not None and sparse > 0.0
         if has_dense and has_sparse:
             signal = "both signals"

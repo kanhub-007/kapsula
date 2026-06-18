@@ -335,12 +335,15 @@ async def intelligent_search_across_collections_streaming(
                 )
             except HTTPException:
                 yield f"data: {json.dumps({'event_type': 'error', 'data': {'message': 'No collections available'}})}\n\n"
-            # Step 4 & 5: Execute searches with streaming            # Step 4 & 5: Execute searches with streaming
+                return
+            # Step 4 & 5: Execute searches with streaming
             intelligent_engine = create_intelligent_searcher()
+            # Hoist searcher construction once per request (closes PE3) —
+            # previously rebuilt inside execute_search for every sub-query.
+            multi_searcher = create_multi_index_searcher(db)
 
             async def execute_search(search_query: str):
-                # Reranker disabled — runs too slow locally
-                return await create_multi_index_searcher(db).search_collections(
+                return await multi_searcher.search_collections(
                     CollectionSearch(
                         query=search_query,
                         account_id=account_id,

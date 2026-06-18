@@ -24,8 +24,8 @@ from kapsula.core.application.use_cases.search_metadata_builder import (
 )
 from kapsula.core.application.use_cases.search_runtime_helpers import (
     DEFAULT_DOCUMENT_CONCURRENCY,
-    _gather,
-    _select,
+    gather_flattened,
+    select_metadata,
 )
 from kapsula.core.application.use_cases.search_strategy.collection_search_strategy import (
     CollectionSearchStrategy,
@@ -59,7 +59,7 @@ class MultiIndexSearcher:
         embedder: Embedder,
         reranker: Reranker,
         chat_client: ChatClient,
-        make_searcher: Callable,
+        make_searcher: Callable[[str, str], Any],
         strategies: list[CollectionSearchStrategy] | None = None,
         quota_policy: SourceQuotaPolicy | None = None,
         route_scorer: RouteConfidenceScorer | None = None,
@@ -89,7 +89,7 @@ class MultiIndexSearcher:
         metadata = self._metadata.build_subdoc_metadata(subdocs)
         selector = SubDocumentSelector(self._chat_client)
         routing_started = perf_counter()
-        selected = _select(selector, search.query, metadata)
+        selected = select_metadata(selector, search.query, metadata)
         routing_elapsed = perf_counter() - routing_started
         logger.info(
             "Subdocument routing completed in %.3fs: selected=%s/%s document_id=%s",
@@ -121,7 +121,7 @@ class MultiIndexSearcher:
                 logger.error(f"Failed to search sub-doc '{sd['breadcrumb_key']}': {e}")
                 return []
 
-        all_results = await _gather([_search_one(s) for s in selected])
+        all_results = await gather_flattened([_search_one(s) for s in selected])
         logger.info(
             f"Aggregated {len(all_results)} candidates from {len(selected)} sub-docs"
         )
@@ -245,7 +245,7 @@ class MultiIndexSearcher:
                 logger.error(f"Failed to search collection '{cd['name']}': {e}")
                 return []
 
-        all_results = await _gather([_search_coll(c) for c in selected])
+        all_results = await gather_flattened([_search_coll(c) for c in selected])
         logger.info(
             "Aggregated %s candidates from %s collections in %.3fs",
             len(all_results),
@@ -302,7 +302,7 @@ class MultiIndexSearcher:
             )
             for doc in single_index_docs
         )
-        return await _gather(tasks)
+        return await gather_flattened(tasks)
 
     def _select_batched_subdocuments(
         self, search: CollectionSearch, candidates: list[dict]

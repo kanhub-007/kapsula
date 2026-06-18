@@ -128,16 +128,20 @@ def _link_chunks_to_parents(job_id, document, parent_sections, db, processing_st
 
 
 def _build_document_indexes(
-    job_id, document, chunks, db, ingestion_mode, upload_progress
+    job_id, document, chunks, db, ingestion_mode, upload_progress, embedder=None
 ):
-    """Build FAISS and BM25 search indexes for a document."""
+    """Build FAISS and BM25 search indexes for a document.
+
+    Args:
+        embedder: optional injected ``Embedder``. When ``None`` (legacy
+            callers in ``tasks.py``), a ``HuggingFaceEmbedder`` is created
+            from env. Strategies pass ``ctx.embedder`` so the step is
+            testable with a fake.
+    """
     import os
     import time
 
     from kapsula.infrastructure.data.connection import DATA_DIR
-    from kapsula.infrastructure.repositories.embedding.huggingface_embedder import (
-        HuggingFaceEmbedder,
-    )
     from kapsula.infrastructure.repositories.indexing import DocumentIndexBuilder
 
     index_stage_start = time.time()
@@ -158,10 +162,17 @@ def _build_document_indexes(
         )
         collection_id = document.collection.collection_id
 
-        embedder = HuggingFaceEmbedder(
-            endpoint_url=os.getenv("EMBEDDING_MODEL_URL", "Qwen/Qwen3-Embedding-8B"),
-            token=os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN", ""),
-        )
+        if embedder is None:
+            from kapsula.infrastructure.repositories.embedding.huggingface_embedder import (
+                HuggingFaceEmbedder,
+            )
+
+            embedder = HuggingFaceEmbedder(
+                endpoint_url=os.getenv(
+                    "EMBEDDING_MODEL_URL", "Qwen/Qwen3-Embedding-8B"
+                ),
+                token=os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN", ""),
+            )
         builder = DocumentIndexBuilder(embedder, DATA_DIR)
 
         index_paths = builder.build(

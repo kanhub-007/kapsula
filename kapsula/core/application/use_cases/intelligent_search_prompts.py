@@ -49,7 +49,7 @@ Sub-Question Answers:
 
 Please synthesize the above answers into ONE comprehensive, natural answer to the original question. Write as if you're directly answering the user, without mentioning the sub-questions or sub-answers."""
 
-_NO_ANSWER_PHRASES = [
+NO_ANSWER_PHRASES = [
     "don't have enough information",
     "do not have enough information",
     "not enough information",

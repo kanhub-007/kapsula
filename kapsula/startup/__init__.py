@@ -13,6 +13,25 @@ load_dotenv()
 logger = get_logger(__name__)
 
 
+# Module-level shared maintenance-state manager (single instance per process).
+# Closes A3: previously constructed inline at 9 call sites, re-reading the
+# JSON file on every call. The instance caches parsed state in memory and
+# only flushes on write (PE1).
+_maintenance_state_manager = None
+
+
+def create_maintenance_state_manager():
+    """Return the process-wide shared MaintenanceStateManager."""
+    global _maintenance_state_manager
+    if _maintenance_state_manager is None:
+        from kapsula.infrastructure.repositories.processing.maintenance_state_manager import (
+            MaintenanceStateManager,
+        )
+
+        _maintenance_state_manager = MaintenanceStateManager()
+    return _maintenance_state_manager
+
+
 def bootstrap():
     """Initialize database and default account. Call once at startup."""
     init_db()
@@ -77,6 +96,53 @@ def create_intelligent_searcher(chat_client=None):
 
     client = chat_client or create_chat_client()
     return IntelligentSearcher(client)
+
+
+def _build_collection_document_structure(db, collection_id: int) -> list[dict]:
+    """Build hierarchical document structure for a collection (shared helper).
+
+    Used by :func:`create_prepare_intelligent_search_use_case` so both the
+    API and MCP paths share one structure-building implementation.
+    """
+    from kapsula.infrastructure.data import Document as OrmDocument
+    from kapsula.infrastructure.data import SubDocument as OrmSubDocument
+    from kapsula.presentation.shared.document_structure_builder import (
+        build_document_structure_from_subdocs,
+    )
+
+    structure: list[dict] = []
+    documents = (
+        db.query(OrmDocument).filter(OrmDocument.collection_id == collection_id).all()
+    )
+    for doc in documents:
+        subdocs = (
+            db.query(OrmSubDocument).filter(OrmSubDocument.document_id == doc.id).all()
+        )
+        structure.extend(build_document_structure_from_subdocs(subdocs, db))
+    return structure
+
+
+def create_prepare_intelligent_search_use_case(db):
+    """Wire the shared intelligent-search preparation use case (closes A6)."""
+    from kapsula.core.application.use_cases.prepare_intelligent_search import (
+        PrepareIntelligentSearchUseCase,
+    )
+    from kapsula.core.application.use_cases.selectors.collection_selector import (
+        CollectionSelector,
+    )
+    from kapsula.infrastructure.repositories.data.sql_search_data_access import (
+        SqlSearchDataAccess,
+    )
+
+    chat_client = create_chat_client()
+    data = SqlSearchDataAccess(db)
+    return PrepareIntelligentSearchUseCase(
+        data=data,
+        chat_client=chat_client,
+        query_planner=create_query_planner(chat_client),
+        collection_selector=CollectionSelector(chat_client),
+        structure_builder=lambda cid: _build_collection_document_structure(db, cid),
+    )
 
 
 def create_query_planner(chat_client=None):
@@ -247,7 +313,11 @@ def create_delete_document_use_case():
 
 
 def create_upload_document_use_case():
-    """Create an UploadDocumentUseCase with wired dependencies."""
+    """Create an UploadDocumentUseCase for the MCP path.
+
+    Wires a real ``ThreadPoolBackgroundProcessor`` so the MCP tool returns
+    immediately while the document is processed in a daemon thread.
+    """
     from kapsula.core.application.use_cases.upload_document import (
         UploadDocumentUseCase,
     )
@@ -277,4 +347,37 @@ def create_upload_document_use_case():
     progress_tracker = InMemoryProgressTracker(job_repository)
     return UploadDocumentUseCase(
         background_processor, document_repository, progress_tracker
+    )
+
+
+def create_api_upload_document_use_case():
+    """Create an UploadDocumentUseCase for the HTTP API path.
+
+    Wires a ``NoOpBackgroundProcessor`` because the HTTP route dispatches
+    the task itself via FastAPI ``BackgroundTasks`` (per the
+    ``wire-upload-usecase`` spec). If the use case also dispatched, every
+    upload would be processed twice (duplicate chunks, duplicate indexes,
+    races on shared state).
+    """
+    from kapsula.core.application.use_cases.upload_document import (
+        UploadDocumentUseCase,
+    )
+    from kapsula.infrastructure.repositories.data.sql_document_repository import (
+        SqlDocumentRepository,
+    )
+    from kapsula.infrastructure.repositories.data.sql_upload_job_repository import (
+        SqlUploadJobRepository,
+    )
+    from kapsula.infrastructure.repositories.processing.background_processor import (
+        NoOpBackgroundProcessor,
+    )
+    from kapsula.infrastructure.repositories.processing.progress_tracker import (
+        InMemoryProgressTracker,
+    )
+
+    document_repository = SqlDocumentRepository()
+    job_repository = SqlUploadJobRepository()
+    progress_tracker = InMemoryProgressTracker(job_repository)
+    return UploadDocumentUseCase(
+        NoOpBackgroundProcessor(), document_repository, progress_tracker
     )

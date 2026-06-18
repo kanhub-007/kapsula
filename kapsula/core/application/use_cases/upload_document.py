@@ -4,6 +4,8 @@ import logging
 import uuid
 from pathlib import Path
 
+from sqlalchemy.orm import Session
+
 from kapsula.core.application.dto.upload_document_result import (
     UploadDocumentResult,
 )
@@ -40,7 +42,7 @@ class UploadDocumentUseCase:
 
     def execute(
         self,
-        db,
+        db: "Session",
         file_path: str,
         collection_id: str,
         max_tokens: int = 512,
@@ -82,48 +84,20 @@ class UploadDocumentUseCase:
 
         # Read and persist
         content = p.read_text(encoding="utf-8")
-        job_id = str(uuid.uuid4())
-
-        doc = Document(
-            job_id=job_id,
-            collection_id=col.id,
-            filename=p.name,
-            size=len(content.encode("utf-8")),
-            ip_address=ip_address,
+        return self._persist_and_dispatch(
+            db=db,
             content=content,
-            status="processing",
-        )
-        doc = self._document_repository.save_document(db, doc)
-
-        # Register tracking and start background processing
-        self._progress_tracker.register_job(
-            job_id=job_id,
+            size=len(content.encode("utf-8")),
             filename=p.name,
-            collection_name=col.name,
+            collection=col,
+            max_tokens=max_tokens,
             ingestion_mode=ingestion_mode,
-        )
-        self._background_processor.start_processing(
-            job_id, content, max_tokens, ingestion_mode
-        )
-
-        logger.info(
-            "Upload started: job_id=%s filename=%s collection=%s mode=%s",
-            job_id,
-            p.name,
-            col.name,
-            ingestion_mode,
-        )
-
-        return UploadDocumentResult(
-            job_id=job_id,
-            filename=p.name,
-            collection_name=col.name,
-            ingestion_mode=ingestion_mode,
+            ip_address=ip_address,
         )
 
     def execute_from_content(
         self,
-        db,
+        db: "Session",
         content_bytes: bytes,
         filename: str,
         collection_id: str,
@@ -151,22 +125,50 @@ class UploadDocumentUseCase:
             raise ValueError(f"Collection not found: {collection_id}")
 
         content = content_bytes.decode("utf-8")
+        return self._persist_and_dispatch(
+            db=db,
+            content=content,
+            size=len(content_bytes),
+            filename=filename,
+            collection=col,
+            max_tokens=max_tokens,
+            ingestion_mode=ingestion_mode,
+            ip_address=ip_address,
+        )
+
+    def _persist_and_dispatch(
+        self,
+        db: "Session",
+        content: str,
+        size: int,
+        filename: str,
+        collection,
+        max_tokens: int,
+        ingestion_mode: str,
+        ip_address: str,
+    ) -> UploadDocumentResult:
+        """Shared body for execute() and execute_from_content() (closes S2).
+
+        Both entry points normalise input to (content, size, filename) and
+        delegate here for validation, persistence, progress tracking, and
+        background dispatch.
+        """
         job_id = str(uuid.uuid4())
         doc = Document(
             job_id=job_id,
-            collection_id=col.id,
+            collection_id=collection.id,
             filename=filename,
-            size=len(content_bytes),
+            size=size,
             ip_address=ip_address,
             content=content,
             status="processing",
         )
-        doc = self._document_repository.save_document(db, doc)
+        self._document_repository.save_document(db, doc)
 
         self._progress_tracker.register_job(
             job_id=job_id,
             filename=filename,
-            collection_name=col.name,
+            collection_name=collection.name,
             ingestion_mode=ingestion_mode,
         )
         self._background_processor.start_processing(
@@ -177,13 +179,12 @@ class UploadDocumentUseCase:
             "Upload started: job_id=%s filename=%s collection=%s mode=%s",
             job_id,
             filename,
-            col.name,
+            collection.name,
             ingestion_mode,
         )
-
         return UploadDocumentResult(
             job_id=job_id,
             filename=filename,
-            collection_name=col.name,
+            collection_name=collection.name,
             ingestion_mode=ingestion_mode,
         )

@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from kapsula.core.application.use_cases.intelligent_search_prompts import (
-    _NO_ANSWER_PHRASES,
+    NO_ANSWER_PHRASES,
     SYSTEM_PROMPT_COMBINE,
     SYSTEM_PROMPT_EVALUATE,
     USER_MESSAGE_COMBINE,
@@ -127,37 +127,23 @@ class IntelligentSearcher:
         max_context_length: int = 8000,
         top_k: int = 10,
     ) -> dict[str, Any]:
-        """Execute a search plan and return a single result dict."""
+        """Execute a search plan and return a single result dict.
 
-        if not plan:
-            search_results = await search_function(query)
-            result = self.evaluate_and_answer(query, search_results, max_context_length)
-            result["plan"] = None
-            result["sub_answers"] = None
-            return result
-
-        tasks = [
-            self._process_sub_query(q, search_function, max_context_length, top_k)
-            for q in plan["queries"]
-        ]
-        sub_answers = await asyncio.gather(*tasks)
-
-        all_results = []
-        for sa in sub_answers:
-            all_results.extend(sa.get("search_results", []))
-
-        final = await asyncio.to_thread(
-            self._combine_sub_answers, query, sub_answers, max_context_length
-        )
-        final["search_results"] = all_results
-        final["plan"] = {
-            "strategy": plan["strategy"],
-            "queries": plan["queries"],
-            "reasoning": plan.get("reasoning", ""),
-            "total_unique_results": sum(sa["num_results"] for sa in sub_answers),
-            "sub_answers_count": len(sub_answers),
-        }
-        final["sub_answers"] = sub_answers
+        Consumes the streaming generator (closes P2) so the planning /
+        sub-query / aggregation logic has one source of truth.
+        """
+        final: dict[str, Any] | None = None
+        async for event in self.evaluate_and_answer_with_planning_streaming(
+            query=query,
+            search_function=search_function,
+            plan=plan,
+            max_context_length=max_context_length,
+            top_k=top_k,
+        ):
+            if event["event_type"] == "final_answer":
+                final = event["data"]
+        # The streaming variant always yields exactly one final_answer.
+        assert final is not None
         return final
 
     def evaluate_and_answer(
@@ -224,7 +210,7 @@ class IntelligentSearcher:
                 "search_results": search_results,
             }
 
-        has_answer = not any(p in answer.lower() for p in _NO_ANSWER_PHRASES)
+        has_answer = not any(p in answer.lower() for p in NO_ANSWER_PHRASES)
         relevant = list(range(evaluated)) if has_answer else []
 
         return {
@@ -330,7 +316,7 @@ class IntelligentSearcher:
                 "has_answer": False,
             }
 
-        has_answer = not any(p in answer.lower() for p in _NO_ANSWER_PHRASES)
+        has_answer = not any(p in answer.lower() for p in NO_ANSWER_PHRASES)
         return {
             "answer": answer,
             "relevant_results": [],

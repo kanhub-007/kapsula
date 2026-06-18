@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from kapsula.core.domain.interfaces.chat_client import ChatClient
-from kapsula.core.domain.json_utils import _parse_json_safely
+from kapsula.core.domain.json_utils import parse_json_safely
 
 from .query_planning_prompts import SYSTEM_PROMPT_DOCUMENT, USER_MESSAGE_DOCUMENT
 
@@ -46,7 +46,7 @@ class QueryPlanner:
                 max_tokens=500,
                 temperature=0.3,
             )
-            plan = _parse_json_safely(response)
+            plan = parse_json_safely(response)
             return self._validate(plan, query)
         except Exception as e:
             logger.exception(f"Query planning failed: {e}")

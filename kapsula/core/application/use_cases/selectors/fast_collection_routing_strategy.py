@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from kapsula.core.application.use_cases.selectors.collection_routing_strategy import (
-    _annotate_collection,
+    annotate_collection,
 )
 
 
@@ -17,6 +17,6 @@ class FastCollectionRoutingStrategy:
 
     def select(self, query: str, collections: list[dict]) -> list[dict]:
         return [
-            _annotate_collection(coll, 0.8, reason="Fast routing (all candidates)")
+            annotate_collection(coll, 0.8, reason="Fast routing (all candidates)")
             for coll in collections
         ]

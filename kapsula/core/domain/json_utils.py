@@ -7,8 +7,13 @@ import re
 logger = logging.getLogger(__name__)
 
 
-def _parse_json_safely(text: str) -> dict:
-    """Robust JSON parsing from LLM output — handles code fences and prose."""
+def parse_json_safely(text: str) -> dict:
+    """Robust JSON parsing from LLM output — handles code fences and prose.
+
+    Public: used cross-module by query planner, selectors, and the
+    consolidation runner. (Was ``_parse_json_safely``; renamed to drop the
+    private underscore since it is imported across modules — closes D1.)
+    """
     if not text:
         # Documented contract: never crash callers. Return {} on empty input.
         return {}

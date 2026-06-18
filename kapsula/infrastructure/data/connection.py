@@ -1,14 +1,18 @@
 """Database connection and session management."""
 
 import os
+from pathlib import Path
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-DATA_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "data"
-)
-os.makedirs(DATA_DIR, exist_ok=True)
+# Repository-root ``data/`` directory. Computed via Path.parents for clarity
+# and robustness against file relocation (closes SC7 — was 4× nested dirname).
+DATA_DIR = str(Path(__file__).resolve().parents[3])
+# NOTE: the directory is created lazily in init_db(), not at import time,
+# so merely importing kapsula (e.g. in tests) has no filesystem side effect.
+
+DATA_DIR = os.path.join(DATA_DIR, "data")
 
 DATABASE_URL = f"sqlite:///{os.path.join(DATA_DIR, 'documents.db')}"
 
@@ -35,6 +39,8 @@ Base = declarative_base()
 
 
 def init_db():
+    """Create the data directory, all tables, and run lightweight migrations."""
+    os.makedirs(DATA_DIR, exist_ok=True)
     Base.metadata.create_all(bind=engine)
     _run_lightweight_migrations()
 

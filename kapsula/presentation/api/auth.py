@@ -5,11 +5,22 @@ ON automatically when ``KAPSULA_API_KEY`` is set in the environment. When on,
 every request must carry it either as ``Authorization: Bearer <key>`` or as
 the ``X-API-Key`` query/header. Requests without a matching key get 401.
 
-This closes the \"unauthenticated network-exposed API\" gap. Account-scoped
-authorization (IDOR prevention) is a follow-up: it requires routing every read
-through the authenticated account, which is a larger, spec-driven change.
+Comparison uses :func:`hmac.compare_digest` (constant-time) to avoid leaking
+the key via a timing side-channel under sustained probing.
+
+This closes the "unauthenticated network-exposed API" gap.
+
+**Authorization model (per the 2026-06-18 IDOR decision, see
+``specs/2026-06-18_account-scoped-authorization/``):** kapsula is single-tenant.
+Accounts are organizational units (the Account → Collection → Document
+hierarchy), not security boundaries — the operator may use multiple accounts,
+all trusted to the one deployment principal. There is no inter-account
+isolation to enforce, so this dependency is the complete authn/authz story.
+If a future deployment hosts mutually-distrusting parties on one process,
+add a ``PrincipalResolver`` + per-resource ownership checks at that point.
 """
 
+import hmac
 import os
 
 from fastapi import Header, HTTPException, Query, status
@@ -41,7 +52,7 @@ async def require_api_key(
         if len(parts) == 2 and parts[0].lower() == "bearer":
             presented = parts[1].strip()
 
-    if not presented or presented != expected:
+    if not presented or not hmac.compare_digest(presented, expected):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing or invalid API key",

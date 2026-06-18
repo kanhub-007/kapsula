@@ -9,16 +9,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from kapsula.core.domain.json_utils import _parse_json_safely
+from kapsula.core.domain.json_utils import parse_json_safely
 
 
 def extract_json_object(response: str) -> dict[str, Any]:
     """Extract the first JSON object from an LLM response.
 
-    Delegates to ``_parse_json_safely`` so all LLM-output quirks (code fences,
+    Delegates to ``parse_json_safely`` so all LLM-output quirks (code fences,
     prose wrapping, trailing commas, curly quotes) are handled in one place.
     """
-    return _parse_json_safely(response)
+    return parse_json_safely(response)
 
 
 def extract_json_float(

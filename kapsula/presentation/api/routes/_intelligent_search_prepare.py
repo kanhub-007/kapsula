@@ -1,18 +1,14 @@
-"""Shared intelligent search preparation logic."""
+"""Shared intelligent search preparation logic.
+
+Thin adapter: delegates to ``PrepareIntelligentSearchUseCase`` (closes A6).
+Kept as a module function so the route handlers can stay synchronous-ish
+and so the streaming route can reuse the same preparation path.
+"""
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from kapsula.infrastructure.data.tables.collection import Collection as OrmCollection
-from kapsula.infrastructure.data.tables.document import Document as OrmDocument
-from kapsula.infrastructure.data.tables.library_card import (
-    LibraryCard as OrmLibraryCard,
-)
-from kapsula.infrastructure.data.tables.sub_document import (
-    SubDocument as OrmSubDocument,
-)
 from kapsula.infrastructure.logging_config import get_logger
-from kapsula.startup import create_chat_client, create_query_planner
 
 logger = get_logger(__name__)
 
@@ -23,92 +19,21 @@ async def _prepare_intelligent_search(
     enable_planning: bool,
     db: Session,
 ):
-    """Route to collection, build document structure, create query plan.
+    """Prepare a search via the shared use case.
 
-    Returns (search_plan, collections, routed_collection) tuple or raises HTTPException.
+    Returns (search_plan, collections, routed_collection) tuple for
+    backward compatibility with existing route handlers, or raises
+    HTTPException(404) when no collections are available.
     """
-    from kapsula.core.application.use_cases.selectors.collection_selector import (
-        CollectionSelector,
+    from kapsula.startup import create_prepare_intelligent_search_use_case
+
+    use_case = create_prepare_intelligent_search_use_case(db)
+    try:
+        preparation = use_case.prepare(query, account_id, enable_planning)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return (
+        preparation.plan,
+        preparation.collections,
+        preparation.routed_collection,
     )
-
-    collections_query = db.query(OrmCollection)
-    if account_id:
-        collections_query = collections_query.join(OrmCollection.account).filter(
-            OrmCollection.account.has(account_id=account_id)
-        )
-    collections = collections_query.all()
-
-    if not collections:
-        logger.warning("No collections found")
-        raise HTTPException(status_code=404, detail="No collections available")
-
-    router = CollectionSelector(create_chat_client())
-    collection_metadata = []
-    for coll in collections:
-        card = (
-            db.query(OrmLibraryCard)
-            .filter(
-                OrmLibraryCard.collection_id == coll.id,
-                OrmLibraryCard.level == "collection",
-            )
-            .first()
-        )
-        collection_metadata.append(
-            {
-                "id": coll.id,
-                "name": coll.name,
-                "library_card_summary": (
-                    card.content[:500] if card else f"Collection: {coll.name}"
-                ),
-                "document_count": len(coll.documents),
-            }
-        )
-
-    routed_collection_ids = router.select(query, collection_metadata)
-    routed_collection_id = (
-        routed_collection_ids[0] if routed_collection_ids else collections[0].id
-    )
-    logger.info("Routed to collection ID: %s", routed_collection_id)
-
-    routed_collection = (
-        db.query(OrmCollection).filter(OrmCollection.id == routed_collection_id).first()
-    )
-
-    from kapsula.presentation.shared.document_structure_builder import (
-        build_document_structure_from_subdocs,
-    )
-
-    document_structure = []
-    if routed_collection:
-        documents = (
-            db.query(OrmDocument)
-            .filter(OrmDocument.collection_id == routed_collection_id)
-            .all()
-        )
-        for doc in documents:
-            subdocs = (
-                db.query(OrmSubDocument)
-                .filter(OrmSubDocument.document_id == doc.id)
-                .all()
-            )
-            document_structure.extend(
-                build_document_structure_from_subdocs(subdocs, db)
-            )
-
-    search_plan = None
-    if enable_planning and document_structure:
-        logger.info(
-            "Creating query plan using %s sections from routed collection",
-            len(document_structure),
-        )
-        planner = create_query_planner()
-        search_plan = planner.plan_document_search(
-            query, document_library_card=None, document_structure=document_structure
-        )
-        logger.info(
-            "Query plan: %s - %s",
-            search_plan["strategy"],
-            search_plan.get("reasoning", ""),
-        )
-
-    return search_plan, collections, routed_collection

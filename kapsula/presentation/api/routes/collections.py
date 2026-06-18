@@ -18,6 +18,7 @@ from kapsula.infrastructure.repositories.data.sql_collection_repository import (
     SqlCollectionRepository,
 )
 
+from .._http import client_ip
 from ..models import CollectionListResponse, CollectionResponse
 
 logger = get_logger(__name__)
@@ -80,7 +81,7 @@ async def create_collection(
     logger.info(f"Creating collection: {name}")
 
     # Get client IP (request.client may be None behind some proxies)
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip_value = client_ip(request)
 
     # Generate unique collection ID (GUID)
     collection_id = str(uuid.uuid4())
@@ -114,7 +115,7 @@ async def create_collection(
         name=name,
         logo_filename=logo_filename,
         account_id=account.id if account else None,
-        ip_address=client_ip,
+        ip_address=client_ip_value,
     )
     _collection_repo.save(db, collection)
 

@@ -14,6 +14,7 @@ from kapsula.infrastructure.repositories.data.sql_account_repository import (
     SqlAccountRepository,
 )
 
+from .._http import client_ip
 from ..models import (
     AccountCreate,
     AccountExportResponse,
@@ -32,9 +33,11 @@ async def create_account(
     request: Request, account_data: AccountCreate, db: Session = Depends(get_db)
 ):
     logger.info(f"Creating account: {account_data.name}")
-    client_ip = request.client.host
+    client_ip_value = client_ip(request)
     account_id = str(uuid.uuid4())
-    acc = Account(account_id=account_id, name=account_data.name, ip_address=client_ip)
+    acc = Account(
+        account_id=account_id, name=account_data.name, ip_address=client_ip_value
+    )
     _account_repo.save(db, acc)
     logger.info(f"Account created: {account_id}")
     return AccountResponse(
@@ -47,29 +50,27 @@ async def create_account(
 
 @router.get("/", response_model=AccountListResponse)
 async def list_accounts(db: Session = Depends(get_db)):
-    accounts = _account_repo.list_all(db)
-    # Need ORM for collection counts (relationships)
-    orm_accounts = {
-        a.account_id: db.query(OrmAccount)
-        .filter(OrmAccount.account_id == a.account_id)
-        .first()
-        for a in accounts
-    }
+    from sqlalchemy.orm import joinedload
+
+    # Single query with eager-loaded collections (closes S3 N+1: previously
+    # re-queried each account by GUID to read .collections).
+    orm_accounts = (
+        db.query(OrmAccount)
+        .options(joinedload(OrmAccount.collections))
+        .order_by(OrmAccount.created_at.desc())
+        .all()
+    )
     return AccountListResponse(
         accounts=[
             AccountResponse(
                 account_id=acc.account_id,
                 name=acc.name,
                 created_at=acc.created_at.isoformat() if acc.created_at else "",
-                collection_count=(
-                    len(orm_accounts[acc.account_id].collections)
-                    if acc.account_id in orm_accounts
-                    else 0
-                ),
+                collection_count=len(acc.collections),
             )
-            for acc in accounts
+            for acc in orm_accounts
         ],
-        total=len(accounts),
+        total=len(orm_accounts),
     )
 
 

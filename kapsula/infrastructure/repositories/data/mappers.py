@@ -248,3 +248,72 @@ def _collection_from_orm_shallow(orm: OrmCollection) -> DomainCollection:
         account=None,
         documents=[],
     )
+
+
+# ── read-model mappers (ORM → application DTOs for search) ───────
+
+
+def sub_document_to_read(orm: OrmSubDocument):
+    """Project an ORM SubDocument to the search read-model DTO."""
+    from kapsula.core.application.dto.sub_document_read import SubDocumentRead
+
+    return SubDocumentRead(
+        id=orm.id,
+        breadcrumb_key=orm.breadcrumb_key,
+        page_count=orm.page_count,
+        faiss_index_path=orm.faiss_index_path,
+        bm25_index_path=orm.bm25_index_path,
+    )
+
+
+def document_to_read(orm: OrmDocument):
+    """Project an ORM Document to the search read-model DTO."""
+    from kapsula.core.application.dto.document_read import DocumentRead
+
+    return DocumentRead(
+        id=orm.id,
+        filename=orm.filename,
+        collection_id=orm.collection_id,
+        faiss_index_path=orm.faiss_index_path,
+        bm25_index_path=orm.bm25_index_path,
+    )
+
+
+def collection_to_read(orm: OrmCollection):
+    """Project an ORM Collection to the search read-model DTO."""
+    from kapsula.core.application.dto.collection_read import CollectionRead
+
+    account_guid = None
+    try:
+        if orm.account is not None:
+            account_guid = orm.account.account_id
+    except (DetachedInstanceError, MissingGreenlet, AttributeError) as exc:
+        logger.debug("Collection.account relationship unavailable (read): %s", exc)
+    return CollectionRead(
+        id=orm.id,
+        name=orm.name,
+        collection_id=orm.collection_id,
+        account_id=orm.account_id,
+        account_guid=account_guid,
+    )
+
+
+def library_card_from_orm(orm):
+    """Convert ORM LibraryCard to domain LibraryCard.
+
+    Closes D4: previously ``SqlLibraryCardRepository`` mapped inline.
+    """
+    from kapsula.core.domain.entities.library_card import LibraryCard
+
+    return LibraryCard(
+        id=orm.id,
+        collection_id=orm.collection_id,
+        document_id=orm.document_id,
+        sub_document_id=orm.sub_document_id,
+        doc_id=orm.doc_id,
+        level=orm.level,
+        title=orm.title,
+        content=orm.content,
+        extra_metadata=orm.extra_metadata,
+        created_at=orm.created_at,
+    )

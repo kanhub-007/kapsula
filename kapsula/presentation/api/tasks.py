@@ -50,9 +50,6 @@ from kapsula.infrastructure.repositories.processing.aggregate_build_stage import
 from kapsula.infrastructure.repositories.processing.collection_summary_stage import (
     update_collection_library_card,
 )
-from kapsula.infrastructure.repositories.processing.maintenance_state_manager import (
-    MaintenanceStateManager,
-)
 from kapsula.infrastructure.repositories.processing.upload_progress_store import (
     processing_status,
 )
@@ -65,9 +62,13 @@ from kapsula.presentation.upload.sub_document_batch_indexer import (
 from kapsula.startup import (
     create_collection_summary_generator,
     create_embedder,
+    create_maintenance_state_manager,
 )
 
 logger = get_logger(__name__)
+
+# Shared maintenance-state manager (closes A3 — no more inline construction).
+_maintenance_state = create_maintenance_state_manager()
 
 # Regex to strip image markdown (![alt](url)) and leading Figure labels from
 # structural library card content so previews show real text, not image noise.
@@ -203,6 +204,74 @@ def _link_and_persist_subdoc_chunks(
             )
         )
     return stats
+
+
+def _run_ingestion_maintenance_tail(
+    *,
+    db,
+    document,
+    job_id: str,
+    chunk_count: int,
+    duration: float,
+    ingestion_mode: str,
+    ingestion_strategy,
+    upload_progress,
+    start_time: float,
+    summary: bool = False,
+    subdocument_count: int | None = None,
+) -> None:
+    """Run the maintenance tail for an upload (closes P1/P3 duplication).
+
+    Previously this ~30-line block was duplicated verbatim in both
+    ``process_document`` and ``process_document_with_subdocuments``.
+    Now both call this single helper. Decides rebuild-vs-stale internally.
+    """
+    if ingestion_strategy.rebuild_aggregate_indexes:
+        embedder = create_embedder()
+        rebuild_collection_aggregate_index(
+            db,
+            document,
+            job_id,
+            upload_progress=upload_progress,
+            embedder=embedder,
+            upload_start_time=start_time,
+        )
+    else:
+        _maintenance_state.mark_collection_stale(
+            document.collection,
+            summary=summary,
+            collection_index=True,
+            account_index=True,
+        )
+        if document.collection:
+            _maintenance_state.increment_uploads(document.collection.collection_id)
+        extra: dict = {
+            "chunk_count": chunk_count,
+            "duration": duration,
+            "ingestion_mode": ingestion_mode,
+            "maintenance_deferred": True,
+        }
+        if subdocument_count is not None:
+            extra["subdocument_count"] = subdocument_count
+        skip_summary = "collection summary and " if summary else ""
+        upload_progress.set(
+            job_id,
+            status="processing",
+            progress=98,
+            stage="finalizing",
+            message=(
+                f"Skipping {skip_summary}aggregate maintenance for "
+                f"ingestion_mode={ingestion_mode}; finalizing upload."
+            ),
+            **extra,
+        )
+        skip_summary = "collection summary and " if summary else ""
+        logger.info(
+            "Job %s: Deferred %smaintenance for ingestion_mode=%s",
+            job_id,
+            skip_summary,
+            ingestion_mode,
+        )
 
 
 def process_document(
@@ -350,42 +419,18 @@ def process_document(
         db.commit()
         logger.debug(f"Job {job_id}: Database updated with completion status")
 
-        if ingestion_strategy.rebuild_aggregate_indexes:
-            # Step 4: Rebuild collection aggregate index
-            embedder = create_embedder()
-            rebuild_collection_aggregate_index(
-                db,
-                document,
-                job_id,
-                upload_progress=_upload_progress,
-                embedder=embedder,
-                upload_start_time=start_time,
-            )
-        else:
-            MaintenanceStateManager().mark_collection_stale(
-                document.collection,
-                summary=False,
-                collection_index=True,
-                account_index=True,
-            )
-            if document.collection:
-                MaintenanceStateManager().increment_uploads(
-                    document.collection.collection_id
-                )
-            _upload_progress.set(
-                job_id,
-                status="processing",
-                progress=98,
-                stage="finalizing",
-                message=(
-                    f"Skipping aggregate index maintenance for ingestion_mode={ingestion_mode}; "
-                    "finalizing upload."
-                ),
-                chunk_count=len(chunks),
-                duration=duration,
-                ingestion_mode=ingestion_mode,
-                maintenance_deferred=True,
-            )
+        _run_ingestion_maintenance_tail(
+            db=db,
+            document=document,
+            job_id=job_id,
+            chunk_count=len(chunks),
+            duration=duration,
+            ingestion_mode=ingestion_mode,
+            ingestion_strategy=ingestion_strategy,
+            upload_progress=_upload_progress,
+            start_time=start_time,
+            summary=False,
+        )
 
         # Update progress: Completed
         _upload_progress.set(
@@ -776,49 +821,19 @@ def process_document_with_subdocuments(
                     ingestion_mode=ingestion_mode,
                 )
 
-        if ingestion_strategy.rebuild_aggregate_indexes:
-            # Step 5: Rebuild collection aggregate index
-            if embedder is None:
-                embedder = create_embedder()
-            rebuild_collection_aggregate_index(
-                db,
-                document,
-                job_id,
-                upload_progress=_upload_progress,
-                embedder=embedder,
-                upload_start_time=start_time,
-            )
-        else:
-            MaintenanceStateManager().mark_collection_stale(
-                document.collection,
-                summary=True,
-                collection_index=True,
-                account_index=True,
-            )
-            if document.collection:
-                MaintenanceStateManager().increment_uploads(
-                    document.collection.collection_id
-                )
-            _upload_progress.set(
-                job_id,
-                status="processing",
-                progress=98,
-                stage="finalizing",
-                message=(
-                    f"Skipping collection summary and aggregate maintenance for ingestion_mode={ingestion_mode}; "
-                    "finalizing upload."
-                ),
-                subdocument_count=len(subdocs),
-                chunk_count=total_chunks,
-                duration=duration,
-                ingestion_mode=ingestion_mode,
-                maintenance_deferred=True,
-            )
-            logger.info(
-                "Job %s: Deferred collection summary and aggregate index maintenance for ingestion_mode=%s",
-                job_id,
-                ingestion_mode,
-            )
+        _run_ingestion_maintenance_tail(
+            db=db,
+            document=document,
+            job_id=job_id,
+            chunk_count=total_chunks,
+            duration=duration,
+            ingestion_mode=ingestion_mode,
+            ingestion_strategy=ingestion_strategy,
+            upload_progress=_upload_progress,
+            start_time=start_time,
+            summary=True,
+            subdocument_count=len(subdocs),
+        )
 
         # Update progress: Completed
         _upload_progress.set(

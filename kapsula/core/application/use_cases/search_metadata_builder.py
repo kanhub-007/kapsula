@@ -58,11 +58,7 @@ class SearchMetadataBuilder:
                     "document_count": doc_count,
                     "document_list": doc_list,
                     "collection_route_confidence": 1.0,
-                    "account_guid": (
-                        getattr(coll.account, "account_id", None)
-                        if hasattr(coll, "account") and coll.account
-                        else None
-                    ),
+                    "account_guid": _resolve_account_guid(coll),
                     "collection_guid": getattr(coll, "collection_id", None),
                 }
             )
@@ -123,3 +119,17 @@ def _parse_collection_card(card: Any | None) -> tuple[int, list[str], str]:
         )
     except json.JSONDecodeError:
         return 0, [], card.content
+
+
+def _resolve_account_guid(coll: Any) -> str | None:
+    """Return the account GUID from a collection read-model or ORM object.
+
+    Prefers the flat ``account_guid`` field carried by ``CollectionRead``
+    DTOs; falls back to the legacy ``coll.account.account_id`` ORM path
+    for any caller still passing ORM instances.
+    """
+    flat = getattr(coll, "account_guid", None)
+    if flat is not None:
+        return flat
+    account = getattr(coll, "account", None)
+    return getattr(account, "account_id", None) if account else None

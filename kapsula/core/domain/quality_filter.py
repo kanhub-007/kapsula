@@ -9,8 +9,12 @@ it. See :mod:`kapsula.core.domain.fusion.rrf_fusion` and
 from collections.abc import Callable
 from typing import Any
 
+#: Minimum dense score for a result to count as having a dense signal.
+#: Single source of truth — imported by the MCP presenter (closes D2).
+DENSE_SIGNAL_THRESHOLD = 0.15
+
 _QUALITY_CONDITIONS: list[Callable[[float, float, float], bool]] = [
-    lambda d, sn, cs: d > 0.15 and sn > 0.1,
+    lambda d, sn, cs: d > DENSE_SIGNAL_THRESHOLD and sn > 0.1,
     lambda d, sn, cs: d >= 0.55 and sn > 0.02,
     lambda d, sn, cs: d >= 0.4 and sn > 0.05,
     lambda d, sn, cs: sn >= 0.3 and d >= 0.25,

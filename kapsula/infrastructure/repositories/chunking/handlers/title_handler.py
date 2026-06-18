@@ -1,20 +1,16 @@
 """Title element strategy."""
 
-from typing import Any
 
-from kapsula.core.domain.interfaces.element_handler import ElementHandler
+class TitleHandler:
+    def handle(self, idx: int, elements: list, ctx) -> None:
+        element = elements[idx]
+        state = ctx.state
 
-
-class TitleHandler(ElementHandler):
-    def handle(self, idx: int, elements: list, ctx: Any) -> None:
-        el = elements[idx]
-        s = ctx.state
-
-        if el.level <= 3:
+        if element.level <= 3:
             ctx.flush()
 
-        while s.header_stack and s.header_stack[-1][0] >= el.level:
-            s.header_stack.pop()
-        s.header_stack.append((el.level, el.content))
-        s.current_header = " > ".join(h[1] for h in s.header_stack)
-        s.i = idx + 1
+        while state.header_stack and state.header_stack[-1][0] >= element.level:
+            state.header_stack.pop()
+        state.header_stack.append((element.level, element.content))
+        state.current_header = " > ".join(h[1] for h in state.header_stack)
+        state.i = idx + 1

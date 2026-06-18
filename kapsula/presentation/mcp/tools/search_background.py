@@ -1,6 +1,7 @@
 """MCP background search tools — async search job management."""
 
 import asyncio
+from contextlib import asynccontextmanager
 
 from fastmcp import FastMCP
 
@@ -15,30 +16,41 @@ from ._shared import _get_search_job_manager
 logger = get_logger(__name__)
 
 
+@asynccontextmanager
+async def job_lifecycle(manager, job, running_label: str):
+    """Shared running → completed/cancelled/failed transition (closes P5).
+
+    Wraps a job body so every executor gets identical lifecycle handling
+    without duplicating the try/except/manager.update boilerplate.
+    """
+    manager.update(job, status="running", progress=running_label)
+    try:
+        yield
+    except asyncio.CancelledError:
+        manager.update(job, status="cancelled", progress=f"{running_label} cancelled")
+        raise
+    except Exception as exc:
+        logger.exception("Background job failed: %s", running_label)
+        manager.update(job, status="failed", progress="failed", error=str(exc))
+        return
+    # Body completed normally — caller is responsible for the completed update
+    # (it carries the result payload, which the context manager cannot know).
+
+
 def register_search_background_tools(mcp: FastMCP):
     """Register background/async search tools."""
 
     async def _execute_search_job(job) -> None:
         manager = _get_search_job_manager()
-        manager.update(job, status="running", progress="Search running")
-        try:
+        async with job_lifecycle(manager, job, "Search running"):
             result = await run_search_documents_text(**job.params)
             manager.update(
                 job, status="completed", progress="Search completed", result=result
             )
-        except asyncio.CancelledError:
-            manager.update(job, status="cancelled", progress="Search cancelled")
-            raise
-        except Exception as exc:
-            logger.exception("Background search job failed")
-            manager.update(
-                job, status="failed", progress="Search failed", error=str(exc)
-            )
 
     async def _execute_intelligent_search_job(job) -> None:
         manager = _get_search_job_manager()
-        manager.update(job, status="running", progress="Intelligent search running")
-        try:
+        async with job_lifecycle(manager, job, "Intelligent search running"):
             result = await run_intelligent_collection_search(
                 query=job.params["query"],
                 top_k=job.params.get("top_k", 10),
@@ -52,19 +64,6 @@ def register_search_background_tools(mcp: FastMCP):
                 status="completed",
                 progress="Intelligent search completed",
                 result=result,
-            )
-        except asyncio.CancelledError:
-            manager.update(
-                job, status="cancelled", progress="Intelligent search cancelled"
-            )
-            raise
-        except Exception as exc:
-            logger.exception("Background intelligent search job failed")
-            manager.update(
-                job,
-                status="failed",
-                progress="Intelligent search failed",
-                error=str(exc),
             )
 
     @mcp.tool(
