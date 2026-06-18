@@ -3,6 +3,7 @@
 import time
 import json
 import os
+import re
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 
@@ -26,6 +27,9 @@ from kapsula.infrastructure.repositories.chunking.breadcrumb_parser import (
     generate_content_hash,
     validate_subdocuments,
 )
+from kapsula.infrastructure.repositories.chunking.header_matcher import (
+    match_header_to_parents,
+)
 from kapsula.infrastructure.repositories.indexing import DocumentIndexBuilder
 from kapsula.infrastructure.repositories.embedding import HuggingFaceEmbedder
 from kapsula.infrastructure.external.llm.chat_client import HuggingFaceChatClient
@@ -34,6 +38,15 @@ from kapsula.core.application.use_cases.collection_summary import (
 )
 from kapsula.core.application.use_cases.upload.upload_ingestion_strategy_factory import (
     UploadIngestionStrategyFactory,
+)
+from kapsula.infrastructure.repositories.processing.citation_linker import (
+    add_citation_metadata_to_chunks,
+)
+from kapsula.infrastructure.repositories.processing.collection_summary_stage import (
+    update_collection_library_card,
+)
+from kapsula.infrastructure.repositories.processing.aggregate_build_stage import (
+    _rebuild_collection_aggregate_index,
 )
 from kapsula.presentation.upload.maintenance_state_manager import (
     MaintenanceStateManager,
@@ -47,6 +60,31 @@ from kapsula.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+logger = get_logger(__name__)
+
+# Regex to strip image markdown (![alt](url)) and leading Figure labels from
+# structural library card content so previews show real text, not image noise.
+_IMG_MD_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_FIG_LABEL_RE = re.compile(
+    r"^\s*fig(?:ure)?\s*\d*[:.]?\s*", re.IGNORECASE
+)
+
+
+def _strip_section_images(content: str) -> str:
+    """Remove image markdown and leading Figure labels from section content.
+
+    Structural library cards store section text for previews and browsing.
+    Substack avatars/figures dominate the first ~200 chars otherwise, hiding
+    the actual section content. The search index (chunks) is unaffected —
+    the chunker already strips images. This only cleans the card `content`.
+    """
+    if not content:
+        return content
+    cleaned = _IMG_MD_RE.sub("", content)
+    cleaned = _FIG_LABEL_RE.sub("", cleaned, count=1)
+    return cleaned.lstrip()
+
+
 # Global dictionary to track processing progress
 processing_status = {}
 _embedder_singleton = None
@@ -56,218 +94,9 @@ _upload_progress = UploadProgressTracker(processing_status, logger)
 _upload_job_manager = UploadJobManager(_upload_progress)
 
 
-def match_header_to_parents(header: str, parent_sections: dict) -> dict:
-    """
-    Match a chunk's header breadcrumb to parent section hashes.
-
-    Args:
-        header: Breadcrumb path like "API > Auth > Parameters"
-        parent_sections: Dict mapping hashes to parent section data
-
-    Returns:
-        Dict with keys: immediate (H3), chapter (H2), page (H1)
-        Falls back to immediate parent if chapter/page not found.
-
-    Note: Level mapping is H1=level_1, H2=level_2, H3=level_3
-    Context modes: "narrow" uses H3 (immediate), "deep" uses H2 (chapter)
-    """
-    # Split header into parts
-    parts = [p.strip() for p in header.split(">")]
-
-    # Initialize with None
-    parents = {"immediate": None, "chapter": None, "page": None}
-
-    # Track matches for debugging
-    matched_titles = []
-
-    # Match parts to parent sections by title (case-insensitive partial matching)
-    for doc_id, section in parent_sections.items():
-        title = section["title"]
-        level = section["level"]
-
-        # Check if title matches any part of the breadcrumb (case-insensitive)
-        title_lower = title.lower()
-        for part in parts:
-            part_lower = part.lower()
-
-            # Exact match or partial match (title contains part or part contains title)
-            if (
-                title_lower == part_lower
-                or title_lower in part_lower
-                or part_lower in title_lower
-            ):
-                # H3 is the most granular (immediate context for narrow mode)
-                if level == "level_3":
-                    parents["immediate"] = doc_id
-                    matched_titles.append(f"immediate(H3)='{title}'")
-                # H2 is chapter level (deep context mode)
-                elif level == "level_2":
-                    parents["chapter"] = doc_id
-                    matched_titles.append(f"chapter(H2)='{title}'")
-                # H1 is page level (broadest context)
-                elif level == "level_1":
-                    parents["page"] = doc_id
-                    matched_titles.append(f"page(H1)='{title}'")
-                break  # Found a match for this section, move to next
-
-    # Log matches for debugging
-    if matched_titles:
-        logger.debug(f"Matched header '{header}' to: {', '.join(matched_titles)}")
-    else:
-        logger.warning(f"No parent matches found for header '{header}'")
-
-    # Fallback hierarchy: narrow mode (immediate) <- chapter <- page
-    # If immediate (H3) not found, try using chapter (H2)
-    if not parents["immediate"] and parents["chapter"]:
-        parents["immediate"] = parents["chapter"]
-        logger.debug(
-            f"No H3 immediate found for '{header}', using H2 chapter as fallback"
-        )
-
-    # If chapter (H2) not found, try using page (H1)
-    if not parents["chapter"] and parents["page"]:
-        parents["chapter"] = parents["page"]
-        logger.debug(f"No H2 chapter found for '{header}', using H1 page as fallback")
-
-    # If page (H1) not found, use whatever we have
-    if not parents["page"]:
-        if parents["chapter"]:
-            parents["page"] = parents["chapter"]
-        elif parents["immediate"]:
-            parents["page"] = parents["immediate"]
-
-    # Log final result
-    has_any = any(v is not None for v in parents.values())
-    if not has_any:
-        logger.error(
-            f"Failed to find ANY parent for header '{header}' - context expansion will fail!"
-        )
-
-    return parents
-
-
 from kapsula.core.domain.citation_matching import (
     find_chunk_in_markdown,
 )
-
-
-def add_citation_metadata_to_chunks(
-    chunks: List[Dict[str, Any]],
-    parent_sections: Dict[str, Dict[str, str]],
-    markdown_content: str,
-) -> List[Dict[str, Any]]:
-    """
-    Add citation triplet metadata to chunks before they're saved to database.
-
-    For each chunk, finds the matching parent section and calculates:
-    - library_card_doc_id: The doc_id (hash) of the parent section (to be resolved to library_card_id later)
-    - start_char: Character position where chunk starts in the document
-    - end_char: Character position where chunk ends in the document
-    - section_title: Title of the parent section
-    - section_level: Level of the parent section (level_1/2/3)
-
-    Args:
-        chunks: List of chunk dictionaries from MarkdownChunker
-        parent_sections: Dict mapping doc_ids to section data with start_char/end_char
-        markdown_content: Original markdown content
-
-    Returns:
-        List of chunk dictionaries with citation metadata added
-    """
-    logger.info(f"Adding citation metadata to {len(chunks)} chunks")
-
-    for chunk_data in chunks:
-        metadata = chunk_data["metadata"]
-        chunk_content = chunk_data["content"]
-
-        # Find the chunk's position in the original markdown content
-        # Use the first 150 characters of chunk content for matching (more reliable)
-        search_text = chunk_content[:150].strip()
-
-        try:
-            chunk_start_pos = find_chunk_in_markdown(search_text, markdown_content)
-
-            if chunk_start_pos == -1:
-                # Try without header if chunk has one
-                if "\n\n" in chunk_content:
-                    parts = chunk_content.split("\n\n", 1)
-                    if len(parts) > 1:
-                        search_text = parts[1][:150].strip()
-                        chunk_start_pos = find_chunk_in_markdown(
-                            search_text, markdown_content
-                        )
-
-            if chunk_start_pos == -1 and metadata.get("node_type") == "table":
-                # Table chunks are HTML-transformed (Field: X, Desc: Y format).
-                # Try every colon-separated segment as a potential cell value.
-                for line in chunk_content.split("\n"):
-                    # Split on ", " then extract value after ": " in each segment
-                    for segment in line.split(", "):
-                        if ": " in segment:
-                            value_part = segment.split(": ", 1)[-1].strip().rstrip(".")
-                            if len(value_part) > 10:
-                                chunk_start_pos = find_chunk_in_markdown(
-                                    value_part[:150], markdown_content
-                                )
-                                if chunk_start_pos != -1:
-                                    break
-                    if chunk_start_pos != -1:
-                        break
-
-            if chunk_start_pos != -1:
-                chunk_end_pos = chunk_start_pos + len(chunk_content)
-
-                # Find which parent section contains this chunk
-                best_match = None
-                best_match_doc_id = None
-
-                for doc_id, section_data in parent_sections.items():
-                    section_start = section_data.get("start_char", 0)
-                    section_end = section_data.get("end_char", len(markdown_content))
-
-                    # Check if chunk is within this section
-                    if section_start <= chunk_start_pos < section_end:
-                        # Prefer more specific matches (level_1 > level_2 > level_3)
-                        level_priority = {"level_1": 3, "level_2": 2, "level_3": 1}
-                        current_priority = level_priority.get(section_data["level"], 0)
-
-                        if best_match is None or current_priority > level_priority.get(
-                            best_match["level"], 0
-                        ):
-                            best_match = section_data
-                            best_match_doc_id = doc_id
-
-                if best_match and best_match_doc_id:
-                    # Store citation metadata (library_card_id will be resolved during linking)
-                    metadata["citation"] = {
-                        "library_card_doc_id": best_match_doc_id,  # Hash to be resolved to ID later
-                        "start_char": chunk_start_pos,
-                        "end_char": chunk_end_pos,
-                        "section_title": best_match["title"],
-                        "section_level": best_match["level"],
-                    }
-                    logger.debug(
-                        f"Chunk {metadata['chunk_index']}: Citation added (section='{best_match['title']}', pos={chunk_start_pos}-{chunk_end_pos})"
-                    )
-                else:
-                    logger.warning(
-                        f"Chunk {metadata['chunk_index']}: No matching parent section found"
-                    )
-                    metadata["citation"] = None
-            else:
-                logger.warning(
-                    f"Chunk {metadata['chunk_index']}: Could not find chunk position in document"
-                )
-                metadata["citation"] = None
-
-        except Exception as e:
-            logger.error(
-                f"Error adding citation to chunk {metadata.get('chunk_index', '?')}: {e}"
-            )
-            metadata["citation"] = None
-
-    logger.info("Citation metadata added to all chunks")
-    return chunks
 
 
 def process_document(
@@ -919,7 +748,7 @@ def process_document_with_subdocuments(
                     doc_id=doc_id,
                     level=section_data["level"],
                     title=section_data["title"],
-                    content=section_data["content"],
+                    content=_strip_section_images(section_data["content"]),
                     extra_metadata=json.dumps(
                         {
                             "extraction_time": time.time(),
@@ -1159,312 +988,6 @@ def process_document_with_subdocuments(
 
     finally:
         db.close()
-
-
-def update_collection_library_card(document_id: int, db: Session):
-    """
-    Create or update collection library card when a document is added.
-
-    Args:
-        document_id: ID of the document that was just processed
-        db: Database session
-    """
-    # Get document and its library card
-    document = db.query(Document).filter(Document.id == document_id).first()
-    if not document:
-        logger.error(f"Document {document_id} not found")
-        return
-
-    # Get document's main library card
-    doc_card = (
-        db.query(LibraryCard)
-        .filter(LibraryCard.document_id == document_id, LibraryCard.level == "document")
-        .first()
-    )
-
-    if not doc_card:
-        logger.warning(f"No document library card found for document {document_id}")
-        return
-
-    # Get collection
-    collection = (
-        db.query(Collection).filter(Collection.id == document.collection_id).first()
-    )
-    if not collection:
-        logger.error(f"Collection {document.collection_id} not found")
-        return
-
-    # Get existing collection library card
-    existing_collection_card = (
-        db.query(LibraryCard)
-        .filter(
-            LibraryCard.collection_id == collection.id,
-            LibraryCard.level == "collection",
-        )
-        .first()
-    )
-
-    # Parse document metadata
-    doc_metadata = {}
-    if doc_card.extra_metadata:
-        try:
-            doc_metadata = json.loads(doc_card.extra_metadata)
-        except json.JSONDecodeError:
-            logger.warning(
-                f"Failed to parse document library card metadata for document {document_id}"
-            )
-
-    # Initialize summary generator
-    summary_generator = CollectionSummaryGenerator(
-        HuggingFaceChatClient(
-            token=os.getenv("HF_TOKEN", ""),
-            model=os.getenv(
-                "INTELLIGENT_SEARCH_MODEL", "deepseek-ai/DeepSeek-V3.2-Exp"
-            ),
-        )
-    )
-
-    if not existing_collection_card:
-        # Create new collection library card
-        logger.info(
-            f"Creating new collection library card for collection {collection.id}"
-        )
-
-        summary = summary_generator.generate_new_collection_summary(
-            collection_name=collection.name,
-            document_summary=doc_card.content,
-            document_filename=document.filename,
-            document_metadata=doc_metadata,
-        )
-
-        new_card = LibraryCard(
-            collection_id=collection.id,
-            doc_id=f"collection_{collection.id}",
-            level="collection",
-            title=collection.name,
-            content=summary,
-            extra_metadata=json.dumps(
-                {
-                    "document_summaries": [
-                        {
-                            "document_id": document.id,
-                            "filename": document.filename,
-                            "summary": doc_card.content,
-                            "subdocument_count": (
-                                doc_metadata.get("sub_documents", {}).__len__()
-                                if "sub_documents" in doc_metadata
-                                else 0
-                            ),
-                            "page_count": doc_metadata.get("total_pages", 0),
-                        }
-                    ],
-                    "total_documents": 1,
-                    "total_pages": doc_metadata.get("total_pages", 0),
-                    "last_updated": time.time(),
-                    "generation_method": "new",
-                }
-            ),
-        )
-        db.add(new_card)
-        db.commit()
-        logger.info(f"✓ Created collection library card for collection {collection.id}")
-
-    else:
-        # Update existing collection library card
-        logger.info(
-            f"Updating existing collection library card for collection {collection.id}"
-        )
-
-        # Parse existing metadata
-        existing_metadata = {}
-        if existing_collection_card.extra_metadata:
-            try:
-                existing_metadata = json.loads(existing_collection_card.extra_metadata)
-            except json.JSONDecodeError:
-                logger.warning(
-                    "Failed to parse existing collection library card metadata"
-                )
-                existing_metadata = {"document_summaries": []}
-
-        # Get existing document summaries
-        existing_summaries = existing_metadata.get("document_summaries", [])
-
-        # Generate incremental summary
-        summary = summary_generator.generate_incremental_summary(
-            collection_name=collection.name,
-            existing_summary=existing_collection_card.content,
-            existing_documents=existing_summaries,
-            new_document_summary=doc_card.content,
-            new_document_filename=document.filename,
-            new_document_metadata=doc_metadata,
-        )
-
-        # Update metadata
-        existing_summaries.append(
-            {
-                "document_id": document.id,
-                "filename": document.filename,
-                "summary": doc_card.content,
-                "subdocument_count": (
-                    doc_metadata.get("sub_documents", {}).__len__()
-                    if "sub_documents" in doc_metadata
-                    else 0
-                ),
-                "page_count": doc_metadata.get("total_pages", 0),
-            }
-        )
-
-        existing_metadata["document_summaries"] = existing_summaries
-        existing_metadata["total_documents"] = len(existing_summaries)
-        existing_metadata["total_pages"] = sum(
-            s.get("page_count", 0) for s in existing_summaries
-        )
-        existing_metadata["last_updated"] = time.time()
-        existing_metadata["generation_method"] = "incremental"
-
-        # Update card
-        existing_collection_card.content = summary
-        existing_collection_card.extra_metadata = json.dumps(existing_metadata)
-
-        db.commit()
-        logger.info(f"✓ Updated collection library card for collection {collection.id}")
-
-
-def _rebuild_collection_aggregate_index(
-    db: Session,
-    document: Document,
-    job_id: str,
-    upload_start_time: float | None = None,
-) -> None:
-    """Rebuild collection/account aggregate indexes after a full ingestion."""
-    global _embedder_singleton
-    try:
-        from kapsula.infrastructure.repositories.indexing.aggregate_index_builder import (
-            AggregateIndexBuilder,
-        )
-
-        collection = document.collection
-        if not collection:
-            return
-
-        account = collection.account
-        account_guid = account.account_id if account else None
-
-        if _embedder_singleton is None:
-            from kapsula.startup import create_embedder
-
-            _embedder_singleton = create_embedder()
-
-        builder = AggregateIndexBuilder(_embedder_singleton, DATA_DIR)
-
-        completed_collection_chunks = (
-            db.query(Chunk)
-            .join(Document, Chunk.document_id == Document.id)
-            .filter(
-                Document.collection_id == collection.id,
-                Document.status == "completed",
-            )
-            .count()
-        )
-        collection_stage_start = time.time()
-        _upload_progress.set(
-            job_id,
-            status="processing",
-            progress=90,
-            stage="collection_aggregate_index",
-            message=(
-                f"Rebuilding collection aggregate index: {completed_collection_chunks} chunks "
-                f"from collection '{collection.name}' "
-                f"({_upload_progress.elapsed_message(upload_start_time or collection_stage_start)})."
-            ),
-        )
-        builder.build(
-            db,
-            collection_id=collection.id,
-            account_id=account_guid,
-            collection_guid=collection.collection_id,
-        )
-        _upload_progress.log_stage(
-            job_id,
-            "aggregate_collection",
-            collection_stage_start,
-            chunks=completed_collection_chunks,
-            collection_id=collection.collection_id,
-        )
-        logger.info(
-            "Job %s: Collection aggregate index rebuilt for collection '%s'",
-            job_id,
-            collection.name,
-        )
-
-        if account:
-            from kapsula.infrastructure.data.tables.collection import (
-                Collection as CollectionTable,
-            )
-
-            completed_account_chunks = (
-                db.query(Chunk)
-                .join(Document, Chunk.document_id == Document.id)
-                .join(CollectionTable, Document.collection_id == CollectionTable.id)
-                .filter(
-                    CollectionTable.account_id == account.id,
-                    Document.status == "completed",
-                )
-                .count()
-            )
-            account_stage_start = time.time()
-            _upload_progress.set(
-                job_id,
-                status="processing",
-                progress=95,
-                stage="account_aggregate_index",
-                message=(
-                    f"Rebuilding account aggregate index: {completed_account_chunks} chunks "
-                    f"for account '{account.name}' "
-                    f"({_upload_progress.elapsed_message(upload_start_time or account_stage_start)})."
-                ),
-            )
-            builder.build_account(
-                db,
-                account_id=account.id,
-                account_guid=account.account_id,
-            )
-            _upload_progress.log_stage(
-                job_id,
-                "aggregate_account",
-                account_stage_start,
-                chunks=completed_account_chunks,
-                account_id=account.account_id,
-            )
-            logger.info(
-                "Job %s: Account aggregate index rebuilt for account '%s'",
-                job_id,
-                account.name,
-            )
-
-        _upload_progress.set(
-            job_id,
-            status="processing",
-            progress=98,
-            stage="finalizing",
-            message="Aggregate maintenance finished; finalizing upload.",
-        )
-    except Exception as exc:
-        logger.error(
-            "Job %s: Failed to rebuild aggregate index: %s",
-            job_id,
-            exc,
-        )
-        _upload_progress.set(
-            job_id,
-            status="processing",
-            progress=98,
-            stage="finalizing",
-            message=(
-                "Aggregate maintenance failed but document indexing is complete; "
-                "finalizing upload."
-            ),
-        )
 
 
 def get_processing_status(job_id: str) -> dict:
