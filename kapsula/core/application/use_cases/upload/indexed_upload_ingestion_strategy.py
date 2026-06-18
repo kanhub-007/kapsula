@@ -18,6 +18,15 @@ class IndexedUploadIngestionStrategy:
 
     mode = "indexed"
 
+    # ── backward-compat bridges (removed in Slice 2 when tasks.py is rewritten) ─
+    @property
+    def build_document_indexes(self) -> bool:
+        return True
+
+    @property
+    def rebuild_aggregate_indexes(self) -> bool:
+        return False
+
     def build_indexes(self, ctx: UploadPipelineContext) -> None:
         """Build FAISS + BM25 indexes for the document (flat path).
 

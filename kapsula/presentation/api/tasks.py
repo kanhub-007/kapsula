@@ -787,7 +787,7 @@ def process_document_with_subdocuments(
             ingestion_mode=ingestion_mode,
         )
 
-        if ingestion_strategy.update_collection_summary:
+        if ingestion_strategy.mode == "full":
             # Step 4: Update collection library card
             summary_stage_start = time.time()
             _upload_progress.set(

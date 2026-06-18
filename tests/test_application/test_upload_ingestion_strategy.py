@@ -86,21 +86,27 @@ class TestStrategyShape:
                 strategy, method_name
             ), f"{strategy_cls.__name__} missing method {method_name}"
 
-    def test_no_boolean_flag_attributes(self, strategy_cls, expected_mode):
-        """The old boolean flags must be gone (closes P1).
+    def test_strategy_has_methods_not_boolean_dataclass_fields(
+        self, strategy_cls, expected_mode
+    ):
+        """Strategies are plain classes with ctx-taking methods, not frozen
+        dataclasses with boolean fields (closes P1).
 
-        Two old flag names (``build_document_indexes``,
-        ``rebuild_aggregate_indexes``) don't collide with any method name
-        and must be absent entirely. The third (``update_collection_summary``)
-        is intentionally reused as the new method name — verify it's now
-        callable, not a boolean.
+        Backward-compat ``@property`` bridges for the old flag names may
+        exist temporarily (removed in Slice 2 when tasks.py is rewritten),
+        so we assert the strategies are NOT ``@dataclass`` types and that
+        the three ctx-taking methods are callable.
         """
         strategy = strategy_cls()
-        # Non-colliding old flag names — must be gone entirely.
-        assert not hasattr(strategy, "build_document_indexes")
-        assert not hasattr(strategy, "rebuild_aggregate_indexes")
-        # Colliding name — must now be a method, not a boolean.
-        assert callable(getattr(strategy, "update_collection_summary", None))
+        # Not a dataclass — no __dataclass_fields__.
+        assert not hasattr(strategy, "__dataclass_fields__"), (
+            f"{strategy_cls.__name__} is still a @dataclass; should be a plain class"
+        )
+        # All three ctx-taking methods exist and are callable.
+        for method_name in _REQUIRED_METHODS:
+            assert callable(getattr(strategy, method_name, None)), (
+                f"{strategy_cls.__name__} missing callable method {method_name}"
+            )
 
 
 # ── Fast strategy methods are no-ops ─────────────────────────────────

@@ -16,6 +16,15 @@ class FastUploadIngestionStrategy:
 
     mode = "fast"
 
+    # ── backward-compat bridges (removed in Slice 2 when tasks.py is rewritten) ─
+    @property
+    def build_document_indexes(self) -> bool:
+        return False
+
+    @property
+    def rebuild_aggregate_indexes(self) -> bool:
+        return False
+
     def build_indexes(self, ctx: UploadPipelineContext) -> None:
         """No-op: fast mode skips all index building."""
 
