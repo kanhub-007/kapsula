@@ -56,6 +56,12 @@ def _get_reranker():
 
 
 def _get_multi_index_searcher(db):
+    """Create a new MultiIndexSearcher per call — NOT cached.
+
+    The searcher depends on the DB session (which changes per tool call),
+    so caching is not safe here. Use the cached embedder/reranker/chat_client
+    to avoid re-creating expensive infrastructure.
+    """
     from kapsula.startup import create_multi_index_searcher
     return create_multi_index_searcher(
         db_session=db,

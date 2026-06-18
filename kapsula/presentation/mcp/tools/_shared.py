@@ -5,6 +5,8 @@
 
 # ruff: noqa: F401  — this file is a re-export facade; all imports are public API
 
+from kapsula.core.domain.text_processing import parse_node_type_filter as _parse_node_type_filter  # noqa: F401
+
 from ._db import _get_db, _resolve_collection, _resolve_account
 from ._infra import (
     _cached,
@@ -18,10 +20,3 @@ from ._infra import (
     _get_intelligent_searcher,
     _get_search_job_manager,
 )
-
-
-def _parse_node_type_filter(node_type_filter: str | None) -> list[str] | None:
-    if not node_type_filter:
-        return None
-    parsed = [item.strip() for item in node_type_filter.split(",") if item.strip()]
-    return parsed or None

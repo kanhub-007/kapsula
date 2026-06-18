@@ -82,7 +82,7 @@ async def create_collection(
     # If account_id provided, verify it exists and get the account
     account = None
     if account_id:
-        account = db.query(OrmAccount).filter(OrmOrmAccount.account_id == account_id).first()
+        account = db.query(OrmAccount).filter(OrmAccount.account_id == account_id).first()
         if not account:
             logger.warning(f"Account not found: {account_id}")
             raise HTTPException(
@@ -143,7 +143,7 @@ async def upload_collection_logo(
 
     # Get collection
     collection = (
-        db.query(OrmCollection).filter(OrmOrmCollection.collection_id == collection_id).first()
+        db.query(OrmCollection).filter(OrmCollection.collection_id == collection_id).first()
     )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
@@ -193,7 +193,7 @@ async def download_collection_logo(collection_id: str, db: Session = Depends(get
 
     # Get collection
     collection = (
-        db.query(OrmCollection).filter(OrmOrmCollection.collection_id == collection_id).first()
+        db.query(OrmCollection).filter(OrmCollection.collection_id == collection_id).first()
     )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
@@ -273,7 +273,7 @@ async def get_collection(
     logger.debug(f"Getting details for collection: {collection_id}")
 
     collection = (
-        db.query(OrmCollection).filter(OrmOrmCollection.collection_id == collection_id).first()
+        db.query(OrmCollection).filter(OrmCollection.collection_id == collection_id).first()
     )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
@@ -304,7 +304,7 @@ async def list_collection_documents(collection_id: str, db: Session = Depends(ge
     logger.debug(f"Listing documents for collection: {collection_id}")
 
     collection = (
-        db.query(OrmCollection).filter(OrmOrmCollection.collection_id == collection_id).first()
+        db.query(OrmCollection).filter(OrmCollection.collection_id == collection_id).first()
     )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
@@ -355,7 +355,7 @@ async def export_collection_data(
 
     # Get collection
     collection = (
-        db.query(OrmCollection).filter(OrmOrmCollection.collection_id == collection_id).first()
+        db.query(OrmCollection).filter(OrmCollection.collection_id == collection_id).first()
     )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")

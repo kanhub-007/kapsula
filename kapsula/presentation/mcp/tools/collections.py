@@ -187,20 +187,17 @@ def register_collection_tools(mcp: FastMCP):
     @mcp.tool(
         name="run_collection_maintenance",
         description=(
-            "Refresh a collection: regenerate its LLM summary, rebuild collection-level "
-            "and account-level aggregate FAISS+BM25 indexes, and run the consolidation engine "
-            "to generate topic/evolution/gap cards from extracted knowledge. "
-            "Use when list_stale_maintenance() shows a collection needs maintenance, "
-            "or when search results seem incomplete/outdated after deleting or uploading documents. "
+            "Start background collection maintenance: refresh summary, "
+            "rebuild FAISS+BM25 indexes, and run consolidation. "
+            "Returns a maintenance_job_id immediately — poll progress "
+            "with get_maintenance_job(job_id). "
             "This is the all-in-one repair and synthesis tool."
         ),
     )
     def run_collection_maintenance(collection_id: str) -> str:
+        import threading
         db = _get_db()
         try:
-            from kapsula.presentation.upload.collection_maintenance_runner import (
-                CollectionMaintenanceRunner,
-            )
             from kapsula.infrastructure.data import Collection as OrmCollection
 
             col = (
@@ -210,30 +207,105 @@ def register_collection_tools(mcp: FastMCP):
             )
             if not col:
                 return f"Collection not found: {collection_id}"
-            result = CollectionMaintenanceRunner(db).run(col)
-            lines = [
-                "Collection maintenance completed",
-                f"  Collection: {result['collection_name']}",
-                f"  collection_id: {result['collection_id']}",
-                f"  Summary updates: {result['summary_updates']}",
-                f"  Summary failures: {result['summary_failures']}",
-                f"  Collection FAISS: {result['collection_faiss'] or '--'}",
-                f"  Collection BM25: {result['collection_bm25'] or '--'}",
-                f"  Account FAISS: {result['account_faiss'] or '--'}",
-                f"  Account BM25: {result['account_bm25'] or '--'}",
-            ]
-            if result.get("cards_created") or result.get("cards_updated"):
-                lines.append(
-                    f"  Consolidation: {result.get('cards_created', 0)} created, "
-                    f"{result.get('cards_updated', 0)} updated, "
-                    f"{result.get('conflicts_found', 0)} conflicts, "
-                    f"{result.get('gaps_found', 0)} gaps"
-                )
-            if result.get("error"):
-                lines.append(f"  Consolidation error: {result['error']}")
-            return "\n".join(lines)
+
+            from kapsula.presentation.upload.maintenance_runner import (
+                get_maintenance_manager,
+                run_maintenance_in_background,
+            )
+
+            manager = get_maintenance_manager()
+            job = manager.create(
+                collection_id=collection_id,
+                collection_name=col.name,
+            )
+
+            threading.Thread(
+                target=run_maintenance_in_background,
+                args=(job.job_id, collection_id),
+                daemon=True,
+            ).start()
+
+            return (
+                f"Maintenance started for '{col.name}'\n"
+                f"  maintenance_job_id: {job.job_id}\n"
+                f"  Poll progress: get_maintenance_job(\"{job.job_id}\")"
+            )
         finally:
             db.close()
+
+    @mcp.tool(
+        name="get_maintenance_job",
+        description=(
+            "Poll a background maintenance job by job_id. "
+            "Returns status, stage, progress, and result fields on completion. "
+            "Use after run_collection_maintenance() to track progress."
+        ),
+    )
+    def get_maintenance_job(job_id: str) -> str:
+        from kapsula.presentation.upload.maintenance_runner import (
+            get_maintenance_manager,
+        )
+
+        manager = get_maintenance_manager()
+        job = manager.get(job_id)
+        if not job:
+            return f"Maintenance job not found: {job_id}"
+
+        lines = [
+            f"Maintenance Job: {job.job_id}",
+            f"  Collection: {job.collection_name} ({job.collection_id})",
+            f"  Status: {job.status}",
+            f"  Stage: {job.stage}",
+            f"  Progress: {job.progress}",
+        ]
+        if job.status == "completed":
+            lines.append(f"  Summary updates: {job.summary_updates}")
+            lines.append(f"  Summary failures: {job.summary_failures}")
+            lines.append(f"  Collection FAISS: {job.collection_faiss or '--'}")
+            lines.append(f"  Collection BM25: {job.collection_bm25 or '--'}")
+            lines.append(f"  Account FAISS: {job.account_faiss or '--'}")
+            lines.append(f"  Account BM25: {job.account_bm25 or '--'}")
+            if job.cards_created or job.cards_updated:
+                lines.append(
+                    f"  Consolidation: {job.cards_created} created, "
+                    f"{job.cards_updated} updated"
+                )
+            if job.cards_enriched:
+                lines.append(f"  Cards enriched: {job.cards_enriched}")
+        if job.error:
+            lines.append(f"  Error: {job.error}")
+        lines.append(f"  Created: {job.created_at.isoformat()}")
+        lines.append(f"  Updated: {job.updated_at.isoformat()}")
+        return "\n".join(lines)
+
+    @mcp.tool(
+        name="get_collection_maintenance_status",
+        description=(
+            "Show the most recent maintenance job for a collection. "
+            "Returns last job_id, status, stage, and when it ran."
+        ),
+    )
+    def get_collection_maintenance_status(collection_id: str) -> str:
+        from kapsula.presentation.upload.maintenance_runner import (
+            get_maintenance_manager,
+        )
+
+        manager = get_maintenance_manager()
+        job = manager.get_latest_for_collection(collection_id)
+        if not job:
+            return f"No maintenance jobs found for collection: {collection_id}"
+
+        lines = [
+            f"Latest Maintenance — {job.collection_name}",
+            f"  Job ID: {job.job_id}",
+            f"  Status: {job.status}",
+            f"  Stage: {job.stage}",
+            f"  Created: {job.created_at.isoformat()}",
+            f"  Updated: {job.updated_at.isoformat()}",
+        ]
+        if job.error:
+            lines.append(f"  Error: {job.error}")
+        return "\n".join(lines)
 
     @mcp.tool(
         name="get_library_cards",
@@ -328,8 +400,10 @@ def register_collection_tools(mcp: FastMCP):
                     doc_names.get(card.document_id, "?") if card.document_id else "?"
                 )
                 preview = card.content[:200].replace("\n", " ").strip()
+                desc = f" — {card.description}" if getattr(card, "description", None) else ""
                 lines.append(
-                    f"{ind}[{lvl_label}] {card.title} — " f'"{preview}..." ({doc_name})'
+                    f"{ind}[{lvl_label}] {card.title}{desc} — "
+                    f'"{preview}..." ({doc_name})'
                 )
 
             return "\n".join(lines)
