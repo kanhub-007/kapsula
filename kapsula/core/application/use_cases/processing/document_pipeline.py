@@ -8,8 +8,6 @@ DB session management and document status updates.
 import logging
 import time
 
-from kapsula.core.application.use_cases.processing.pipeline_stage import PipelineStage
-
 logger = logging.getLogger(__name__)
 
 

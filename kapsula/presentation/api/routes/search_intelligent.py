@@ -181,92 +181,11 @@ async def intelligent_search_across_collections(
             CollectionSelector,
         )
 
-        # Step 1: Route to the correct collection using existing routing
-        collections_query = db.query(Collection)
-        if account_id:
-            collections_query = collections_query.join(Collection.account).filter(
-                Collection.account.has(account_id=account_id)
-            )
-        collections = collections_query.all()
-
-        if not collections:
-            logger.warning("No collections found")
-            raise HTTPException(status_code=404, detail="No collections available")
-
-        # Use existing routing to find the right collection
-        router = CollectionSelector(create_chat_client())
-        collection_metadata = []
-        for coll in collections:
-            card = (
-                db.query(LibraryCard)
-                .filter(
-                    LibraryCard.collection_id == coll.id,
-                    LibraryCard.level == "collection",
-                )
-                .first()
-            )
-
-            collection_metadata.append(
-                {
-                    "id": coll.id,
-                    "name": coll.name,
-                    "library_card_summary": (
-                        card.content[:500] if card else f"Collection: {coll.name}"
-                    ),
-                    "document_count": len(coll.documents),
-                }
-            )
-
-        routed_collection_ids = router.select(query, collection_metadata)
-        routed_collection_id = (
-            routed_collection_ids[0] if routed_collection_ids else collections[0].id
-        )
-        logger.info(f"Routed to collection ID: {routed_collection_id}")
-
-        # Step 2: Get library cards (document structure) from the routed collection
-        document_structure = []
-        routed_collection = (
-            db.query(Collection).filter(Collection.id == routed_collection_id).first()
+        search_plan, collections, routed_collection = await _prepare_intelligent_search(
+            query, account_id, enable_planning, db
         )
 
-        if routed_collection:
-            # Get all documents in this collection
-            documents = (
-                db.query(Document)
-                .filter(Document.collection_id == routed_collection_id)
-                .all()
-            )
-
-            for doc in documents:
-                # Get subdocuments
-                subdocs = (
-                    db.query(SubDocument)
-                    .filter(SubDocument.document_id == doc.id)
-                    .all()
-                )
-                from kapsula.presentation.shared.document_structure_builder import (
-                    build_document_structure_from_subdocs,
-                )
-                document_structure.extend(
-                    build_document_structure_from_subdocs(subdocs, db)
-                )
-
-        search_plan = None
-
-        # Step 3: Create query plan using library cards (if enabled and structure available)
-        if enable_planning and document_structure:
-            logger.info(
-                f"Creating query plan using {len(document_structure)} sections from routed collection"
-            )
-            planner = create_query_planner()
-            search_plan = planner.plan_document_search(
-                query, document_library_card=None, document_structure=document_structure
-            )
-            logger.info(
-                f"Query plan: {search_plan['strategy']} - {search_plan.get('reasoning', '')}"
-            )
-
-        # Step 4 & 5: Execute searches (routing per sub-question happens automatically) and aggregate
+        # Step 4 & 5: Execute searches and aggregate
         intelligent_engine = create_intelligent_searcher()
 
         # Create search function that searches within the routed collection
@@ -520,95 +439,13 @@ async def intelligent_search_across_collections_streaming(
                 CollectionSelector,
             )
 
-            # Step 1: Route to the correct collection
-            collections_query = db.query(Collection)
-            if account_id:
-                collections_query = collections_query.join(Collection.account).filter(
-                    Collection.account.has(account_id=account_id)
+            try:
+                search_plan, collections, routed_collection = await _prepare_intelligent_search(
+                    query, account_id, enable_planning, db
                 )
-            collections = collections_query.all()
-
-            if not collections:
-                logger.warning("No collections found")
+            except HTTPException:
                 yield f"data: {json.dumps({'event_type': 'error', 'data': {'message': 'No collections available'}})}\n\n"
-                return
-
-            # Use existing routing to find the right collection
-            router = CollectionSelector(create_chat_client())
-            collection_metadata = []
-            for coll in collections:
-                card = (
-                    db.query(LibraryCard)
-                    .filter(
-                        LibraryCard.collection_id == coll.id,
-                        LibraryCard.level == "collection",
-                    )
-                    .first()
-                )
-
-                collection_metadata.append(
-                    {
-                        "id": coll.id,
-                        "name": coll.name,
-                        "library_card_summary": (
-                            card.content[:500] if card else f"Collection: {coll.name}"
-                        ),
-                        "document_count": len(coll.documents),
-                    }
-                )
-
-            routed_collection_ids = router.select(query, collection_metadata)
-            routed_collection_id = (
-                routed_collection_ids[0] if routed_collection_ids else collections[0].id
-            )
-            logger.info(f"Routed to collection ID: {routed_collection_id}")
-
-            # Step 2: Get library cards from the routed collection
-            document_structure = []
-            routed_collection = (
-                db.query(Collection)
-                .filter(Collection.id == routed_collection_id)
-                .first()
-            )
-
-            if routed_collection:
-                documents = (
-                    db.query(Document)
-                    .filter(Document.collection_id == routed_collection_id)
-                    .all()
-                )
-
-                for doc in documents:
-                    subdocs = (
-                        db.query(SubDocument)
-                        .filter(SubDocument.document_id == doc.id)
-                        .all()
-                    )
-                    from kapsula.presentation.shared.document_structure_builder import (
-                        build_document_structure_from_subdocs,
-                    )
-                    document_structure.extend(
-                        build_document_structure_from_subdocs(subdocs, db)
-                    )
-
-            search_plan = None
-
-            # Step 3: Create query plan
-            if enable_planning and document_structure:
-                logger.info(
-                    f"Creating query plan using {len(document_structure)} sections from routed collection"
-                )
-                planner = create_query_planner()
-                search_plan = planner.plan_document_search(
-                    query,
-                    document_library_card=None,
-                    document_structure=document_structure,
-                )
-                logger.info(
-                    f"Query plan: {search_plan['strategy']} - {search_plan.get('reasoning', '')}"
-                )
-
-            # Step 4 & 5: Execute searches with streaming
+            # Step 4 & 5: Execute searches with streaming            # Step 4 & 5: Execute searches with streaming
             intelligent_engine = create_intelligent_searcher()
 
             async def execute_search(search_query: str):

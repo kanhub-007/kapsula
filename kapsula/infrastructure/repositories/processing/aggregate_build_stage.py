@@ -3,7 +3,6 @@
 Extracted from ``presentation/api/tasks.py``.
 """
 
-import os
 import time
 
 from sqlalchemy.orm import Session
