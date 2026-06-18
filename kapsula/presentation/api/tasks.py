@@ -97,6 +97,115 @@ _upload_progress = UploadProgressTracker(processing_status, logger)
 _upload_job_manager = SqlUploadJobRepository()
 
 
+# ── document-processing helpers (extracted from the orchestrators) ─────
+# Each helper is one bounded phase, keeping process_document* readable.
+
+
+def _persist_chunks(
+    db: Session, document_id: int, chunks_with_citations: list[dict]
+) -> None:
+    """Insert chunk rows for a document and commit."""
+    for chunk_data in chunks_with_citations:
+        db.add(
+            Chunk(
+                document_id=document_id,
+                content=chunk_data["content"],
+                chunk_index=chunk_data["metadata"]["chunk_index"],
+                token_count=chunk_data["token_count"],
+                chunk_metadata=json.dumps(chunk_data["metadata"]),
+            )
+        )
+    db.commit()
+
+
+def _persist_parent_cards(
+    db: Session, document: Document, parent_sections: dict
+) -> None:
+    """Insert one LibraryCard per parent section and commit."""
+    for doc_id, section_data in parent_sections.items():
+        db.add(
+            LibraryCard(
+                collection_id=document.collection_id,
+                document_id=document.id,
+                doc_id=doc_id,
+                level=section_data["level"],
+                title=section_data["title"],
+                content=section_data["content"],
+                extra_metadata=json.dumps(
+                    {
+                        "extraction_time": time.time(),
+                        "start_char": section_data.get("start_char", 0),
+                        "end_char": section_data.get("end_char", 0),
+                    }
+                ),
+            )
+        )
+    db.commit()
+
+
+def _mark_job_failed(job_id: str, message: str, db: Session) -> None:
+    """Mark the document failed in DB, in live progress, and in the job table."""
+    logger.exception(message)
+    document = db.query(Document).filter(Document.job_id == job_id).first()
+    if document:
+        document.status = "failed"
+        db.commit()
+    processing_status[job_id] = {
+        "status": "failed",
+        "progress": 0,
+        "stage": "failed",
+        "message": message,
+    }
+    _upload_job_manager.update(
+        job_id,
+        status="failed",
+        progress=0,
+        stage="failed",
+        error=message,
+    )
+
+
+def _link_and_persist_subdoc_chunks(
+    db: Session,
+    document: Document,
+    subdoc: SubDocument,
+    chunks: list[dict],
+    parent_sections: dict,
+) -> dict:
+    """Match each chunk header to parents, persist chunk rows, return link stats."""
+    stats = {
+        "with_immediate": 0,
+        "with_chapter": 0,
+        "with_page": 0,
+        "no_match": 0,
+    }
+    for chunk_data in chunks:
+        header = chunk_data["metadata"].get("header", "")
+        parents = match_header_to_parents(header, parent_sections)
+        chunk_data["metadata"]["parents"] = parents
+
+        if parents.get("immediate"):
+            stats["with_immediate"] += 1
+        if parents.get("chapter"):
+            stats["with_chapter"] += 1
+        if parents.get("page"):
+            stats["with_page"] += 1
+        if not any(parents.values()):
+            stats["no_match"] += 1
+
+        db.add(
+            Chunk(
+                document_id=document.id,
+                sub_document_id=subdoc.id,
+                content=chunk_data["content"],
+                chunk_index=chunk_data["metadata"]["chunk_index"],
+                token_count=chunk_data["token_count"],
+                chunk_metadata=json.dumps(chunk_data["metadata"]),
+            )
+        )
+    return stats
+
+
 def process_document(
     job_id: str,
     markdown_content: str,
@@ -206,17 +315,7 @@ def process_document(
         )
 
         # Save chunks to database
-        for chunk_data in chunks_with_citations:
-            chunk = Chunk(
-                document_id=document.id,
-                content=chunk_data["content"],
-                chunk_index=chunk_data["metadata"]["chunk_index"],
-                token_count=chunk_data["token_count"],
-                chunk_metadata=json.dumps(chunk_data["metadata"]),
-            )
-            db.add(chunk)
-
-        db.commit()
+        _persist_chunks(db, document.id, chunks_with_citations)
         logger.debug(f"Job {job_id}: Chunks saved to database")
 
         # Update progress: Saving parent sections
@@ -229,25 +328,7 @@ def process_document(
         logger.debug(f"Job {job_id}: Saving parent sections to database")
 
         # Save parent sections to database
-        for doc_id, section_data in parent_sections.items():
-            library_card = LibraryCard(
-                collection_id=document.collection_id,
-                document_id=document.id,
-                doc_id=doc_id,
-                level=section_data["level"],
-                title=section_data["title"],
-                content=section_data["content"],
-                extra_metadata=json.dumps(
-                    {
-                        "extraction_time": time.time(),
-                        "start_char": section_data.get("start_char", 0),
-                        "end_char": section_data.get("end_char", 0),
-                    }
-                ),
-            )
-            db.add(library_card)
-
-        db.commit()
+        _persist_parent_cards(db, document, parent_sections)
         logger.debug(f"Job {job_id}: Parent sections saved to database")
 
         _link_chunks_to_parents(
@@ -329,28 +410,7 @@ def process_document(
         logger.info(f"Job {job_id}: SUCCESS - {len(chunks)} chunks in {duration:.2f}s")
 
     except Exception as e:
-        logger.exception(f"Job {job_id}: Processing failed with error: {str(e)}")
-
-        # Update document with error status
-        document = db.query(Document).filter(Document.job_id == job_id).first()
-        if document:
-            document.status = "failed"
-            db.commit()
-
-        # Update progress: Failed
-        processing_status[job_id] = {
-            "status": "failed",
-            "progress": 0,
-            "stage": "failed",
-            "message": f"Processing failed: {str(e)}",
-        }
-        _upload_job_manager.update(
-            job_id,
-            status="failed",
-            progress=0,
-            stage="failed",
-            error=str(e),
-        )
+        _mark_job_failed(job_id, f"Job {job_id}: Processing failed: {e}", db)
 
     finally:
         db.close()
@@ -524,40 +584,9 @@ def process_document_with_subdocuments(
                 )
 
             # Save chunks linked to sub-document
-            subdoc_link_stats = {
-                "with_immediate": 0,
-                "with_chapter": 0,
-                "with_page": 0,
-                "no_match": 0,
-            }
-
-            for chunk_data in chunks:
-                # Match header to parent sections
-                header = chunk_data["metadata"].get("header", "")
-                parents = match_header_to_parents(header, parent_sections)
-
-                # Update metadata with parent pointers
-                chunk_data["metadata"]["parents"] = parents
-
-                # Track linking stats
-                if parents.get("immediate"):
-                    subdoc_link_stats["with_immediate"] += 1
-                if parents.get("chapter"):
-                    subdoc_link_stats["with_chapter"] += 1
-                if parents.get("page"):
-                    subdoc_link_stats["with_page"] += 1
-                if not any(parents.values()):
-                    subdoc_link_stats["no_match"] += 1
-
-                chunk = Chunk(
-                    document_id=document.id,
-                    sub_document_id=subdoc.id,
-                    content=chunk_data["content"],
-                    chunk_index=chunk_data["metadata"]["chunk_index"],
-                    token_count=chunk_data["token_count"],
-                    chunk_metadata=json.dumps(chunk_data["metadata"]),
-                )
-                db.add(chunk)
+            subdoc_link_stats = _link_and_persist_subdoc_chunks(
+                db, document, subdoc, chunks, parent_sections
+            )
 
             logger.info(
                 f"Job {job_id}: Subdoc '{breadcrumb_key}' linking stats - immediate:{subdoc_link_stats['with_immediate']}, chapter:{subdoc_link_stats['with_chapter']}, page:{subdoc_link_stats['with_page']}, no_match:{subdoc_link_stats['no_match']}"
@@ -827,27 +856,8 @@ def process_document_with_subdocuments(
         )
 
     except Exception as e:
-        logger.exception(f"Job {job_id}: Russian Doll processing failed: {str(e)}")
-
-        # Update document with error status
-        document = db.query(Document).filter(Document.job_id == job_id).first()
-        if document:
-            document.status = "failed"
-            db.commit()
-
-        # Update progress: Failed
-        processing_status[job_id] = {
-            "status": "failed",
-            "progress": 0,
-            "stage": "failed",
-            "message": f"Russian Doll processing failed: {str(e)}",
-        }
-        _upload_job_manager.update(
-            job_id,
-            status="failed",
-            progress=0,
-            stage="failed",
-            error=str(e),
+        _mark_job_failed(
+            job_id, f"Job {job_id}: Russian Doll processing failed: {e}", db
         )
 
     finally:
