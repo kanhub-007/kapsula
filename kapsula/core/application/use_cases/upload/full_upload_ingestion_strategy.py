@@ -28,20 +28,12 @@ class FullUploadIngestionStrategy:
         return True
 
     def build_indexes(self, ctx: UploadPipelineContext) -> None:
-        """Build FAISS + BM25 indexes for the document (flat path)."""
-        from kapsula.infrastructure.repositories.processing._chunk_linker import (
-            _build_document_indexes,
+        """Build FAISS + BM25 indexes (flat or per-sub-document)."""
+        from kapsula.infrastructure.repositories.processing.upload_persistence import (
+            build_indexes_for_context,
         )
 
-        _build_document_indexes(
-            ctx.job_id,
-            ctx.document,
-            ctx.chunks,
-            ctx.db,
-            ctx.ingestion_mode,
-            ctx.progress,
-            embedder=ctx.embedder,
-        )
+        build_indexes_for_context(ctx)
 
     def update_collection_summary(self, ctx: UploadPipelineContext) -> None:
         """Regenerate the collection library-card summary via LLM."""

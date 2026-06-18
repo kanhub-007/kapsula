@@ -140,7 +140,9 @@ class CollectionMaintenanceRunner:
     def _refresh_collection_summary(
         self, collection: Collection, progress_callback=None
     ) -> tuple[int, int]:
-        from kapsula.presentation.api.tasks import update_collection_library_card
+        from kapsula.infrastructure.repositories.processing.collection_summary_stage import (
+            update_collection_library_card,
+        )
 
         existing_document_ids = self._existing_summary_document_ids(collection)
         completed_docs = (

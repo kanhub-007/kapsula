@@ -99,17 +99,32 @@ class TestStrategyShape:
         """
         strategy = strategy_cls()
         # Not a dataclass — no __dataclass_fields__.
-        assert not hasattr(strategy, "__dataclass_fields__"), (
-            f"{strategy_cls.__name__} is still a @dataclass; should be a plain class"
-        )
+        assert not hasattr(
+            strategy, "__dataclass_fields__"
+        ), f"{strategy_cls.__name__} is still a @dataclass; should be a plain class"
         # All three ctx-taking methods exist and are callable.
         for method_name in _REQUIRED_METHODS:
-            assert callable(getattr(strategy, method_name, None)), (
-                f"{strategy_cls.__name__} missing callable method {method_name}"
-            )
+            assert callable(
+                getattr(strategy, method_name, None)
+            ), f"{strategy_cls.__name__} missing callable method {method_name}"
 
 
-# ── Fast strategy methods are no-ops ─────────────────────────────────
+# ── Fast strategy methods ────────────────────────────────────────────
+
+
+class _RecordingMaintenanceState:
+    """Records mark_stale / increment calls for outcome assertions."""
+
+    def __init__(self, sink: list):
+        self._sink = sink
+
+    def mark_collection_stale(self, collection, **kwargs):
+        self._sink.append({"method": "mark_collection_stale", "collection": collection})
+
+    def increment_uploads(self, collection_id):
+        self._sink.append(
+            {"method": "increment_uploads", "collection_id": collection_id}
+        )
 
 
 class TestFastStrategyIsNoOp:
@@ -123,10 +138,20 @@ class TestFastStrategyIsNoOp:
         FastUploadIngestionStrategy().update_collection_summary(ctx)
         assert ctx.__dict__ == before
 
-    def test_rebuild_aggregates_does_not_touch_context(self, ctx):
-        before = dict(ctx.__dict__)
+    def test_rebuild_aggregates_marks_deferred_maintenance(self, ctx):
+        """Fast mode skips aggregate rebuild but marks the collection stale
+        so deferred maintenance picks it up (preserves old behaviour).
+        Asserts on the outcome (maintenance state was notified), not on calls."""
+        from kapsula.core.domain.entities.collection import Collection
+
+        recorded = []
+        ctx.maintenance_state = _RecordingMaintenanceState(recorded)
+        ctx.document.collection = Collection(collection_id="coll-x", name="X")
+
         FastUploadIngestionStrategy().rebuild_aggregates(ctx)
-        assert ctx.__dict__ == before
+
+        assert any(call["method"] == "mark_collection_stale" for call in recorded)
+        assert any(call["method"] == "increment_uploads" for call in recorded)
 
 
 # ── factory still works ──────────────────────────────────────────────

@@ -32,9 +32,10 @@ class FastUploadIngestionStrategy:
         """No-op: fast mode skips collection summary regeneration."""
 
     def rebuild_aggregates(self, ctx: UploadPipelineContext) -> None:
-        """No-op: fast mode skips aggregate index rebuilds.
+        """No-op rebuild, but mark the collection stale so deferred
+        maintenance picks it up (preserves the old mark-stale behaviour)."""
+        from kapsula.infrastructure.repositories.processing.upload_persistence import (
+            mark_deferred_maintenance,
+        )
 
-        Maintenance state (mark-stale + increment-uploads) is handled by the
-        pipeline's maintenance step, not by this strategy — it runs for
-        every mode.
-        """
+        mark_deferred_maintenance(ctx, summary=False)

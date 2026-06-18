@@ -54,6 +54,7 @@ class TestUploadPipelineContextFields:
             "parent_sections",
             "chunks",
             "subdocs",
+            "subdoc_plan",
             "duration",
         }
         actual = {f.name for f in fields(UploadPipelineContext)}

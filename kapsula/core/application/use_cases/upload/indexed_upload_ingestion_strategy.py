@@ -28,27 +28,21 @@ class IndexedUploadIngestionStrategy:
         return False
 
     def build_indexes(self, ctx: UploadPipelineContext) -> None:
-        """Build FAISS + BM25 indexes for the document (flat path).
-
-        Sub-document indexes are built by the sub-document chunking strategy
-        in Slice 3; this method handles the flat-document case.
-        """
-        from kapsula.infrastructure.repositories.processing._chunk_linker import (
-            _build_document_indexes,
+        """Build FAISS + BM25 indexes (flat or per-sub-document)."""
+        from kapsula.infrastructure.repositories.processing.upload_persistence import (
+            build_indexes_for_context,
         )
 
-        _build_document_indexes(
-            ctx.job_id,
-            ctx.document,
-            ctx.chunks,
-            ctx.db,
-            ctx.ingestion_mode,
-            ctx.progress,
-            embedder=ctx.embedder,
-        )
+        build_indexes_for_context(ctx)
 
     def update_collection_summary(self, ctx: UploadPipelineContext) -> None:
         """No-op: indexed mode defers collection summary regeneration."""
 
     def rebuild_aggregates(self, ctx: UploadPipelineContext) -> None:
-        """No-op: indexed mode defers aggregate index rebuilds."""
+        """No-op rebuild, but mark the collection stale so deferred
+        maintenance picks it up (preserves the old mark-stale behaviour)."""
+        from kapsula.infrastructure.repositories.processing.upload_persistence import (
+            mark_deferred_maintenance,
+        )
+
+        mark_deferred_maintenance(ctx, summary=False)

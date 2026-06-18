@@ -63,11 +63,11 @@ def temp_env(tmp_path, monkeypatch):
 
     # Patch the module-global SessionLocal and DATA_DIR that tasks.py / repos use.
     import kapsula.infrastructure.data.connection as conn
-    import kapsula.presentation.api.tasks as tasks_mod
 
     monkeypatch.setattr(conn, "SessionLocal", Session)
     monkeypatch.setattr(conn, "DATA_DIR", str(data_dir))
-    monkeypatch.setattr(tasks_mod, "DATA_DIR", str(data_dir))
+    # tasks.py no longer holds DATA_DIR (the pipeline reads it via the index
+    # builder's own connection import); only patch the connection module.
     # The live progress store is module-global; reset it.
     from kapsula.infrastructure.repositories.processing import upload_progress_store
 

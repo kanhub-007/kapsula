@@ -71,6 +71,28 @@ def create_embedder():
     return CachingEmbedder(embedder, namespace=endpoint_url, max_entries=256)
 
 
+def create_upload_pipeline(ingestion_mode: str):
+    """Build the upload pipeline (chunking + ingestion strategies) for a mode.
+
+    Returns ``(pipeline, ingestion_strategy)`` so the caller can build a
+    context and dispatch. The chunking strategy is SubDocument-by-default
+    (falls back to flat internally when no breadcrumbs exist).
+    """
+    from kapsula.core.application.use_cases.upload.subdocument_chunking_strategy import (
+        SubDocumentChunkingStrategy,
+    )
+    from kapsula.core.application.use_cases.upload.upload_ingestion_strategy_factory import (
+        UploadIngestionStrategyFactory,
+    )
+    from kapsula.core.application.use_cases.upload.upload_pipeline import (
+        UploadPipeline,
+    )
+
+    ingestion = UploadIngestionStrategyFactory.create(ingestion_mode)
+    chunking = SubDocumentChunkingStrategy()
+    return UploadPipeline(chunking, ingestion), ingestion
+
+
 def create_chat_client():
     from kapsula.infrastructure.external.llm.chat_client import HuggingFaceChatClient
 

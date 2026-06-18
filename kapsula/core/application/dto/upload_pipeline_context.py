@@ -58,4 +58,8 @@ class UploadPipelineContext:
     parent_sections: dict = field(default_factory=dict)
     chunks: list[dict] = field(default_factory=list)
     subdocs: list[SubDocument] | None = None
+    #: Per-subdocument extraction plan populated by SubDocumentChunkingStrategy:
+    #: each entry carries breadcrumb_key, pages, chunks, parent_sections. The
+    #: persistence step consumes it to create SubDocument rows + linked chunks.
+    subdoc_plan: list[dict] | None = None
     duration: float | None = None
