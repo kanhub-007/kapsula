@@ -329,7 +329,7 @@ pip install -e .
 cp .env.example .env
 # Edit .env and add your HF_TOKEN
 
-# REST API (port 8001)
+# REST API (defaults to 127.0.0.1:8001 — loopback only)
 python -m kapsula.presentation.api
 
 # MCP server (stdio)
@@ -341,6 +341,21 @@ python -m kapsula.presentation.mcp
 > `.venv/bin/python` in the extension before using it with pi.
 
 API docs at `http://localhost:8001/docs`
+
+### Security configuration (before exposing beyond loopback)
+
+By default the REST API binds to `127.0.0.1` and has **no authentication**
+(suitable for local development). Before exposing it on a network, set:
+
+| Variable | Purpose |
+|---|---|
+| `KAPSULA_API_KEY` | Enables API-key auth on every route. Clients send it as `Authorization: Bearer <key>`, `X-API-Key`, or `?api_key=`. Required before binding `0.0.0.0` (the server refuses to start otherwise). |
+| `API_HOST` | Bind address. Defaults to `127.0.0.1`; set to `0.0.0.0` only with `KAPSULA_API_KEY` set. |
+| `KAPSULA_CORS_ORIGINS` | Comma-separated allowed origins (default: loopback). The wildcard `*` is no longer used. |
+
+> Account-scoped authorization (per-tenant data isolation / IDOR prevention)
+> is a follow-up: today a valid API key grants access to all accounts.
+
 
 ---
 
