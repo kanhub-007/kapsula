@@ -160,3 +160,98 @@ class InMemoryTracker(ProgressTracker):
 # Re-use the in-memory repo from the upload tests to avoid needing the temp DB
 # for the pure use-case test (the real SqlDocumentRepository is used above to
 # match production; it talks to the patched in-memory engine).
+
+
+# ── S4.2: per-mode regression (chunk count + index-file count) ─────────
+
+
+class TestPerModePipelineOutputs:
+    """S4.2: the pipeline produces the right chunk + index counts per mode."""
+
+    @pytest.mark.parametrize("mode", ["fast", "indexed"])
+    def test_pipeline_persists_chunks_and_respects_index_mode(
+        self, temp_env, collection, tmp_path, mode
+    ):
+        """For each mode: exactly one set of chunks; index files only when
+        the mode builds indexes (fast → zero, indexed → ≥1 each)."""
+        from kapsula.core.application.dto.upload_pipeline_context import (
+            UploadPipelineContext,
+        )
+        from kapsula.core.application.use_cases.upload.flat_chunking_strategy import (
+            FlatChunkingStrategy,
+        )
+        from kapsula.core.application.use_cases.upload.upload_ingestion_strategy_factory import (
+            UploadIngestionStrategyFactory,
+        )
+        from kapsula.core.application.use_cases.upload.upload_pipeline import (
+            UploadPipeline,
+        )
+        from kapsula.infrastructure.data import Chunk as OrmChunk
+        from kapsula.infrastructure.data import Document as OrmDocument
+        from kapsula.infrastructure.repositories.chunking import MarkdownChunker
+        from kapsula.infrastructure.repositories.processing.upload_progress_store import (
+            processing_status,
+        )
+        from kapsula.infrastructure.repositories.processing.upload_progress_tracker import (
+            UploadProgressTracker,
+        )
+
+        Session = temp_env["Session"]
+        db = Session()
+        try:
+            doc = OrmDocument(
+                job_id="job-per-mode",
+                collection_id=collection.id,
+                filename="doc.md",
+                size=100,
+                content="# Title",
+                status="processing",
+                ip_address="x",
+            )
+            db.add(doc)
+            db.commit()
+            db.refresh(doc)
+
+            markdown = "## Section\n\n" + ("body text enough to chunk.\n\n" * 20)
+            ingestion = UploadIngestionStrategyFactory.create(mode)
+            pipeline = UploadPipeline(FlatChunkingStrategy(), ingestion)
+            ctx = UploadPipelineContext(
+                db=db,
+                document=doc,
+                job_id="job-per-mode",
+                ingestion_mode=mode,
+                start_time=0.0,
+                markdown_content=markdown,
+                chunker=MarkdownChunker(max_tokens=512),
+                embedder=FakeEmbedder(),
+                progress=UploadProgressTracker(
+                    processing_status, __import__("logging").getLogger("t")
+                ),
+                maintenance_state=type(
+                    "M",
+                    (),
+                    {
+                        "mark_collection_stale": staticmethod(lambda *a, **k: None),
+                        "increment_uploads": staticmethod(lambda *a, **k: None),
+                    },
+                )(),
+                card_repo=None,
+                chunk_repo=None,
+            )
+
+            pipeline.run(ctx)
+
+            chunk_rows = db.query(OrmChunk).filter(OrmChunk.document_id == doc.id).all()
+            assert len(chunk_rows) == len(ctx.chunks)
+            assert len(chunk_rows) > 0
+
+            faiss_files = list(temp_env["data_dir"].rglob("*.index"))
+            bm25_files = list(temp_env["data_dir"].rglob("*.pkl"))
+            if mode == "fast":
+                assert faiss_files == []
+                assert bm25_files == []
+            else:  # indexed
+                assert len(faiss_files) >= 1
+                assert len(bm25_files) >= 1
+        finally:
+            db.close()
