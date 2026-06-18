@@ -4,18 +4,18 @@ import asyncio
 
 from fastmcp import FastMCP
 
-from kapsula.infrastructure.data import Document, SubDocument, LibraryCard
+from kapsula.infrastructure.data import Document, SubDocument
 
+from ._search_helpers import (
+    get_topic_card_summary,
+    run_intelligent_collection_search,
+)
 from ._shared import (
     _get_db,
-    _hf_token,
-    _get_query_planner,
-    _get_multi_index_searcher,
     _get_intelligent_searcher,
-)
-from ._search_helpers import (
-    run_intelligent_collection_search,
-    get_topic_card_summary,
+    _get_multi_index_searcher,
+    _get_query_planner,
+    _hf_token,
 )
 
 
@@ -46,8 +46,13 @@ def register_search_intelligent_tools(mcp: FastMCP):
         db = _get_db()
         try:
             return await run_intelligent_collection_search(
-                query, top_k, context_mode, account_id,
-                enable_planning, node_type_filter, db,
+                query,
+                top_k,
+                context_mode,
+                account_id,
+                enable_planning,
+                node_type_filter,
+                db,
             )
         finally:
             db.close()
@@ -69,11 +74,11 @@ def register_search_intelligent_tools(mcp: FastMCP):
         enable_planning: bool = True,
         node_type_filter: str | None = None,
     ) -> str:
-        from kapsula.core.application.dto.sub_document_search import (
-            SubDocumentSearch,
-        )
         from kapsula.core.application.dto.single_index_search import (
             SingleIndexSearch,
+        )
+        from kapsula.core.application.dto.sub_document_search import (
+            SubDocumentSearch,
         )
 
         db = _get_db()
@@ -96,11 +101,14 @@ def register_search_intelligent_tools(mcp: FastMCP):
                     .all()
                 )
                 from kapsula.presentation.shared.document_structure_builder import (
-                    build_document_structure_from_subdocs,
                     build_document_structure_from_document,
+                    build_document_structure_from_subdocs,
                 )
+
                 if subdocs:
-                    document_structure = build_document_structure_from_subdocs(subdocs, db)
+                    document_structure = build_document_structure_from_subdocs(
+                        subdocs, db
+                    )
                 else:
                     document_structure = build_document_structure_from_document(
                         document_id=doc.id,

@@ -11,8 +11,10 @@ from kapsula.infrastructure.data.connection import DATA_DIR
 from kapsula.infrastructure.data.tables.chunk import Chunk
 from kapsula.infrastructure.data.tables.collection import Collection as OrmCollection
 from kapsula.infrastructure.data.tables.document import Document as OrmDocument
-from kapsula.infrastructure.repositories.indexing.aggregate_index_builder import AggregateIndexBuilder
 from kapsula.infrastructure.logging_config import get_logger
+from kapsula.infrastructure.repositories.indexing.aggregate_index_builder import (
+    AggregateIndexBuilder,
+)
 
 logger = get_logger(__name__)
 

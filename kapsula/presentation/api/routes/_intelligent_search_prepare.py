@@ -1,16 +1,41 @@
 """Shared intelligent search preparation logic."""
 
-async def _prepare_intelligent_search(query, account_id, enable_planning, db):
+import logging
+
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
+from kapsula.infrastructure.data.tables.collection import Collection as OrmCollection
+from kapsula.infrastructure.data.tables.document import Document as OrmDocument
+from kapsula.infrastructure.data.tables.library_card import (
+    LibraryCard as OrmLibraryCard,
+)
+from kapsula.infrastructure.data.tables.sub_document import (
+    SubDocument as OrmSubDocument,
+)
+from kapsula.startup import create_chat_client, create_query_planner
+
+logger = logging.getLogger(__name__)
+
+
+async def _prepare_intelligent_search(
+    query: str,
+    account_id: str | None,
+    enable_planning: bool,
+    db: Session,
+):
     """Route to collection, build document structure, create query plan.
-    
+
     Returns (search_plan, collections, routed_collection) tuple or raises HTTPException.
     """
-    from kapsula.core.application.use_cases.selectors.collection_selector import CollectionSelector
+    from kapsula.core.application.use_cases.selectors.collection_selector import (
+        CollectionSelector,
+    )
 
-    collections_query = db.query(Collection)
+    collections_query = db.query(OrmCollection)
     if account_id:
-        collections_query = collections_query.join(Collection.account).filter(
-            Collection.account.has(account_id=account_id)
+        collections_query = collections_query.join(OrmCollection.account).filter(
+            OrmCollection.account.has(account_id=account_id)
         )
     collections = collections_query.all()
 
@@ -22,10 +47,10 @@ async def _prepare_intelligent_search(query, account_id, enable_planning, db):
     collection_metadata = []
     for coll in collections:
         card = (
-            db.query(LibraryCard)
+            db.query(OrmLibraryCard)
             .filter(
-                LibraryCard.collection_id == coll.id,
-                LibraryCard.level == "collection",
+                OrmLibraryCard.collection_id == coll.id,
+                OrmLibraryCard.level == "collection",
             )
             .first()
         )
@@ -44,26 +69,27 @@ async def _prepare_intelligent_search(query, account_id, enable_planning, db):
     routed_collection_id = (
         routed_collection_ids[0] if routed_collection_ids else collections[0].id
     )
-    logger.info(f"Routed to collection ID: {routed_collection_id}")
+    logger.info("Routed to collection ID: %s", routed_collection_id)
 
     routed_collection = (
-        db.query(Collection).filter(Collection.id == routed_collection_id).first()
+        db.query(OrmCollection).filter(OrmCollection.id == routed_collection_id).first()
     )
 
     from kapsula.presentation.shared.document_structure_builder import (
         build_document_structure_from_subdocs,
     )
+
     document_structure = []
     if routed_collection:
         documents = (
-            db.query(Document)
-            .filter(Document.collection_id == routed_collection_id)
+            db.query(OrmDocument)
+            .filter(OrmDocument.collection_id == routed_collection_id)
             .all()
         )
         for doc in documents:
             subdocs = (
-                db.query(SubDocument)
-                .filter(SubDocument.document_id == doc.id)
+                db.query(OrmSubDocument)
+                .filter(OrmSubDocument.document_id == doc.id)
                 .all()
             )
             document_structure.extend(
@@ -73,14 +99,17 @@ async def _prepare_intelligent_search(query, account_id, enable_planning, db):
     search_plan = None
     if enable_planning and document_structure:
         logger.info(
-            f"Creating query plan using {len(document_structure)} sections from routed collection"
+            "Creating query plan using %s sections from routed collection",
+            len(document_structure),
         )
         planner = create_query_planner()
         search_plan = planner.plan_document_search(
             query, document_library_card=None, document_structure=document_structure
         )
         logger.info(
-            f"Query plan: {search_plan['strategy']} - {search_plan.get('reasoning', '')}"
+            "Query plan: %s - %s",
+            search_plan["strategy"],
+            search_plan.get("reasoning", ""),
         )
 
     return search_plan, collections, routed_collection

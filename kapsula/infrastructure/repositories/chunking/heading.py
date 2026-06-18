@@ -1,15 +1,15 @@
 """Heading node for document structure hierarchy."""
 
-from typing import List, Dict, Any
+from typing import Any
 
 
 class Heading:
     def __init__(self, level: int, text: str):
         self.level = level
         self.text = text
-        self.children: List["Heading"] = []
+        self.children: list[Heading] = []
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "level": self.level,
             "text": self.text,

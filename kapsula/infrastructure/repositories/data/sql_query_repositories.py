@@ -12,7 +12,11 @@ from kapsula.core.domain.interfaces.query_repositories import (
 )
 from kapsula.infrastructure.data import (
     Chunk as OrmChunk,
+)
+from kapsula.infrastructure.data import (
     LibraryCard as OrmLibraryCard,
+)
+from kapsula.infrastructure.data import (
     SubDocument as OrmSubDocument,
 )
 from kapsula.infrastructure.repositories.data.mappers import (
@@ -34,11 +38,7 @@ class SqlChunkRepository(ChunkRepository):
         return [chunk_from_orm(c) for c in orm_list]
 
     def count_by_document(self, db: Session, document_id: int) -> int:
-        return (
-            db.query(OrmChunk)
-            .filter(OrmChunk.document_id == document_id)
-            .count()
-        )
+        return db.query(OrmChunk).filter(OrmChunk.document_id == document_id).count()
 
 
 class SqlSubDocumentRepository(SubDocumentRepository):
@@ -56,7 +56,9 @@ class SqlSubDocumentRepository(SubDocumentRepository):
 class SqlLibraryCardRepository(LibraryCardRepository):
     """SQLAlchemy-backed library card queries."""
 
-    def find_collection_card(self, db: Session, collection_id: int) -> DomainCard | None:
+    def find_collection_card(
+        self, db: Session, collection_id: int
+    ) -> DomainCard | None:
         orm = (
             db.query(OrmLibraryCard)
             .filter(

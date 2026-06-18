@@ -7,8 +7,8 @@ All parameters and return values use domain entities from
 from abc import ABC, abstractmethod
 from typing import Any
 
-from kapsula.core.domain.entities.document import Document
 from kapsula.core.domain.entities.collection import Collection
+from kapsula.core.domain.entities.document import Document
 
 
 class DocumentRepository(ABC):

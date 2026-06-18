@@ -14,8 +14,8 @@ from kapsula.infrastructure.repositories.data.sql_collection_repository import (
 from kapsula.infrastructure.repositories.data.sql_document_repository import (
     SqlDocumentRepository,
 )
-from ._shared import _get_db
 
+from ._shared import _get_db
 
 _account_repo = SqlAccountRepository()
 _collection_repo = SqlCollectionRepository()

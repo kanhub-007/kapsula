@@ -3,8 +3,8 @@
 import os
 from unittest.mock import patch
 
-from kapsula.startup.mcp import create_server, get_transport_config
 from kapsula.startup import bootstrap
+from kapsula.startup.mcp import create_server, get_transport_config
 
 
 class TestCreateServer:
@@ -24,8 +24,9 @@ class TestCreateServer:
         """Server should register tools on creation."""
         server = create_server()
         # FastMCP stores tools internally; verify tools list is populated
-        from fastmcp import Client
         import asyncio
+
+        from fastmcp import Client
 
         async def _test():
             async with Client(server) as client:
@@ -41,7 +42,7 @@ class TestCreateServer:
 class TestBootstrap:
     def test_creates_default_account_on_fresh_db(self):
         """Should create a default 'kapsula' account if none exists."""
-        from kapsula.infrastructure.data import SessionLocal, Account
+        from kapsula.infrastructure.data import Account, SessionLocal
 
         db = SessionLocal()
         try:
@@ -61,7 +62,7 @@ class TestBootstrap:
 
     def test_skips_account_creation_if_exists(self):
         """Should not create a duplicate account if one already exists."""
-        from kapsula.infrastructure.data import SessionLocal, Account
+        from kapsula.infrastructure.data import Account, SessionLocal
 
         db = SessionLocal()
         try:
@@ -70,9 +71,7 @@ class TestBootstrap:
             db.commit()
             bootstrap()
 
-            count_before = (
-                db.query(Account).filter(Account.name == "kapsula").count()
-            )
+            count_before = db.query(Account).filter(Account.name == "kapsula").count()
 
             # Bootstrap again
             bootstrap()

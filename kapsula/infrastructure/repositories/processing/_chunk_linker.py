@@ -4,13 +4,16 @@ import json
 import logging
 
 from kapsula.infrastructure.data import Chunk, LibraryCard
-from kapsula.infrastructure.repositories.chunking.header_matcher import match_header_to_parents
+from kapsula.infrastructure.repositories.chunking.header_matcher import (
+    match_header_to_parents,
+)
 
 logger = logging.getLogger(__name__)
 
+
 def _link_chunks_to_parents(job_id, document, parent_sections, db, processing_status):
     """Link chunks to parent sections and resolve citation library_card_ids."""
-# Update progress: Linking chunks to parent sections
+    # Update progress: Linking chunks to parent sections
     processing_status[job_id] = {
         "status": "processing",
         "progress": 70,
@@ -115,14 +118,18 @@ def _link_chunks_to_parents(job_id, document, parent_sections, db, processing_st
         )
 
 
-
-def _build_document_indexes(job_id, document, chunks, db, ingestion_mode, upload_progress):
+def _build_document_indexes(
+    job_id, document, chunks, db, ingestion_mode, upload_progress
+):
     """Build FAISS and BM25 search indexes for a document."""
     import os
     import time
-    from kapsula.infrastructure.repositories.embedding.huggingface_embedder import HuggingFaceEmbedder
-    from kapsula.infrastructure.repositories.indexing import DocumentIndexBuilder
+
     from kapsula.infrastructure.data.connection import DATA_DIR
+    from kapsula.infrastructure.repositories.embedding.huggingface_embedder import (
+        HuggingFaceEmbedder,
+    )
+    from kapsula.infrastructure.repositories.indexing import DocumentIndexBuilder
 
     index_stage_start = time.time()
     upload_progress.set(
@@ -156,11 +163,9 @@ def _build_document_indexes(job_id, document, chunks, db, ingestion_mode, upload
         document.bm25_index_path = index_paths.bm25
         db.commit()
 
-        import logging
-        logging.getLogger(__name__).info("Job %s: Search indexes created successfully", job_id)
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).error("Job %s: Failed to build indexes: %s", job_id, e, exc_info=True)
+        logger.info("Job %s: Search indexes created successfully", job_id)
+    except Exception:
+        logger.exception("Job %s: Failed to build indexes", job_id)
     finally:
         upload_progress.log_stage(
             job_id,

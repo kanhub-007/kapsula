@@ -1,9 +1,10 @@
 """Integration tests for MCP server — tool execution, caching, and async safety."""
 
-import os
 import asyncio
-import pytest
+import os
 from unittest.mock import patch
+
+import pytest
 
 # ── Fixtures ────────────────────────────────────────────────────
 
@@ -43,6 +44,7 @@ class TestMCPHandshake:
     def test_initialize_handshake(self, clean_cache):
         """Server should respond to MCP initialize request."""
         from fastmcp import Client
+
         from kapsula.startup.mcp import create_server
 
         server = create_server()
@@ -58,6 +60,7 @@ class TestMCPHandshake:
     def test_list_tools_returns_registered_tools(self, clean_cache):
         """Tools list should include all registered tools."""
         from fastmcp import Client
+
         from kapsula.startup.mcp import create_server
 
         server = create_server()
@@ -87,7 +90,7 @@ class TestMCPHandshake:
 class TestSingletonCaching:
     def test_chat_client_is_cached(self, clean_cache):
         """Calling _get_chat_client() multiple times returns the same instance."""
-        from kapsula.presentation.mcp.tools import _get_chat_client, _clear_cache
+        from kapsula.presentation.mcp.tools import _clear_cache, _get_chat_client
 
         _clear_cache()
         c1 = _get_chat_client()
@@ -96,7 +99,7 @@ class TestSingletonCaching:
 
     def test_embedder_is_cached(self, clean_cache):
         """HuggingFaceEmbedder should be a singleton — avoids re-init of InferenceClient."""
-        from kapsula.presentation.mcp.tools import _get_embedder, _clear_cache
+        from kapsula.presentation.mcp.tools import _clear_cache, _get_embedder
 
         _clear_cache()
         e1 = _get_embedder()
@@ -105,7 +108,7 @@ class TestSingletonCaching:
 
     def test_reranker_is_cached(self, clean_cache):
         """LocalCrossEncoderReranker should be a singleton — model loaded once."""
-        from kapsula.presentation.mcp.tools import _get_reranker, _clear_cache
+        from kapsula.presentation.mcp.tools import _clear_cache, _get_reranker
 
         _clear_cache()
         r1 = _get_reranker()
@@ -115,8 +118,8 @@ class TestSingletonCaching:
     def test_intelligent_searcher_is_cached(self, clean_cache):
         """Calling _get_intelligent_searcher() multiple times returns the same instance."""
         from kapsula.presentation.mcp.tools import (
-            _get_intelligent_searcher,
             _clear_cache,
+            _get_intelligent_searcher,
         )
 
         _clear_cache()
@@ -126,7 +129,7 @@ class TestSingletonCaching:
 
     def test_query_planner_is_cached(self, clean_cache):
         """Calling _get_query_planner() multiple times returns the same instance."""
-        from kapsula.presentation.mcp.tools import _get_query_planner, _clear_cache
+        from kapsula.presentation.mcp.tools import _clear_cache, _get_query_planner
 
         _clear_cache()
         p1 = _get_query_planner()
@@ -136,12 +139,12 @@ class TestSingletonCaching:
     def test_clear_cache_resets_all(self, clean_cache):
         """After clearing cache, new instances are created for all 5 singletons."""
         from kapsula.presentation.mcp.tools import (
+            _clear_cache,
             _get_chat_client,
             _get_embedder,
-            _get_reranker,
-            _get_query_planner,
             _get_intelligent_searcher,
-            _clear_cache,
+            _get_query_planner,
+            _get_reranker,
         )
 
         _clear_cache()
@@ -166,14 +169,14 @@ class TestSingletonCaching:
 
     def test_multi_index_searcher_reuses_cached_deps(self, clean_cache, mock_hf_token):
         """_get_multi_index_searcher should pass cached singletons to the searcher."""
-        from kapsula.presentation.mcp.tools import (
-            _get_multi_index_searcher,
-            _get_embedder,
-            _get_reranker,
-            _get_chat_client,
-            _clear_cache,
-        )
         from kapsula.presentation.mcp.db import get_db_session
+        from kapsula.presentation.mcp.tools import (
+            _clear_cache,
+            _get_chat_client,
+            _get_embedder,
+            _get_multi_index_searcher,
+            _get_reranker,
+        )
 
         _clear_cache()
 
@@ -192,6 +195,7 @@ class TestAccountTools:
     def test_create_and_list_accounts(self, clean_cache):
         """Create an account and verify it appears in list."""
         from fastmcp import Client
+
         from kapsula.startup.mcp import create_server
 
         server = create_server()
@@ -222,6 +226,7 @@ class TestAccountTools:
     def test_get_account_details(self, clean_cache):
         """Get account should return details including collections."""
         from fastmcp import Client
+
         from kapsula.startup.mcp import create_server
 
         server = create_server()
@@ -253,6 +258,7 @@ class TestCollectionTools:
     def test_create_and_list_collections(self, clean_cache):
         """Create a collection and verify it appears."""
         from fastmcp import Client
+
         from kapsula.startup.mcp import create_server
 
         server = create_server()
@@ -277,6 +283,7 @@ class TestCollectionTools:
     def test_get_collection_details(self, clean_cache):
         """Get collection should return details and document count."""
         from fastmcp import Client
+
         from kapsula.startup.mcp import create_server
 
         server = create_server()
@@ -305,6 +312,7 @@ class TestCollectionTools:
     def test_create_collection_with_account(self, clean_cache):
         """Create a collection tied to a specific account."""
         from fastmcp import Client
+
         from kapsula.startup.mcp import create_server
 
         server = create_server()
@@ -339,6 +347,7 @@ class TestSearchTools:
         """search_documents raises ToolError when HF_TOKEN is missing."""
         from fastmcp import Client
         from fastmcp.exceptions import ToolError
+
         from kapsula.startup.mcp import create_server
 
         # Clear HF_TOKEN so embedder creation fails
@@ -358,6 +367,7 @@ class TestSearchTools:
         """intelligent_search should return an error when HF_TOKEN is not set."""
         with patch.dict(os.environ, {}, clear=True):
             from fastmcp import Client
+
             from kapsula.startup.mcp import create_server
 
             server = create_server()
@@ -381,6 +391,7 @@ class TestSearchTools:
         operations are properly offloaded to thread pools.
         """
         from fastmcp import Client
+
         from kapsula.startup.mcp import create_server
 
         server = create_server()
@@ -417,6 +428,7 @@ class TestDocumentTools:
     def test_upload_nonexistent_file(self, clean_cache):
         """Uploading a non-existent file should return an error."""
         from fastmcp import Client
+
         from kapsula.startup.mcp import create_server
 
         server = create_server()
@@ -437,6 +449,7 @@ class TestDocumentTools:
     def test_list_documents_returns_list(self, clean_cache):
         """Listing documents should return a valid list (may contain existing data)."""
         from fastmcp import Client
+
         from kapsula.startup.mcp import create_server
 
         server = create_server()
@@ -455,6 +468,7 @@ class TestDocumentTools:
     def test_list_documents_filter_by_collection(self, clean_cache):
         """Filtering by collection that doesn't exist returns message."""
         from fastmcp import Client
+
         from kapsula.startup.mcp import create_server
 
         server = create_server()

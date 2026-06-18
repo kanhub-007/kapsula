@@ -2,52 +2,40 @@
 
 import json
 import os
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from kapsula.core.application.dto.collection_search import CollectionSearch
 from kapsula.infrastructure.data.connection import get_db
 from kapsula.infrastructure.logging_config import get_logger
+from kapsula.presentation.api.search_presenter import (
+    collect_unique_citations,
+)
+from kapsula.startup import (
+    create_intelligent_searcher,
+    create_multi_index_searcher,
+)
+
+from ..models import (
+    IntelligentCollectionSearchResponse,
+    SearchPlan,
+)
+from ._intelligent_search_prepare import _prepare_intelligent_search
 from .search_helpers import extract_citation_from_result
 
 logger = get_logger(__name__)
 router = APIRouter()
 
-from ._intelligent_search_prepare import _prepare_intelligent_search
 
-from kapsula.core.application.dto.collection_search import CollectionSearch
-from kapsula.core.domain.text_processing import parse_node_type_filter
-from kapsula.infrastructure.data.tables.collection import Collection
-from kapsula.infrastructure.data.tables.document import Document
-from kapsula.infrastructure.data.tables.library_card import LibraryCard
-from kapsula.infrastructure.data.tables.sub_document import SubDocument
-from kapsula.presentation.api.search_presenter import (
-    build_collection_search_response,
-    collect_unique_citations,
-)
-from kapsula.startup import (
-    create_multi_index_searcher,
-    create_query_planner,
-    create_intelligent_searcher,
-    create_chat_client,
-)
-from ..models import (
-    CollectionSearchResponse,
-    IntelligentCollectionSearchResponse,
-    SearchPlan,
-    SubAnswer,
-    Citation,
-)
 @router.post(
     "/intelligent_search/collections",
     response_model=IntelligentCollectionSearchResponse,
 )
-
 async def intelligent_search_across_collections(
     query: str = Query(..., description="Search query"),
-    account_id: Optional[str] = Query(
+    account_id: str | None = Query(
         None, description="Account ID to search within (optional)"
     ),
     top_k: int = Query(10, ge=1, le=100, description="Number of results to return"),
@@ -85,9 +73,6 @@ async def intelligent_search_across_collections(
 
     try:
         # Import routing functionality
-        from kapsula.core.application.use_cases.selectors.collection_selector import (
-            CollectionSelector,
-        )
 
         search_plan, collections, routed_collection = await _prepare_intelligent_search(
             query, account_id, enable_planning, db
@@ -179,7 +164,7 @@ async def intelligent_search_across_collections(
         )
 
     except Exception as e:
-        logger.error(f"Intelligent collection search failed: {e}", exc_info=True)
+        logger.exception(f"Intelligent collection search failed: {e}")
         raise HTTPException(
             status_code=500, detail=f"Intelligent collection search failed: {str(e)}"
         )
@@ -188,7 +173,7 @@ async def intelligent_search_across_collections(
 @router.post("/intelligent_search/collections/stream")
 async def intelligent_search_across_collections_streaming(
     query: str = Query(..., description="Search query"),
-    account_id: Optional[str] = Query(
+    account_id: str | None = Query(
         None, description="Account ID to search within (optional)"
     ),
     top_k: int = Query(10, ge=1, le=100, description="Number of results to return"),
@@ -343,13 +328,12 @@ async def intelligent_search_across_collections_streaming(
     async def event_generator():
         try:
             # Import routing functionality
-            from kapsula.core.application.use_cases.selectors.collection_selector import (
-                CollectionSelector,
-            )
 
             try:
-                search_plan, collections, routed_collection = await _prepare_intelligent_search(
-                    query, account_id, enable_planning, db
+                search_plan, collections, routed_collection = (
+                    await _prepare_intelligent_search(
+                        query, account_id, enable_planning, db
+                    )
                 )
             except HTTPException:
                 yield f"data: {json.dumps({'event_type': 'error', 'data': {'message': 'No collections available'}})}\n\n"
@@ -394,7 +378,9 @@ async def intelligent_search_across_collections_streaming(
                     unique_citations = collect_unique_citations(all_citations)
 
                     # Add citations to the final data
-                    event["data"]["citations"] = [c.model_dump() for c in unique_citations]
+                    event["data"]["citations"] = [
+                        c.model_dump() for c in unique_citations
+                    ]
                     event["data"]["account_id"] = account_id
                     event["data"]["context_mode"] = context_mode
 
@@ -404,9 +390,7 @@ async def intelligent_search_across_collections_streaming(
             logger.info("Streaming intelligent collection search completed")
 
         except Exception as e:
-            logger.error(
-                f"Streaming intelligent collection search failed: {e}", exc_info=True
-            )
+            logger.exception(f"Streaming intelligent collection search failed: {e}")
             yield f"data: {json.dumps({'event_type': 'error', 'data': {'message': str(e)}})}\n\n"
 
     return StreamingResponse(
@@ -417,5 +401,3 @@ async def intelligent_search_across_collections_streaming(
             "Connection": "keep-alive",
         },
     )
-
-

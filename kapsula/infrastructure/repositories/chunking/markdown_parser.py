@@ -1,12 +1,11 @@
 """Markdown parser — produces domain Elements from raw markdown."""
 
-from typing import List
-
 from unstructured.partition.md import partition_md
+
+from kapsula.infrastructure.logging_config import get_logger
 
 from .content_block import ContentBlock
 from .element_adapter import adapt
-from kapsula.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
 
@@ -14,7 +13,7 @@ logger = get_logger(__name__)
 class MarkdownParser:
     """Parses markdown into domain Elements."""
 
-    def parse(self, content: str) -> List[ContentBlock]:
+    def parse(self, content: str) -> list[ContentBlock]:
         raw = partition_md(text=content)
         logger.info(f"Parsed {len(raw)} elements from markdown")
 

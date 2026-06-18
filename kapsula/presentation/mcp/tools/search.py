@@ -5,9 +5,9 @@
 
 from fastmcp import FastMCP
 
+from .search_background import register_search_background_tools
 from .search_documents import register_search_document_tools
 from .search_intelligent import register_search_intelligent_tools
-from .search_background import register_search_background_tools
 
 
 def register_search_tools(mcp: FastMCP):

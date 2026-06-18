@@ -8,8 +8,8 @@ from kapsula.core.domain.entities.account import Account
 from kapsula.infrastructure.repositories.data.sql_account_repository import (
     SqlAccountRepository,
 )
-from ._shared import _get_db
 
+from ._shared import _get_db
 
 _account_repo = SqlAccountRepository()
 

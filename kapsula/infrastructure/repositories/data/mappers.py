@@ -6,10 +6,38 @@ Nested relationships are NOT eagerly mapped to avoid cycles.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def document_to_orm(domain):
+from sqlalchemy.exc import MissingGreenlet
+from sqlalchemy.orm.exc import DetachedInstanceError
+
+from kapsula.infrastructure.logging_config import get_logger
+
+if TYPE_CHECKING:
+    from kapsula.core.domain.entities.account import Account as DomainAccount
+    from kapsula.core.domain.entities.chunk import Chunk as DomainChunk
+    from kapsula.core.domain.entities.collection import Collection as DomainCollection
+    from kapsula.core.domain.entities.document import Document as DomainDocument
+    from kapsula.core.domain.entities.sub_document import (
+        SubDocument as DomainSubDocument,
+    )
+    from kapsula.infrastructure.data.tables.account import Account as OrmAccount
+    from kapsula.infrastructure.data.tables.chunk import Chunk as OrmChunk
+    from kapsula.infrastructure.data.tables.collection import (
+        Collection as OrmCollection,
+    )
+    from kapsula.infrastructure.data.tables.document import Document as OrmDocument
+    from kapsula.infrastructure.data.tables.sub_document import (
+        SubDocument as OrmSubDocument,
+    )
+
+logger = get_logger(__name__)
+
+
+def document_to_orm(domain: DomainDocument) -> OrmDocument:
     """Convert domain Document to ORM Document for persistence."""
     from kapsula.infrastructure.data.tables.document import Document as OrmDocument
+
     return OrmDocument(
         id=domain.id,
         job_id=domain.job_id,
@@ -27,15 +55,16 @@ def document_to_orm(domain):
     )
 
 
-def document_from_orm(orm) -> "domain_doc.Document":
+def document_from_orm(orm: OrmDocument) -> DomainDocument:
     """Convert ORM Document to domain Document (collection populated, no nested docs)."""
     from kapsula.core.domain.entities.document import Document
+
     collection = None
     try:
         if orm.collection is not None:
             collection = _collection_from_orm_safe(orm.collection)
-    except Exception:
-        pass
+    except (DetachedInstanceError, MissingGreenlet, AttributeError) as exc:
+        logger.debug("Document.collection relationship unavailable: %s", exc)
     return Document(
         id=orm.id,
         job_id=orm.job_id,
@@ -56,9 +85,12 @@ def document_from_orm(orm) -> "domain_doc.Document":
     )
 
 
-def collection_to_orm(domain):
+def collection_to_orm(domain: DomainCollection) -> OrmCollection:
     """Convert domain Collection to ORM Collection."""
-    from kapsula.infrastructure.data.tables.collection import Collection as OrmCollection
+    from kapsula.infrastructure.data.tables.collection import (
+        Collection as OrmCollection,
+    )
+
     return OrmCollection(
         id=domain.id,
         collection_id=domain.collection_id,
@@ -70,15 +102,16 @@ def collection_to_orm(domain):
     )
 
 
-def collection_from_orm(orm) -> "domain_coll.Collection":
+def collection_from_orm(orm: OrmCollection) -> DomainCollection:
     """Convert ORM Collection to domain Collection (account populated, no nested docs)."""
     from kapsula.core.domain.entities.collection import Collection
+
     account = None
     try:
         if orm.account is not None:
             account = _account_from_orm_safe(orm.account)
-    except Exception:
-        pass
+    except (DetachedInstanceError, MissingGreenlet, AttributeError) as exc:
+        logger.debug("Collection.account relationship unavailable: %s", exc)
     return Collection(
         id=orm.id,
         collection_id=orm.collection_id,
@@ -92,9 +125,10 @@ def collection_from_orm(orm) -> "domain_coll.Collection":
     )
 
 
-def account_to_orm(domain):
+def account_to_orm(domain: DomainAccount) -> OrmAccount:
     """Convert domain Account to ORM Account."""
     from kapsula.infrastructure.data.tables.account import Account as OrmAccount
+
     return OrmAccount(
         id=domain.id,
         account_id=domain.account_id,
@@ -104,15 +138,16 @@ def account_to_orm(domain):
     )
 
 
-def account_from_orm(orm) -> "domain_acct.Account":
+def account_from_orm(orm: OrmAccount) -> DomainAccount:
     """Convert ORM Account to domain Account (collections shallow, depth 2)."""
     from kapsula.core.domain.entities.account import Account
+
     colls = []
     try:
         if orm.collections:
             colls = [_collection_from_orm_shallow(c) for c in orm.collections]
-    except Exception:
-        pass
+    except (DetachedInstanceError, MissingGreenlet, AttributeError) as exc:
+        logger.debug("Account.collections relationship unavailable: %s", exc)
     return Account(
         id=orm.id,
         account_id=orm.account_id,
@@ -123,9 +158,10 @@ def account_from_orm(orm) -> "domain_acct.Account":
     )
 
 
-def chunk_from_orm(orm) -> "domain_chunk.Chunk":
+def chunk_from_orm(orm: OrmChunk) -> DomainChunk:
     """Convert ORM Chunk to domain Chunk."""
     from kapsula.core.domain.entities.chunk import Chunk
+
     return Chunk(
         id=orm.id,
         document_id=orm.document_id,
@@ -138,9 +174,10 @@ def chunk_from_orm(orm) -> "domain_chunk.Chunk":
     )
 
 
-def sub_document_from_orm(orm) -> "domain_sd.SubDocument":
+def sub_document_from_orm(orm: OrmSubDocument) -> DomainSubDocument:
     """Convert ORM SubDocument to domain SubDocument."""
     from kapsula.core.domain.entities.sub_document import SubDocument
+
     return SubDocument(
         id=orm.id,
         document_id=orm.document_id,
@@ -156,18 +193,19 @@ def sub_document_from_orm(orm) -> "domain_sd.SubDocument":
 # ── safe shallow mappers (no further nesting, break cycles) ──
 
 
-def _collection_from_orm_safe(orm) -> "domain_coll.Collection":
+def _collection_from_orm_safe(orm: OrmCollection) -> DomainCollection:
     """Collection with account (but account flat — no collections).
-    
+
     Safe for Document→Collection→Account path.  Account has collections=[].
     """
     from kapsula.core.domain.entities.collection import Collection
+
     account = None
     try:
         if orm.account is not None:
             account = _account_from_orm_safe(orm.account)
-    except Exception:
-        pass
+    except (DetachedInstanceError, MissingGreenlet, AttributeError) as exc:
+        logger.debug("Collection.account relationship unavailable (safe path): %s", exc)
     return Collection(
         id=orm.id,
         collection_id=orm.collection_id,
@@ -181,9 +219,10 @@ def _collection_from_orm_safe(orm) -> "domain_coll.Collection":
     )
 
 
-def _account_from_orm_safe(orm) -> "domain_acct.Account":
+def _account_from_orm_safe(orm: OrmAccount) -> DomainAccount:
     """Account without collections (safe for Collection→Account path)."""
     from kapsula.core.domain.entities.account import Account
+
     return Account(
         id=orm.id,
         account_id=orm.account_id,
@@ -194,9 +233,10 @@ def _account_from_orm_safe(orm) -> "domain_acct.Account":
     )
 
 
-def _collection_from_orm_shallow(orm) -> "domain_coll.Collection":
+def _collection_from_orm_shallow(orm: OrmCollection) -> DomainCollection:
     """Collection without account (safe for Account→Collection[] path)."""
     from kapsula.core.domain.entities.collection import Collection
+
     return Collection(
         id=orm.id,
         collection_id=orm.collection_id,

@@ -1,7 +1,7 @@
 """Chunking pipeline — accumulates text, flushes chunks, handles token limits."""
 
-from .markdown_utils import count_tokens
 from .chunk_state import ChunkState
+from .markdown_utils import count_tokens
 
 
 class ChunkPipeline:

@@ -5,8 +5,8 @@ import json
 from sqlalchemy.orm import Session
 
 from kapsula.infrastructure.data import (
-    Collection,
     DATA_DIR,
+    Collection,
     Document,
     LibraryCard,
     SessionLocal,
@@ -78,11 +78,10 @@ class CollectionMaintenanceRunner:
                     consolidation_result = runner.run()
                     state_mgr.mark_consolidated(collection.collection_id)
                 except Exception as exc:
-                    logger.error(
+                    logger.exception(
                         "Consolidation failed for collection %s: %s",
                         collection.collection_id,
                         exc,
-                        exc_info=True,
                     )
                     consolidation_result = {"error": str(exc)}
 
@@ -112,9 +111,7 @@ class CollectionMaintenanceRunner:
     ) -> dict:
         """Enrich terse structural titles with one-line descriptions (Slice 2)."""
         if progress_callback:
-            progress_callback(
-                "enriching", "Enriching structural card titles...", ""
-            )
+            progress_callback("enriching", "Enriching structural card titles...", "")
         try:
             from kapsula.infrastructure.repositories.processing.card_enricher import (
                 CardEnricher,
@@ -129,11 +126,10 @@ class CollectionMaintenanceRunner:
             )
             return enricher.run()
         except Exception as exc:
-            logger.error(
+            logger.exception(
                 "Card enrichment failed for collection %s: %s",
                 collection.collection_id,
                 exc,
-                exc_info=True,
             )
             return {"enriched": 0, "failed": 0}
 
@@ -172,11 +168,10 @@ class CollectionMaintenanceRunner:
                 successes += 1
             except Exception as exc:
                 failures += 1
-                logger.error(
+                logger.exception(
                     "Collection maintenance failed to summarize document %s: %s",
                     document.job_id,
                     exc,
-                    exc_info=True,
                 )
         return successes, failures
 

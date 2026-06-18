@@ -2,6 +2,7 @@
 
 import logging
 import os
+
 from huggingface_hub import InferenceClient
 from huggingface_hub.errors import HfHubHTTPError
 
@@ -40,5 +41,5 @@ class HuggingFaceChatClient:
             )
             raise
         except Exception as e:
-            logger.error(f"LLM call failed: {e}", exc_info=True)
+            logger.exception(f"LLM call failed: {e}")
             raise

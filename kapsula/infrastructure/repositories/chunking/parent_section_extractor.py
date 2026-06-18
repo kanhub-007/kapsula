@@ -2,14 +2,13 @@
 
 import hashlib
 import re
-from typing import Dict
 
 from kapsula.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
-def extract_parent_sections(markdown_content: str) -> Dict[str, Dict[str, str]]:
+def extract_parent_sections(markdown_content: str) -> dict[str, dict[str, str]]:
     lines = markdown_content.split("\n")
     sections: dict = {}
     active: dict[int, dict | None] = {1: None, 2: None, 3: None}
@@ -54,7 +53,7 @@ def extract_parent_sections(markdown_content: str) -> Dict[str, Dict[str, str]]:
 def _close_section(sections: dict, active: dict, level: int, end_char: int) -> None:
     data = active[level]
     content = "\n".join(data["content_lines"]).strip()
-    hash_input = f"level_{data['level']}:{data['title']}".encode("utf-8")
+    hash_input = f"level_{data['level']}:{data['title']}".encode()
     doc_id = hashlib.sha256(hash_input).hexdigest()
     sections[doc_id] = {
         "level": f"level_{data['level']}",

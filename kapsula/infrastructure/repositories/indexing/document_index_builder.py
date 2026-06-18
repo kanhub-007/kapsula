@@ -2,14 +2,14 @@
 
 import os
 import pickle
-from typing import List, Dict, Any
+from typing import Any
 
 import faiss
 from rank_bm25 import BM25Plus
 
 from kapsula.core.domain.entities.index_paths import IndexPaths
-from kapsula.core.domain.text_processing import tokenize, is_meaningful_chunk
 from kapsula.core.domain.interfaces import Embedder
+from kapsula.core.domain.text_processing import is_meaningful_chunk, tokenize
 from kapsula.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -30,7 +30,7 @@ class DocumentIndexBuilder:
 
     def build(
         self,
-        chunks: List[Dict[str, Any]],
+        chunks: list[dict[str, Any]],
         job_id: str,
         *,
         account_id: str | None = None,
@@ -58,7 +58,7 @@ class DocumentIndexBuilder:
 
     def build_from_embeddings(
         self,
-        chunks: List[Dict[str, Any]],
+        chunks: list[dict[str, Any]],
         embeddings,
         job_id: str,
         *,
@@ -86,7 +86,7 @@ class DocumentIndexBuilder:
             bm25=self._build_bm25(texts, job_id, indexes_dir),
         )
 
-    def embed_texts(self, texts: List[str]):
+    def embed_texts(self, texts: list[str]):
         """Embed texts using the configured embedder."""
         logger.info(f"Generating embeddings for {len(texts)} chunks")
         embeddings = self._embedder.embed(texts)
@@ -94,8 +94,8 @@ class DocumentIndexBuilder:
         return embeddings
 
     def filter_chunks(
-        self, chunks: List[Dict[str, Any]], min_length: int = 50
-    ) -> List[Dict[str, Any]]:
+        self, chunks: list[dict[str, Any]], min_length: int = 50
+    ) -> list[dict[str, Any]]:
         kept = [
             c
             for c in chunks
@@ -138,7 +138,7 @@ class DocumentIndexBuilder:
         logger.info(f"FAISS index created at: {path}")
         return path
 
-    def _build_bm25(self, texts: List[str], job_id: str, indexes_dir: str) -> str:
+    def _build_bm25(self, texts: list[str], job_id: str, indexes_dir: str) -> str:
         logger.debug(f"Building BM25 index for {len(texts)} chunks")
 
         corpus = [tokenize(t) for t in texts]

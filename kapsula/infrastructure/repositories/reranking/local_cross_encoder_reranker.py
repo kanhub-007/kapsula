@@ -1,7 +1,7 @@
 """Local cross-encoder reranker using sentence-transformers."""
 
 import asyncio
-from typing import List, Dict, Any
+from typing import Any
 
 from kapsula.infrastructure.logging_config import get_logger
 
@@ -27,8 +27,8 @@ class LocalCrossEncoderReranker:
             self._model = CrossEncoder(self._model_name, max_length=512)
 
     async def rerank(
-        self, query: str, candidates: List[Dict[str, Any]], top_k: int
-    ) -> List[Dict[str, Any]]:
+        self, query: str, candidates: list[dict[str, Any]], top_k: int
+    ) -> list[dict[str, Any]]:
         if not candidates:
             return []
 

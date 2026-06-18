@@ -2,15 +2,15 @@
 Breadcrumb parser for extracting hierarchical document structure from H1 headers.
 """
 
-import re
-import logging
-from typing import Dict, List, Any
 import hashlib
+import logging
+import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def parse_breadcrumb(header: str) -> Dict[str, Any]:
+def parse_breadcrumb(header: str) -> dict[str, Any]:
     """
     Parse H1 breadcrumb header.
 
@@ -69,7 +69,7 @@ def parse_breadcrumb(header: str) -> Dict[str, Any]:
     }
 
 
-def extract_subdocuments(markdown_content: str) -> Dict[str, List[Dict[str, Any]]]:
+def extract_subdocuments(markdown_content: str) -> dict[str, list[dict[str, Any]]]:
     """
     Split markdown into sub-documents based on breadcrumb structure.
 
@@ -156,7 +156,7 @@ def generate_content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
 
 
-def validate_subdocuments(subdocuments: Dict[str, List[Dict[str, Any]]]) -> bool:
+def validate_subdocuments(subdocuments: dict[str, list[dict[str, Any]]]) -> bool:
     """
     Validate that subdocuments have valid structure.
 

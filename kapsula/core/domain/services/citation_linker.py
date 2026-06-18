@@ -1,7 +1,7 @@
 """Add citation triplet metadata to chunks before persistence."""
 
 import logging
-from typing import List, Dict, Any
+from typing import Any
 
 from kapsula.core.domain.citation_matching import find_chunk_in_markdown
 
@@ -9,10 +9,10 @@ logger = logging.getLogger(__name__)
 
 
 def add_citation_metadata_to_chunks(
-    chunks: List[Dict[str, Any]],
-    parent_sections: Dict[str, Dict[str, str]],
+    chunks: list[dict[str, Any]],
+    parent_sections: dict[str, dict[str, str]],
     markdown_content: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Add citation triplet metadata to chunks before they're saved to database.
 
@@ -125,5 +125,3 @@ def add_citation_metadata_to_chunks(
 
     logger.info("Citation metadata added to all chunks")
     return chunks
-
-

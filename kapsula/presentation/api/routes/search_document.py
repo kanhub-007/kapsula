@@ -2,42 +2,35 @@
 
 import json
 import os
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from kapsula.core.application.dto.single_index_search import SingleIndexSearch
+from kapsula.core.application.dto.sub_document_search import SubDocumentSearch
 from kapsula.infrastructure.data.connection import get_db
+from kapsula.infrastructure.data.tables.document import Document
+from kapsula.infrastructure.data.tables.library_card import LibraryCard
+from kapsula.infrastructure.data.tables.sub_document import SubDocument
 from kapsula.infrastructure.logging_config import get_logger
+from kapsula.presentation.api.search_presenter import collect_unique_citations
+from kapsula.startup import (
+    create_intelligent_searcher,
+    create_multi_index_searcher,
+    create_query_planner,
+)
+
+from ..models import (
+    IntelligentSearchResponse,
+    SearchPlan,
+    SearchResponse,
+    SearchResult,
+)
 from .search_helpers import extract_citation_from_result
 
 logger = get_logger(__name__)
 router = APIRouter()
 
-from kapsula.core.application.dto.single_index_search import SingleIndexSearch
-from kapsula.core.application.dto.sub_document_search import SubDocumentSearch
-from kapsula.core.domain.text_processing import parse_node_type_filter
-from kapsula.infrastructure.data.tables.collection import Collection
-from kapsula.infrastructure.data.tables.document import Document
-from kapsula.infrastructure.data.tables.library_card import LibraryCard
-from kapsula.infrastructure.data.tables.sub_document import SubDocument
-from kapsula.infrastructure.data import Chunk
-from kapsula.presentation.api.search_presenter import collect_unique_citations
-from kapsula.startup import (
-    create_multi_index_searcher,
-    create_query_planner,
-    create_intelligent_searcher,
-    create_chat_client,
-)
-from ..models import (
-    SearchResponse,
-    SearchResult,
-    IntelligentSearchResponse,
-    SearchPlan,
-    Citation,
-    SubAnswer,
-)
 
 @router.post("/search/{job_id}", response_model=SearchResponse)
 async def search_document(
@@ -47,7 +40,7 @@ async def search_document(
     context_mode: str = Query(
         "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
     ),
-    node_type_filter: Optional[str] = Query(
+    node_type_filter: str | None = Query(
         None, description="Comma-separated node types to filter (e.g., 'code,table')"
     ),
     db: Session = Depends(get_db),
@@ -188,7 +181,7 @@ async def search_document(
         )
 
     except Exception as e:
-        logger.error(f"Search failed for {job_id}: {e}", exc_info=True)
+        logger.exception(f"Search failed for {job_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
@@ -200,7 +193,7 @@ async def intelligent_search_document(
     context_mode: str = Query(
         "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
     ),
-    node_type_filter: Optional[str] = Query(
+    node_type_filter: str | None = Query(
         None, description="Comma-separated node types to filter (e.g., 'code,table')"
     ),
     max_context_length: int = Query(
@@ -296,9 +289,10 @@ async def intelligent_search_document(
 
             # Get document structure from library cards (H1, H2, H3 hierarchy)
             from kapsula.presentation.shared.document_structure_builder import (
-                build_document_structure_from_subdocs,
                 build_document_structure_from_document,
+                build_document_structure_from_subdocs,
             )
+
             if subdocs:
                 document_structure = build_document_structure_from_subdocs(subdocs, db)
             else:
@@ -434,7 +428,7 @@ async def intelligent_search_document(
         )
 
     except Exception as e:
-        logger.error(f"Intelligent search failed for {job_id}: {e}", exc_info=True)
+        logger.exception(f"Intelligent search failed for {job_id}: {e}")
         raise HTTPException(
             status_code=500, detail=f"Intelligent search failed: {str(e)}"
         )

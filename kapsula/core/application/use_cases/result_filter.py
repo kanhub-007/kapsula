@@ -1,15 +1,15 @@
 """Search result node-type filtering (application-level)."""
 
 import logging
-from typing import List, Dict, Any
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 def filter_by_node_type(
-    results: List[Dict[str, Any]],
-    node_types: List[str] | None = None,
-) -> List[Dict[str, Any]]:
+    results: list[dict[str, Any]],
+    node_types: list[str] | None = None,
+) -> list[dict[str, Any]]:
     """Filter search results by node type.
 
     Args:

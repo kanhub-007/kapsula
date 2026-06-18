@@ -18,13 +18,14 @@ long LLM network calls. See spec 2026-06-17_short-lived-write-transactions.
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, Callable
+from typing import Any
 
 from sqlalchemy.orm import Session, joinedload
 
-from kapsula.core.domain.json_utils import _parse_json_safely
 from kapsula.core.domain.interfaces.chat_client import ChatClient
+from kapsula.core.domain.json_utils import _parse_json_safely
 from kapsula.infrastructure.data import (
     CardReference,
     ConsolidationRun,
@@ -203,7 +204,7 @@ class ConsolidationRunner:
             return self._result()
 
         except Exception as exc:
-            logger.error("Consolidation failed: %s", exc, exc_info=True)
+            logger.exception("Consolidation failed: %s", exc)
             self._record_run(error=str(exc))
             return self._result()
 
@@ -598,9 +599,7 @@ class ConsolidationRunner:
             session.add(run)
             session.commit()
         except Exception as exc:
-            logger.error(
-                "Failed to record consolidation run %s: %s", self._run_id, exc
-            )
+            logger.error("Failed to record consolidation run %s: %s", self._run_id, exc)
             try:
                 session.rollback()
             except Exception:

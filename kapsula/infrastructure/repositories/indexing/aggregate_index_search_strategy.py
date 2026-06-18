@@ -4,21 +4,16 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Callable
+from collections.abc import Callable
 
 from kapsula.core.domain.entities.aggregate_index_paths import (
     AggregateIndexPaths,
 )
-from kapsula.core.domain.fusion.weighted_fusion import WeightedFusion
 from kapsula.core.domain.interfaces.embedder import Embedder
 from kapsula.infrastructure.logging_config import get_logger
 from kapsula.infrastructure.repositories.indexing import (
-    load_faiss_index,
     load_bm25_index,
-)
-from kapsula.infrastructure.repositories.retrieval import (
-    DenseRetriever,
-    SparseRetriever,
+    load_faiss_index,
 )
 
 logger = get_logger(__name__)
@@ -68,7 +63,9 @@ class AggregateIndexSearchStrategy:
         bm25_index = bm25_data[0] if isinstance(bm25_data, tuple) else bm25_data
         texts = bm25_data[1] if isinstance(bm25_data, tuple) else bm25_data
 
-        searcher = self._searcher_factory(faiss_index, bm25_index, texts, self._embedder)
+        searcher = self._searcher_factory(
+            faiss_index, bm25_index, texts, self._embedder
+        )
 
         results = await searcher.search(
             query=query,
@@ -93,7 +90,7 @@ class AggregateIndexSearchStrategy:
     ) -> None:
         if not os.path.exists(paths.mapping):
             return
-        with open(paths.mapping, "r", encoding="utf-8") as handle:
+        with open(paths.mapping, encoding="utf-8") as handle:
             mapping: list[dict] = json.load(handle)
 
         for result in results:

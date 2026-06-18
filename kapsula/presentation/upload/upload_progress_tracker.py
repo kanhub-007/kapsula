@@ -1,7 +1,8 @@
 """Upload progress tracking and stage instrumentation."""
 
 import time
-from typing import Any, MutableMapping
+from collections.abc import MutableMapping
+from typing import Any
 
 
 class UploadProgressTracker:

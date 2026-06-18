@@ -21,11 +21,7 @@ class SqlAccountRepository(AccountRepository):
         return [account_from_orm(a) for a in orm_list]
 
     def find_by_account_id(self, db: Session, account_id: str) -> DomainAccount | None:
-        orm = (
-            db.query(OrmAccount)
-            .filter(OrmAccount.account_id == account_id)
-            .first()
-        )
+        orm = db.query(OrmAccount).filter(OrmAccount.account_id == account_id).first()
         if orm is None:
             return None
         return account_from_orm(orm)

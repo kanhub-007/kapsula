@@ -2,10 +2,11 @@
 
 import re
 
-from .heading import Heading
-from .structure_node import StructureNode
-from .markdown_utils import clean_markdown_link, split_breadcrumb_title
 from kapsula.infrastructure.logging_config import get_logger
+
+from .heading import Heading
+from .markdown_utils import clean_markdown_link, split_breadcrumb_title
+from .structure_node import StructureNode
 
 logger = get_logger(__name__)
 

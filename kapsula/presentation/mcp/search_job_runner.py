@@ -7,7 +7,7 @@ by producing runner coroutines from a search function and metadata.
 from __future__ import annotations
 
 import asyncio
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 from kapsula.infrastructure.logging_config import get_logger
 from kapsula.presentation.mcp.search_jobs import SearchJob, SearchJobManager
@@ -44,9 +44,7 @@ def make_search_job_runner(
             )
             raise
         except Exception as exc:
-            logger.error(
-                "Background %s job failed: %s", progress_label, exc, exc_info=True
-            )
+            logger.exception("Background %s job failed: %s", progress_label, exc)
             manager.update(
                 job,
                 status="failed",

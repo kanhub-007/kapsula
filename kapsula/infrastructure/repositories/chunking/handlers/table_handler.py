@@ -3,6 +3,7 @@
 from typing import Any
 
 from kapsula.core.domain.interfaces.element_handler import ElementHandler
+
 from ..table_parser import transform_table_to_text
 
 

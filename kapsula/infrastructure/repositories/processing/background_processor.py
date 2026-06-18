@@ -25,7 +25,9 @@ class ThreadPoolBackgroundProcessor(BackgroundProcessor):
 
         logger.info(
             "Starting background processing: job_id=%s mode=%s tokens=%s",
-            job_id, ingestion_mode, max_tokens,
+            job_id,
+            ingestion_mode,
+            max_tokens,
         )
 
         threading.Thread(

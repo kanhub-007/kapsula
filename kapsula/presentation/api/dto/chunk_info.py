@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -11,5 +11,5 @@ class ChunkInfo(BaseModel):
     id: int
     chunk_index: int
     content: str
-    token_count: Optional[int]
-    metadata: Dict[str, Any]
+    token_count: int | None
+    metadata: dict[str, Any]

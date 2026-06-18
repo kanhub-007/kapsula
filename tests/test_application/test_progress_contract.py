@@ -62,7 +62,13 @@ class TestProgressContract:
         status: dict = {}
         tracker = UploadProgressTracker(status, null_logger)
 
-        tracker.set(job_id="job-1", status="completed", progress=100, stage="completed", message="Done")
+        tracker.set(
+            job_id="job-1",
+            status="completed",
+            progress=100,
+            stage="completed",
+            message="Done",
+        )
         assert status["job-1"]["progress"] == 100
         assert status["job-1"]["status"] == "completed"
 
@@ -71,6 +77,8 @@ class TestProgressContract:
         status: dict = {}
         tracker = UploadProgressTracker(status, null_logger)
 
-        tracker.set(job_id="job-1", status="failed", progress=0, stage="failed", message="Error")
+        tracker.set(
+            job_id="job-1", status="failed", progress=0, stage="failed", message="Error"
+        )
         assert status["job-1"]["progress"] == 0
         assert status["job-1"]["status"] == "failed"

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from collections import Counter
+from collections.abc import Iterable
 from math import log
 
 from kapsula.core.domain.text_processing import tokenize

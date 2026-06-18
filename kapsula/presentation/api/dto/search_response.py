@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from typing import List, Optional
-
 from pydantic import BaseModel
+
 from kapsula.presentation.api.dto.citation import Citation
 from kapsula.presentation.api.dto.search_result import SearchResult
 
@@ -13,9 +12,7 @@ class SearchResponse(BaseModel):
     job_id: str
     query: str
     total_results: int
-    results: List[SearchResult]
-    context_mode: Optional[str] = None
-    node_type_filter: Optional[List[str]] = None
-    citations: Optional[List[Citation]] = (
-        None  # All unique citations from search results
-    )
+    results: list[SearchResult]
+    context_mode: str | None = None
+    node_type_filter: list[str] | None = None
+    citations: list[Citation] | None = None  # All unique citations from search results

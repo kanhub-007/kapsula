@@ -1,13 +1,14 @@
 """Markdown chunking with type-based strategy dispatch."""
 
-from typing import List, Dict, Any
+from typing import Any
 
 from kapsula.core.domain.interfaces.chunker import Chunker
-from .chunk_state import ChunkState
-from .chunk_pipeline import ChunkPipeline
-from .markdown_parser import MarkdownParser
-from .handlers import HandlerRegistry
 from kapsula.infrastructure.logging_config import get_logger
+
+from .chunk_pipeline import ChunkPipeline
+from .chunk_state import ChunkState
+from .handlers import HandlerRegistry
+from .markdown_parser import MarkdownParser
 
 logger = get_logger(__name__)
 
@@ -33,7 +34,7 @@ class MarkdownChunker(Chunker):
         self._parser = parser or MarkdownParser()
         self._registry = registry or HandlerRegistry()
 
-    def chunk(self, content: str) -> List[Dict[str, Any]]:
+    def chunk(self, content: str) -> list[dict[str, Any]]:
         elements = self._parser.parse(content)
 
         state = ChunkState()

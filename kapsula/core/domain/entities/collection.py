@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kapsula.core.domain.entities.account import Account
+    from kapsula.core.domain.entities.document import Document
 
 
 @dataclass
@@ -19,6 +23,5 @@ class Collection:
     created_at: datetime | None = None
     ip_address: str = ""
 
-    # Navigation
-    account: Optional[Account] = None
+    account: Account | None = None
     documents: list[Document] = field(default_factory=list)

@@ -5,19 +5,20 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, File, UploadFile, Form
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from kapsula.infrastructure.data import get_db, DATA_DIR
-from kapsula.infrastructure.data.tables.collection import Collection as OrmCollection
+from kapsula.core.domain.entities.collection import Collection
+from kapsula.infrastructure.data import DATA_DIR, get_db
 from kapsula.infrastructure.data.tables.account import Account as OrmAccount
+from kapsula.infrastructure.data.tables.collection import Collection as OrmCollection
+from kapsula.infrastructure.logging_config import get_logger
 from kapsula.infrastructure.repositories.data.sql_collection_repository import (
     SqlCollectionRepository,
 )
-from kapsula.core.domain.entities.collection import Collection
-from kapsula.infrastructure.logging_config import get_logger
-from ..models import CollectionResponse, CollectionListResponse
+
+from ..models import CollectionListResponse, CollectionResponse
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -53,6 +54,8 @@ def save_logo(file: UploadFile, collection_id: str) -> str:
 
 
 _collection_repo = SqlCollectionRepository()
+
+
 @router.post("/", response_model=CollectionResponse)
 async def create_collection(
     request: Request,
@@ -82,7 +85,9 @@ async def create_collection(
     # If account_id provided, verify it exists and get the account
     account = None
     if account_id:
-        account = db.query(OrmAccount).filter(OrmAccount.account_id == account_id).first()
+        account = (
+            db.query(OrmAccount).filter(OrmAccount.account_id == account_id).first()
+        )
         if not account:
             logger.warning(f"Account not found: {account_id}")
             raise HTTPException(
@@ -143,7 +148,9 @@ async def upload_collection_logo(
 
     # Get collection
     collection = (
-        db.query(OrmCollection).filter(OrmCollection.collection_id == collection_id).first()
+        db.query(OrmCollection)
+        .filter(OrmCollection.collection_id == collection_id)
+        .first()
     )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
@@ -193,7 +200,9 @@ async def download_collection_logo(collection_id: str, db: Session = Depends(get
 
     # Get collection
     collection = (
-        db.query(OrmCollection).filter(OrmCollection.collection_id == collection_id).first()
+        db.query(OrmCollection)
+        .filter(OrmCollection.collection_id == collection_id)
+        .first()
     )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
@@ -238,7 +247,9 @@ async def list_collections(request: Request, db: Session = Depends(get_db)):
     Returns a list of all collections with document counts and logo download URLs.
     """
     logger.debug("Listing all collections")
-    collections = db.query(OrmCollection).order_by(OrmCollection.created_at.desc()).all()
+    collections = (
+        db.query(OrmCollection).order_by(OrmCollection.created_at.desc()).all()
+    )
 
     return CollectionListResponse(
         collections=[
@@ -273,7 +284,9 @@ async def get_collection(
     logger.debug(f"Getting details for collection: {collection_id}")
 
     collection = (
-        db.query(OrmCollection).filter(OrmCollection.collection_id == collection_id).first()
+        db.query(OrmCollection)
+        .filter(OrmCollection.collection_id == collection_id)
+        .first()
     )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
@@ -304,13 +317,15 @@ async def list_collection_documents(collection_id: str, db: Session = Depends(ge
     logger.debug(f"Listing documents for collection: {collection_id}")
 
     collection = (
-        db.query(OrmCollection).filter(OrmCollection.collection_id == collection_id).first()
+        db.query(OrmCollection)
+        .filter(OrmCollection.collection_id == collection_id)
+        .first()
     )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    from ..models import DocumentListResponse, DocumentListItem
+    from ..models import DocumentListItem, DocumentListResponse
 
     return DocumentListResponse(
         documents=[
@@ -349,13 +364,16 @@ async def export_collection_data(
     This endpoint is useful for backup, migration, or comprehensive data analysis.
     """
     from kapsula.infrastructure.data import LibraryCard
+
     from ..models import CollectionExportInfo, DocumentExportInfo, LibraryCardInfo
 
     logger.info(f"Exporting complete data for collection: {collection_id}")
 
     # Get collection
     collection = (
-        db.query(OrmCollection).filter(OrmCollection.collection_id == collection_id).first()
+        db.query(OrmCollection)
+        .filter(OrmCollection.collection_id == collection_id)
+        .first()
     )
     if not collection:
         logger.warning(f"Collection not found: {collection_id}")

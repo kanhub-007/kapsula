@@ -1,9 +1,9 @@
 """Upload ingestion mode value object."""
 
-from enum import Enum
+from enum import StrEnum
 
 
-class UploadIngestionMode(str, Enum):
+class UploadIngestionMode(StrEnum):
     """Supported upload ingestion modes."""
 
     FAST = "fast"

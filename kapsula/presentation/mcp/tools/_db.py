@@ -1,8 +1,12 @@
 """Database access helpers for MCP tools."""
 
 from kapsula.infrastructure.data import (
-    Collection as OrmCollection,
     Account as OrmAccount,
+)
+from kapsula.infrastructure.data import (
+    Collection as OrmCollection,
+)
+from kapsula.infrastructure.data import (
     SessionLocal,
 )
 
@@ -20,8 +24,4 @@ def _resolve_collection(db, collection_id: str):
 
 
 def _resolve_account(db, account_id: str):
-    return (
-        db.query(OrmAccount)
-        .filter(OrmAccount.account_id == account_id)
-        .first()
-    )
+    return db.query(OrmAccount).filter(OrmAccount.account_id == account_id).first()

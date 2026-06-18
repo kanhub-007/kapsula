@@ -1,12 +1,17 @@
 """JSON parsing utilities for LLM output."""
 
+import json
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_json_safely(text: str) -> dict:
     """Robust JSON parsing from LLM output — handles code fences and prose."""
     if not text:
-        raise ValueError("No text to parse")
+        # Documented contract: never crash callers. Return {} on empty input.
+        return {}
 
     s = text.strip()
     m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", s, re.IGNORECASE)
@@ -31,7 +36,7 @@ def _parse_json_safely(text: str) -> dict:
 
     # Second attempt: fix trailing commas (common LLM mistake)
     try:
-        fixed = re.sub(r',\s*([}\]])', r'\1', s)
+        fixed = re.sub(r",\s*([}\]])", r"\1", s)
         return json.loads(fixed)
     except json.JSONDecodeError:
         pass
@@ -45,7 +50,7 @@ def _parse_json_safely(text: str) -> dict:
         pass
 
     # Give up — return empty dict so callers don't crash
-    logger.warning("Failed to parse JSON from LLM output (length=%d): %.200s", len(s), s)
+    logger.warning(
+        "Failed to parse JSON from LLM output (length=%d): %.200s", len(s), s
+    )
     return {}
-
-

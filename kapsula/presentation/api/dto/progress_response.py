@@ -1,7 +1,5 @@
 """Upload progress response API DTO."""
 
-from typing import Optional
-
 from pydantic import BaseModel
 
 
@@ -12,5 +10,5 @@ class ProgressResponse(BaseModel):
     progress: int
     stage: str
     message: str
-    chunk_count: Optional[int] = None
-    duration: Optional[float] = None
+    chunk_count: int | None = None
+    duration: float | None = None

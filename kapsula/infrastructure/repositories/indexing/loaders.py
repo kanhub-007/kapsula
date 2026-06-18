@@ -2,7 +2,7 @@
 
 import os
 import pickle
-from typing import Any, List, Tuple
+from typing import Any
 
 import faiss
 
@@ -19,7 +19,7 @@ def load_faiss_index(index_path: str) -> faiss.Index:
     return index
 
 
-def load_bm25_index(index_path: str) -> Tuple[Any, List[str]]:
+def load_bm25_index(index_path: str) -> tuple[Any, list[str]]:
     if not os.path.exists(index_path):
         raise FileNotFoundError(f"BM25 index not found: {index_path}")
     with open(index_path, "rb") as f:

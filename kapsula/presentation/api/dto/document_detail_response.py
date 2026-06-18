@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel
 
 
@@ -16,7 +14,7 @@ class DocumentDetailResponse(BaseModel):
     size: int
     status: str
     created_at: str
-    duration: Optional[float]
+    duration: float | None
     ip_address: str
     chunk_count: int
-    structure: Optional[str]  # Markdown skeleton structure
+    structure: str | None  # Markdown skeleton structure

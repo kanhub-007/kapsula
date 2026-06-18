@@ -9,7 +9,11 @@ from .embedder import Embedder
 from .fusion import Fusion
 from .index_manager import IndexManager
 from .progress_tracker import ProgressTracker
-from .query_repositories import ChunkRepository, LibraryCardRepository, SubDocumentRepository
+from .query_repositories import (
+    ChunkRepository,
+    LibraryCardRepository,
+    SubDocumentRepository,
+)
 from .reranker import Reranker
 from .retriever import Retriever
 from .search_data_access import SearchDataAccess

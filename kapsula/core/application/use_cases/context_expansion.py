@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import List, Dict, Any
+from typing import Any
 
 from kapsula.core.domain.entities.chunk import Chunk
 from kapsula.core.domain.interfaces.search_data_access import SearchDataAccess
@@ -11,11 +11,11 @@ logger = logging.getLogger(__name__)
 
 
 def expand_context_with_parents(
-    results: List[Dict[str, Any]],
+    results: list[dict[str, Any]],
     data: SearchDataAccess,
     document_id: int,
     context_mode: str = "narrow",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Expand search results with parent context from library cards.
 
     Pre-fetches all chunks and parent library cards in two batched queries
@@ -26,7 +26,9 @@ def expand_context_with_parents(
 
     logger.debug(
         "Expanding context for %s results (mode=%s, doc=%s)",
-        len(results), context_mode, document_id,
+        len(results),
+        context_mode,
+        document_id,
     )
 
     chunk_specs = _build_chunk_specs(results)
@@ -44,7 +46,7 @@ def expand_context_with_parents(
 
 
 def _build_chunk_specs(
-    results: List[Dict[str, Any]],
+    results: list[dict[str, Any]],
 ) -> list[tuple[int, int | None]]:
     """Collect (chunk_index, sub_document_id) pairs from search results."""
     specs: list[tuple[int, int | None]] = []
@@ -67,9 +69,7 @@ def _fetch_context_data(
     Returns (chunk_map, parent_map) where chunk_map keys are
     (chunk_index, sub_doc_id) and parent_map keys are doc_id hashes.
     """
-    chunk_map = (
-        data.get_chunks_batch(document_id, chunk_specs) if chunk_specs else {}
-    )
+    chunk_map = data.get_chunks_batch(document_id, chunk_specs) if chunk_specs else {}
 
     parent_hashes: set[str] = set()
     for chunk in chunk_map.values():
@@ -78,25 +78,21 @@ def _fetch_context_data(
             parent_hashes.add(ph)
 
     parent_map = (
-        data.get_library_cards_by_doc_ids(list(parent_hashes))
-        if parent_hashes
-        else {}
+        data.get_library_cards_by_doc_ids(list(parent_hashes)) if parent_hashes else {}
     )
     return chunk_map, parent_map
 
 
 def _expand_results(
-    results: List[Dict[str, Any]],
+    results: list[dict[str, Any]],
     chunk_map: dict,
     parent_map: dict,
     context_mode: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Expand each result with parent context from pre-fetched data."""
-    expanded: List[Dict[str, Any]] = []
+    expanded: list[dict[str, Any]] = []
     for result in results:
-        chunk = chunk_map.get(
-            (result.get("index"), result.get("sub_document_id"))
-        )
+        chunk = chunk_map.get((result.get("index"), result.get("sub_document_id")))
 
         if not chunk:
             result["expanded_content"] = result["content"]
@@ -146,11 +142,11 @@ def _resolve_parent_hash(chunk: Chunk, context_mode: str) -> str | None:
 
 
 def _deduplicate(
-    expanded: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+    expanded: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Deduplicate expanded results by parent hash, aggregating scores."""
-    deduplicated: List[Dict[str, Any]] = []
-    seen_hashes: dict[str, Dict[str, Any]] = {}
+    deduplicated: list[dict[str, Any]] = []
+    seen_hashes: dict[str, dict[str, Any]] = {}
     seen_indices: set[int] = set()
 
     for result in expanded:

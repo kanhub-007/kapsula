@@ -1,19 +1,15 @@
 """Document model."""
 
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text
-from sqlalchemy.orm import relationship
 from datetime import UTC, datetime
+
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import relationship
 
 from ..connection import Base
 
-"""
-Domain entity — represents a uploaded markdown document in the document search system.
-
-Uses SQLAlchemy ORM as the persistence mechanism.
-In Clean Architecture, this serves as both the domain entity
-and the persistence model. If migrating away from SQLAlchemy,
-extract a pure dataclass and map between the two.
-"""
+# ORM persistence model for Document. Mapped to/from the pure domain entity
+# ``kapsula.core.domain.entities.document.Document`` via
+# ``kapsula.infrastructure.repositories.data.mappers``.
 
 
 class Document(Base):

@@ -3,9 +3,9 @@
 from sqlalchemy.orm import Session
 
 from kapsula.infrastructure.data.tables.account import Account
+from kapsula.infrastructure.data.tables.chunk import Chunk
 from kapsula.infrastructure.data.tables.collection import Collection
 from kapsula.infrastructure.data.tables.document import Document
-from kapsula.infrastructure.data.tables.chunk import Chunk
 from kapsula.infrastructure.data.tables.library_card import LibraryCard
 from kapsula.infrastructure.data.tables.sub_document import SubDocument
 
@@ -100,6 +100,7 @@ class SqlSearchDataAccess:
         if not chunk_specs:
             return {}
         from sqlalchemy import or_
+
         conditions = []
         for c_idx, s_id in chunk_specs:
             if s_id is not None:
@@ -126,9 +127,7 @@ class SqlSearchDataAccess:
         if not doc_ids:
             return {}
         cards = (
-            self._db.query(LibraryCard)
-            .filter(LibraryCard.doc_id.in_(doc_ids))
-            .all()
+            self._db.query(LibraryCard).filter(LibraryCard.doc_id.in_(doc_ids)).all()
         )
         return {c.doc_id: c for c in cards}
 

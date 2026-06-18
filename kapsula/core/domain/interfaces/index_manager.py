@@ -8,17 +8,20 @@ from kapsula.core.domain.entities.rebuild_result import RebuildResult
 
 class HasAccountId(Protocol):
     """Protocol for any object with an account_id attribute."""
+
     account_id: str
 
 
 class IndexableSubDocument(Protocol):
     """Protocol for sub-documents that have index file paths."""
+
     faiss_index_path: str | None
     bm25_index_path: str | None
 
 
 class IndexableDocument(Protocol):
     """Protocol for documents that have index file paths and sub-documents."""
+
     faiss_index_path: str | None
     bm25_index_path: str | None
     sub_documents: list[IndexableSubDocument]
@@ -26,6 +29,7 @@ class IndexableDocument(Protocol):
 
 class IndexableCollection(Protocol):
     """Protocol for collections with an account and GUID."""
+
     id: int
     collection_id: str
     account: HasAccountId | None
@@ -44,9 +48,7 @@ class IndexManager(ABC):
         to force a full rebuild on the next aggregate index build."""
 
     @abstractmethod
-    def rebuild_aggregates(
-        self, db, collection: IndexableCollection
-    ) -> RebuildResult:
+    def rebuild_aggregates(self, db, collection: IndexableCollection) -> RebuildResult:
         """Rebuild collection and account aggregate indexes."""
 
     @abstractmethod

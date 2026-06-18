@@ -120,10 +120,7 @@ class UploadJobManager:
                 .limit(limit)
                 .all()
             )
-            return [
-                _job_to_dict(job)
-                for job in jobs
-            ]
+            return [_job_to_dict(job) for job in jobs]
         finally:
             db.close()
 

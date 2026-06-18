@@ -1,10 +1,11 @@
 """LLM-based sub-document selector."""
 
 import logging
-from typing import List, Dict, Any
+from typing import Any
 
 from kapsula.core.application.use_cases.instrumentation import log_timing
 from kapsula.core.domain.interfaces.chat_client import ChatClient
+
 from .id_parser import parse_ids
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ class SubDocumentSelector:
     def __init__(self, chat_client: ChatClient):
         self._chat_client = chat_client
 
-    def select(self, query: str, sub_documents: List[Dict[str, Any]]) -> List[int]:
+    def select(self, query: str, sub_documents: list[dict[str, Any]]) -> list[int]:
         if not sub_documents:
             return []
 

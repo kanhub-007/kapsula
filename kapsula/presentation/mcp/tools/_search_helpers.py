@@ -14,8 +14,8 @@ from kapsula.infrastructure.data import (
     Collection,
     Document,
     LibraryCard,
-    SubDocument,
     SearchMissLog,
+    SubDocument,
 )
 
 # ORM aliases per project convention
@@ -26,15 +26,14 @@ OrmLibraryCard = LibraryCard
 OrmSubDocument = SubDocument
 
 from ._shared import (
+    _get_chat_client,
     _get_db,
+    _get_intelligent_searcher,
+    _get_multi_index_searcher,
+    _get_query_planner,
     _hf_token,
     _parse_node_type_filter,
-    _get_chat_client,
-    _get_query_planner,
-    _get_multi_index_searcher,
-    _get_intelligent_searcher,
     _resolve_collection,
-    _get_search_job_manager,
 )
 
 
@@ -120,7 +119,9 @@ async def run_search_documents_text(
         if len(results) < 3 and collection_id:
             log_search_miss(db, query, collection_id, len(results), results)
 
-        return format_search_results(query, results, scope=scope, context_mode=context_mode)
+        return format_search_results(
+            query, results, scope=scope, context_mode=context_mode
+        )
     finally:
         db.close()
 
@@ -181,6 +182,7 @@ async def run_intelligent_collection_search(
         from kapsula.presentation.shared.document_structure_builder import (
             build_document_structure_from_subdocs,
         )
+
         document_structure = []
         if routed_coll:
             for doc in routed_coll.documents:

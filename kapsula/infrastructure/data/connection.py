@@ -1,8 +1,9 @@
 """Database connection and session management."""
 
 import os
+
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATA_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "data"
@@ -53,11 +54,7 @@ def _run_lightweight_migrations():
     existing = {c["name"] for c in inspector.get_columns("library_cards")}
     if "description" not in existing:
         with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "ALTER TABLE library_cards ADD COLUMN description TEXT"
-                )
-            )
+            conn.execute(text("ALTER TABLE library_cards ADD COLUMN description TEXT"))
 
 
 def get_db():

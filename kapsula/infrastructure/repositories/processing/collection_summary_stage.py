@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session
 
 from kapsula.infrastructure.data.tables.collection import Collection as OrmCollection
 from kapsula.infrastructure.data.tables.document import Document as OrmDocument
-from kapsula.infrastructure.data.tables.library_card import LibraryCard as OrmLibraryCard
+from kapsula.infrastructure.data.tables.library_card import (
+    LibraryCard as OrmLibraryCard,
+)
 from kapsula.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -33,7 +35,10 @@ def update_collection_library_card(
     # Get document's main library card
     doc_card = (
         db.query(OrmLibraryCard)
-        .filter(OrmLibraryCard.document_id == document_id, OrmLibraryCard.level == "document")
+        .filter(
+            OrmLibraryCard.document_id == document_id,
+            OrmLibraryCard.level == "document",
+        )
         .first()
     )
 
@@ -43,7 +48,9 @@ def update_collection_library_card(
 
     # Get collection
     collection = (
-        db.query(Collection).filter(Collection.id == document.collection_id).first()
+        db.query(OrmCollection)
+        .filter(OrmCollection.id == document.collection_id)
+        .first()
     )
     if not collection:
         logger.error(f"Collection {document.collection_id} not found")
@@ -175,5 +182,3 @@ def update_collection_library_card(
 
         db.commit()
         logger.info(f"✓ Updated collection library card for collection {collection.id}")
-
-

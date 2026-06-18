@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from typing import List
-
 from pydantic import BaseModel
+
 from kapsula.presentation.api.dto.collection_export_info import CollectionExportInfo
 
 
@@ -15,4 +14,4 @@ class AccountExportResponse(BaseModel):
     collection_count: int
     total_documents: int
     total_library_cards: int
-    collections: List[CollectionExportInfo]
+    collections: list[CollectionExportInfo]

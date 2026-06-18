@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel
 
 
@@ -13,5 +11,5 @@ class DocumentInfo(BaseModel):
     filename: str
     size: int
     created_at: str
-    duration: Optional[float]
+    duration: float | None
     ip_address: str

@@ -35,9 +35,7 @@ def strip_inline_formatting(text: str) -> str:
     return text
 
 
-def find_chunk_in_markdown(
-    search_text: str, markdown_content: str
-) -> int:
+def find_chunk_in_markdown(search_text: str, markdown_content: str) -> int:
     """Find chunk text position with progressive fallbacks for formatting.
 
     Returns the character offset in *markdown_content* where *search_text*
@@ -67,9 +65,7 @@ def find_chunk_in_markdown(
     return -1
 
 
-def _map_stripped_to_raw(
-    stripped_md: str, stripped_pos: int, raw_content: str
-) -> int:
+def _map_stripped_to_raw(stripped_md: str, stripped_pos: int, raw_content: str) -> int:
     """Map a character position in stripped markdown back to raw markdown.
 
     The stripped version may have newlines and multiple spaces collapsed,
@@ -82,7 +78,10 @@ def _map_stripped_to_raw(
         if sc == rc:
             stripped_i += 1
             raw_pos += 1
-        elif rc in ("\n", "\r", " ", "\t") and stripped_md[stripped_i - 1:stripped_i + 1] != rc:
+        elif (
+            rc in ("\n", "\r", " ", "\t")
+            and stripped_md[stripped_i - 1 : stripped_i + 1] != rc
+        ):
             # Skip whitespace in raw that was collapsed in stripped
             raw_pos += 1
         else:

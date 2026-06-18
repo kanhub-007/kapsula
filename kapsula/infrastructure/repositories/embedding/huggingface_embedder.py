@@ -1,8 +1,8 @@
 """HuggingFace Inference Endpoint embedder."""
 
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from time import perf_counter
-from typing import List, Union, Iterator
 
 import numpy as np
 from huggingface_hub import InferenceClient
@@ -24,7 +24,7 @@ class HuggingFaceEmbedder:
         logger.info("Initializing HF Inference Client for: %s", endpoint_url)
         self._client = InferenceClient(model=endpoint_url, token=token, timeout=timeout)
 
-    def embed(self, text: Union[str, List[str]], batch_size: int = 32) -> np.ndarray:
+    def embed(self, text: str | list[str], batch_size: int = 32) -> np.ndarray:
         """Generate embeddings. Always returns 2D."""
         texts = [text] if isinstance(text, str) else list(text)
         if not texts:
@@ -51,16 +51,15 @@ class HuggingFaceEmbedder:
         return result
 
     @staticmethod
-    def _batch(texts: List[str], batch_size: int) -> Iterator[List[str]]:
+    def _batch(texts: list[str], batch_size: int) -> Iterator[list[str]]:
         for start in range(0, len(texts), batch_size):
             yield texts[start : start + batch_size]
 
-    def _process_batch(self, batch_texts: List[str]) -> np.ndarray:
+    def _process_batch(self, batch_texts: list[str]) -> np.ndarray:
         try:
             return np.array(self._client.feature_extraction(batch_texts))
         except Exception:
-            logger.error(
+            logger.exception(
                 f"Failed to process batch of {len(batch_texts)} text(s)",
-                exc_info=True,
             )
             raise

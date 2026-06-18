@@ -1,7 +1,7 @@
 """FAISS dense vector retriever."""
 
 import asyncio
-from typing import List, Dict, Any
+from typing import Any
 
 import faiss
 
@@ -11,16 +11,16 @@ from kapsula.core.domain.interfaces import Embedder
 class DenseRetriever:
     """Retrieves results using FAISS vector similarity."""
 
-    def __init__(self, faiss_index: faiss.Index, texts: List[str], embedder: Embedder):
+    def __init__(self, faiss_index: faiss.Index, texts: list[str], embedder: Embedder):
         self._index = faiss_index
         self._texts = texts
         self._embedder = embedder
 
-    async def retrieve(self, query: str, k: int) -> List[Dict[str, Any]]:
+    async def retrieve(self, query: str, k: int) -> list[dict[str, Any]]:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._retrieve_sync, query, k)
 
-    def _retrieve_sync(self, query: str, k: int) -> List[Dict[str, Any]]:
+    def _retrieve_sync(self, query: str, k: int) -> list[dict[str, Any]]:
         q_emb = self._embedder.embed(query).astype("float32")
         faiss.normalize_L2(q_emb)
 

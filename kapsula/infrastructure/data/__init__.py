@@ -1,4 +1,4 @@
-from .connection import Base, DATA_DIR, SessionLocal, engine, get_db, init_db
+from .connection import DATA_DIR, Base, SessionLocal, engine, get_db, init_db
 from .tables import (
     Account,
     CardReference,

@@ -1,6 +1,6 @@
 """Element handler protocol."""
 
-from typing import Protocol, Any
+from typing import Any, Protocol
 
 
 class ElementHandler(Protocol):

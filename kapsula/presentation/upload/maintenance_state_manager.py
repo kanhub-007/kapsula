@@ -3,10 +3,10 @@
 import json
 import os
 import threading
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
-from kapsula.infrastructure.data import Collection, DATA_DIR
+from kapsula.infrastructure.data import DATA_DIR, Collection
 from kapsula.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -49,7 +49,7 @@ class MaintenanceStateManager:
             state["account_index_stale"] = state["account_index_stale"] or bool(
                 collection.account_id and account_index
             )
-            state["updated_at"] = datetime.utcnow().isoformat()
+            state["updated_at"] = datetime.now(UTC).isoformat()
             states[key] = state
             self._save_states(states)
             return state
@@ -89,8 +89,8 @@ class MaintenanceStateManager:
             if consolidation:
                 state["consolidation_stale"] = False
                 state["uploads_since_consolidation"] = 0
-                state["last_consolidation_at"] = datetime.utcnow().isoformat()
-            state["updated_at"] = datetime.utcnow().isoformat()
+                state["last_consolidation_at"] = datetime.now(UTC).isoformat()
+            state["updated_at"] = datetime.now(UTC).isoformat()
             states[key] = state
             self._save_states(states)
             return state
@@ -125,7 +125,7 @@ class MaintenanceStateManager:
                         state.get("uploads_since_consolidation", 0) + 1
                     )
                     state["consolidation_stale"] = True
-                    state["updated_at"] = datetime.utcnow().isoformat()
+                    state["updated_at"] = datetime.now(UTC).isoformat()
                     self._save_states(states)
                     return state
             # No existing state — create one with consolidation marked stale
@@ -140,7 +140,7 @@ class MaintenanceStateManager:
                 "consolidation_stale": True,
                 "uploads_since_consolidation": 1,
                 "last_consolidation_at": None,
-                "updated_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
             }
             states[collection_id] = state
             self._save_states(states)
@@ -154,8 +154,8 @@ class MaintenanceStateManager:
                 if state.get("collection_id") == collection_id:
                     state["consolidation_stale"] = False
                     state["uploads_since_consolidation"] = 0
-                    state["last_consolidation_at"] = datetime.utcnow().isoformat()
-                    state["updated_at"] = datetime.utcnow().isoformat()
+                    state["last_consolidation_at"] = datetime.now(UTC).isoformat()
+                    state["updated_at"] = datetime.now(UTC).isoformat()
                     self._save_states(states)
                     return state
             return {}
@@ -175,7 +175,7 @@ class MaintenanceStateManager:
             "consolidation_stale": False,
             "uploads_since_consolidation": 0,
             "last_consolidation_at": None,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
 
     @staticmethod

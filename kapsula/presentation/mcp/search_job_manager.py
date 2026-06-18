@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import threading
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from kapsula.presentation.mcp.search_job import SearchJob
 
@@ -45,7 +46,7 @@ class SearchJobManager:
         with self._lock:
             for key, value in updates.items():
                 setattr(job, key, value)
-            job.updated_at = datetime.now(timezone.utc)
+            job.updated_at = datetime.now(UTC)
 
     def cancel(self, job_id: str) -> SearchJob | None:
         """Cancel a queued or running job."""
@@ -69,7 +70,7 @@ class SearchJobManager:
 
     def cleanup_expired(self) -> None:
         """Remove expired terminal jobs."""
-        cutoff = datetime.now(timezone.utc) - self._ttl
+        cutoff = datetime.now(UTC) - self._ttl
         with self._lock:
             expired = [
                 job_id

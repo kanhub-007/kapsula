@@ -1,7 +1,7 @@
 """LLM-based collection library card summary generation."""
 
 import logging
-from typing import Dict, Any
+from typing import Any
 
 from kapsula.core.domain.interfaces.chat_client import ChatClient
 
@@ -20,7 +20,7 @@ class CollectionSummaryGenerator:
         collection_name: str,
         document_summary: str,
         document_filename: str,
-        document_metadata: Dict[str, Any],
+        document_metadata: dict[str, Any],
     ) -> str:
         subdoc_info = ""
         if "sub_documents" in document_metadata:
@@ -59,7 +59,7 @@ class CollectionSummaryGenerator:
         existing_documents: list,
         new_document_summary: str,
         new_document_filename: str,
-        new_document_metadata: Dict[str, Any],
+        new_document_metadata: dict[str, Any],
     ) -> str:
         existing_text = "\n".join(
             f"- {d['filename']}: {d['summary'][:100]}..."

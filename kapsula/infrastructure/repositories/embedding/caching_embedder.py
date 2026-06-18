@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from threading import Lock
-from typing import List, Union
 
 import numpy as np
 
@@ -33,7 +32,7 @@ class CachingEmbedder:
         self._cache: OrderedDict[str, np.ndarray] = OrderedDict()
         self._lock = Lock()
 
-    def embed(self, text: Union[str, List[str]], batch_size: int = 32) -> np.ndarray:
+    def embed(self, text: str | list[str], batch_size: int = 32) -> np.ndarray:
         """Generate embeddings, caching only single-string requests."""
         if not isinstance(text, str):
             return self._inner.embed(text, batch_size=batch_size)

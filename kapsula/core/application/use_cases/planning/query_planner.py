@@ -1,17 +1,15 @@
 """LLM-based query planning for intelligent search."""
 
-import json
 import logging
-import re
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 from kapsula.core.domain.interfaces.chat_client import ChatClient
+from kapsula.core.domain.json_utils import _parse_json_safely
+
 from .query_planning_prompts import SYSTEM_PROMPT_DOCUMENT, USER_MESSAGE_DOCUMENT
 
 logger = logging.getLogger(__name__)
 
-
-from kapsula.core.domain.json_utils import _parse_json_safely
 
 class QueryPlanner:
     """Creates intelligent search plans based on user questions and documentation structure."""
@@ -22,9 +20,9 @@ class QueryPlanner:
     def plan_document_search(
         self,
         query: str,
-        document_library_card: Optional[Dict[str, Any]] = None,
-        document_structure: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
+        document_library_card: dict[str, Any] | None = None,
+        document_structure: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         if not document_structure:
             return {
                 "strategy": "single_query",
@@ -51,7 +49,7 @@ class QueryPlanner:
             plan = _parse_json_safely(response)
             return self._validate(plan, query)
         except Exception as e:
-            logger.error(f"Query planning failed: {e}", exc_info=True)
+            logger.exception(f"Query planning failed: {e}")
             return {
                 "strategy": "single_query",
                 "queries": [query],

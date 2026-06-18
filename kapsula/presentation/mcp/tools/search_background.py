@@ -1,14 +1,17 @@
 """MCP background search tools — async search job management."""
 
 import asyncio
+import logging
 
 from fastmcp import FastMCP
 
-from ._shared import _get_search_job_manager
 from ._search_helpers import (
-    run_search_documents_text,
     run_intelligent_collection_search,
+    run_search_documents_text,
 )
+from ._shared import _get_search_job_manager
+
+logger = logging.getLogger(__name__)
 
 
 def register_search_background_tools(mcp: FastMCP):
@@ -19,14 +22,17 @@ def register_search_background_tools(mcp: FastMCP):
         manager.update(job, status="running", progress="Search running")
         try:
             result = await run_search_documents_text(**job.params)
-            manager.update(job, status="completed", progress="Search completed", result=result)
+            manager.update(
+                job, status="completed", progress="Search completed", result=result
+            )
         except asyncio.CancelledError:
             manager.update(job, status="cancelled", progress="Search cancelled")
             raise
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).error("Background search job failed: %s", exc, exc_info=True)
-            manager.update(job, status="failed", progress="Search failed", error=str(exc))
+            logger.exception("Background search job failed")
+            manager.update(
+                job, status="failed", progress="Search failed", error=str(exc)
+            )
 
     async def _execute_intelligent_search_job(job) -> None:
         manager = _get_search_job_manager()
@@ -40,14 +46,25 @@ def register_search_background_tools(mcp: FastMCP):
                 enable_planning=job.params.get("enable_planning", True),
                 node_type_filter=job.params.get("node_type_filter"),
             )
-            manager.update(job, status="completed", progress="Intelligent search completed", result=result)
+            manager.update(
+                job,
+                status="completed",
+                progress="Intelligent search completed",
+                result=result,
+            )
         except asyncio.CancelledError:
-            manager.update(job, status="cancelled", progress="Intelligent search cancelled")
+            manager.update(
+                job, status="cancelled", progress="Intelligent search cancelled"
+            )
             raise
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).error("Background intelligent search job failed: %s", exc, exc_info=True)
-            manager.update(job, status="failed", progress="Intelligent search failed", error=str(exc))
+            logger.exception("Background intelligent search job failed")
+            manager.update(
+                job,
+                status="failed",
+                progress="Intelligent search failed",
+                error=str(exc),
+            )
 
     @mcp.tool(
         name="start_search_documents",

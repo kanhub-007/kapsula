@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from kapsula.presentation.mcp.maintenance_job import MaintenanceJob
@@ -45,15 +45,13 @@ class MaintenanceJobManager:
             for key, value in updates.items():
                 if hasattr(job, key):
                     setattr(job, key, value)
-            job.updated_at = datetime.now(timezone.utc)
+            job.updated_at = datetime.now(UTC)
 
     def get_latest_for_collection(self, collection_id: str) -> MaintenanceJob | None:
         """Return the most recently created job for a collection."""
         with self._lock:
             matching = [
-                j
-                for j in self._jobs.values()
-                if j.collection_id == collection_id
+                j for j in self._jobs.values() if j.collection_id == collection_id
             ]
             if not matching:
                 return None
@@ -61,13 +59,12 @@ class MaintenanceJobManager:
 
     def cleanup_expired(self) -> None:
         """Remove terminal jobs older than TTL."""
-        cutoff = datetime.now(timezone.utc) - self._ttl
+        cutoff = datetime.now(UTC) - self._ttl
         with self._lock:
             expired = [
                 job_id
                 for job_id, job in self._jobs.items()
-                if job.updated_at < cutoff
-                and job.status in {"completed", "failed"}
+                if job.updated_at < cutoff and job.status in {"completed", "failed"}
             ]
             for job_id in expired:
                 self._jobs.pop(job_id, None)

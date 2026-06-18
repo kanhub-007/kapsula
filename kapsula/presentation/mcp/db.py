@@ -4,8 +4,8 @@ Provides a context manager for DB sessions outside of FastAPI's
 dependency injection system.
 """
 
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator
 
 from kapsula.infrastructure.data import SessionLocal
 

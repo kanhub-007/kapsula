@@ -1,8 +1,7 @@
 """Reciprocal Rank Fusion with quality filtering."""
 
-from typing import List, Dict, Any
-
 import logging
+from typing import Any
 
 from kapsula.core.domain.quality_filter import passes_quality_filter
 
@@ -16,8 +15,8 @@ class RRFFusion:
         self._k = k
 
     def fuse(
-        self, dense: List[Dict[str, Any]], sparse: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+        self, dense: list[dict[str, Any]], sparse: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         result_map: dict[int, dict] = {}
         sparse_scores = [
             r["sparse_score"] for r in sparse if r.get("sparse_score", 0) > 0
@@ -56,8 +55,8 @@ class RRFFusion:
 
 
 def _apply_quality_filter(
-    combined: List[Dict[str, Any]], max_sparse: float
-) -> List[Dict[str, Any]]:
+    combined: list[dict[str, Any]], max_sparse: float
+) -> list[dict[str, Any]]:
     filtered = []
     for result in combined:
         dense = result.get("dense_score", 0)

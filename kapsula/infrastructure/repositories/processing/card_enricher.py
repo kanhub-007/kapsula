@@ -13,7 +13,7 @@ outside any session.
 """
 
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 from sqlalchemy.orm import Session
 
@@ -95,9 +95,7 @@ class CardEnricher:
         session = self._short_session()
         try:
             rows = (
-                session.query(
-                    LibraryCard.id, LibraryCard.title, LibraryCard.content
-                )
+                session.query(LibraryCard.id, LibraryCard.title, LibraryCard.content)
                 .filter(
                     LibraryCard.collection_id == self._collection_id,
                     LibraryCard.card_type == "extractive",

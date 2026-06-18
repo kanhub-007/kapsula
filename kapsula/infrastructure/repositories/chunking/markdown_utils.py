@@ -1,7 +1,7 @@
 """Markdown utility functions."""
 
 import re
-from typing import List
+
 import tiktoken
 
 
@@ -15,7 +15,7 @@ def clean_markdown_link(text: str) -> str:
     return text.strip()
 
 
-def split_breadcrumb_title(text: str) -> List[str]:
+def split_breadcrumb_title(text: str) -> list[str]:
     parts = [part.strip() for part in text.split("/")]
     return [p for p in parts if p]
 

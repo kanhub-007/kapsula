@@ -5,7 +5,7 @@ import uuid
 
 from dotenv import load_dotenv
 
-from kapsula.infrastructure.data.connection import init_db, SessionLocal
+from kapsula.infrastructure.data.connection import SessionLocal, init_db
 from kapsula.infrastructure.data.tables.account import Account
 from kapsula.infrastructure.logging_config import get_logger
 
@@ -100,13 +100,13 @@ def create_collection_summary_generator(chat_client=None):
 def create_multi_index_searcher(
     db_session=None, embedder=None, reranker=None, chat_client=None
 ):
+    from kapsula.core.application.use_cases.multi_index_searcher import (
+        MultiIndexSearcher,
+    )
     from kapsula.infrastructure.repositories.data.sql_search_data_access import (
         SqlSearchDataAccess,
     )
     from kapsula.startup.hybrid_searcher_factory import HybridSearcherFactory
-    from kapsula.core.application.use_cases.multi_index_searcher import (
-        MultiIndexSearcher,
-    )
 
     data = SqlSearchDataAccess(db_session) if db_session else None
     embedder = embedder or create_embedder()
@@ -142,7 +142,10 @@ def _make_aggregate_searcher(faiss_index, bm25_index, texts, embedder):
     """
     from kapsula.core.application.use_cases.hybrid_searcher import HybridSearcher
     from kapsula.core.domain.fusion.weighted_fusion import WeightedFusion
-    from kapsula.infrastructure.repositories.retrieval import DenseRetriever, SparseRetriever
+    from kapsula.infrastructure.repositories.retrieval import (
+        DenseRetriever,
+        SparseRetriever,
+    )
 
     return HybridSearcher(
         dense=DenseRetriever(faiss_index, texts, embedder),
@@ -153,12 +156,12 @@ def _make_aggregate_searcher(faiss_index, bm25_index, texts, embedder):
 
 
 def create_aggregate_search_strategy(embedder=None):
+    from kapsula.core.domain.entities.aggregate_index_paths import (
+        AggregateIndexPaths,
+    )
     from kapsula.infrastructure.data.connection import DATA_DIR
     from kapsula.infrastructure.repositories.indexing.aggregate_index_search_strategy import (
         AggregateIndexSearchStrategy,
-    )
-    from kapsula.core.domain.entities.aggregate_index_paths import (
-        AggregateIndexPaths,
     )
 
     embedder = embedder or create_embedder()
@@ -171,18 +174,20 @@ def create_aggregate_search_strategy(embedder=None):
         )
 
     return AggregateIndexSearchStrategy(
-        data_dir=DATA_DIR, embedder=embedder, path_factory=_collection_paths,
+        data_dir=DATA_DIR,
+        embedder=embedder,
+        path_factory=_collection_paths,
         searcher_factory=_make_aggregate_searcher,
     )
 
 
 def create_account_search_strategy(embedder=None):
+    from kapsula.core.domain.entities.aggregate_index_paths import (
+        AggregateIndexPaths,
+    )
     from kapsula.infrastructure.data.connection import DATA_DIR
     from kapsula.infrastructure.repositories.indexing.aggregate_index_search_strategy import (
         AggregateIndexSearchStrategy,
-    )
-    from kapsula.core.domain.entities.aggregate_index_paths import (
-        AggregateIndexPaths,
     )
 
     embedder = embedder or create_embedder()
@@ -194,22 +199,24 @@ def create_account_search_strategy(embedder=None):
         return AggregateIndexPaths.for_account(DATA_DIR, guid)
 
     return AggregateIndexSearchStrategy(
-        data_dir=DATA_DIR, embedder=embedder, path_factory=_account_paths,
+        data_dir=DATA_DIR,
+        embedder=embedder,
+        path_factory=_account_paths,
         searcher_factory=_make_aggregate_searcher,
     )
 
 
 def create_delete_document_use_case():
     """Create a DeleteDocumentUseCase with wired dependencies."""
-    from kapsula.infrastructure.data.connection import DATA_DIR
-    from kapsula.infrastructure.repositories.indexing.index_manager import (
-        FileSystemIndexManager,
+    from kapsula.core.application.use_cases.delete_document import (
+        DeleteDocumentUseCase,
     )
+    from kapsula.infrastructure.data.connection import DATA_DIR
     from kapsula.infrastructure.repositories.data.sql_document_repository import (
         SqlDocumentRepository,
     )
-    from kapsula.core.application.use_cases.delete_document import (
-        DeleteDocumentUseCase,
+    from kapsula.infrastructure.repositories.indexing.index_manager import (
+        FileSystemIndexManager,
     )
 
     embedder = create_embedder()
@@ -220,20 +227,22 @@ def create_delete_document_use_case():
 
 def create_upload_document_use_case():
     """Create an UploadDocumentUseCase with wired dependencies."""
-    from kapsula.infrastructure.repositories.processing.background_processor import (
-        ThreadPoolBackgroundProcessor,
+    from kapsula.core.application.use_cases.upload_document import (
+        UploadDocumentUseCase,
     )
     from kapsula.infrastructure.repositories.data.sql_document_repository import (
         SqlDocumentRepository,
     )
+    from kapsula.infrastructure.repositories.processing.background_processor import (
+        ThreadPoolBackgroundProcessor,
+    )
     from kapsula.infrastructure.repositories.processing.progress_tracker import (
         InMemoryProgressTracker,
-    )
-    from kapsula.core.application.use_cases.upload_document import (
-        UploadDocumentUseCase,
     )
 
     background_processor = ThreadPoolBackgroundProcessor()
     document_repository = SqlDocumentRepository()
     progress_tracker = InMemoryProgressTracker()
-    return UploadDocumentUseCase(background_processor, document_repository, progress_tracker)
+    return UploadDocumentUseCase(
+        background_processor, document_repository, progress_tracker
+    )

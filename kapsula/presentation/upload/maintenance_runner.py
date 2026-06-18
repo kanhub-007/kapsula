@@ -103,7 +103,9 @@ def _run_maintenance_locked(
                 progress=f"{progress}" + (f" ({detail})" if detail else ""),
             )
 
-        result = CollectionMaintenanceRunner(db).run(col, progress_callback=_on_progress)
+        result = CollectionMaintenanceRunner(db).run(
+            col, progress_callback=_on_progress
+        )
 
         manager.update(
             job,
@@ -129,9 +131,7 @@ def _run_maintenance_locked(
         )
 
     except Exception as exc:
-        logger.error(
-            "Maintenance job %s failed: %s", job_id, exc, exc_info=True
-        )
+        logger.exception("Maintenance job %s failed: %s", job_id, exc)
         manager.update(
             job,
             status="failed",

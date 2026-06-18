@@ -1,5 +1,6 @@
 """Upload document use case — validates, persists, and starts background processing."""
 
+import logging
 import uuid
 from pathlib import Path
 
@@ -19,7 +20,6 @@ from kapsula.core.domain.interfaces.document_repository import (
 from kapsula.core.domain.interfaces.progress_tracker import (
     ProgressTracker,
 )
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,10 @@ class UploadDocumentUseCase:
 
         logger.info(
             "Upload started: job_id=%s filename=%s collection=%s mode=%s",
-            job_id, p.name, col.name, ingestion_mode,
+            job_id,
+            p.name,
+            col.name,
+            ingestion_mode,
         )
 
         return UploadDocumentResult(
@@ -137,7 +140,9 @@ class UploadDocumentUseCase:
             tmp.write(content_bytes)
             tmp_path = tmp.name
         try:
-            result = self.execute(db, tmp_path, collection_id, max_tokens, ingestion_mode)
+            result = self.execute(
+                db, tmp_path, collection_id, max_tokens, ingestion_mode
+            )
             return UploadDocumentResult(
                 job_id=result.job_id,
                 filename=filename,

@@ -6,9 +6,9 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from kapsula.core.domain.entities.document import Document as DomainDocument
-from kapsula.core.domain.entities.collection import Collection as DomainCollection
 from kapsula.core.domain.entities.account import Account as DomainAccount
+from kapsula.core.domain.entities.collection import Collection as DomainCollection
+from kapsula.core.domain.entities.document import Document as DomainDocument
 from kapsula.infrastructure.data.connection import Base
 from kapsula.infrastructure.data.tables.account import Account as OrmAccount
 from kapsula.infrastructure.data.tables.collection import Collection as OrmCollection
@@ -18,7 +18,9 @@ from kapsula.infrastructure.data.tables.document import Document as OrmDocument
 @pytest.fixture
 def db_session():
     """Create an in-memory SQLite database with all tables."""
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}
+    )
     Base.metadata.create_all(bind=engine)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     db = SessionLocal()
@@ -31,7 +33,9 @@ def db_session():
 @pytest.fixture
 def account(db_session: Session) -> DomainAccount:
     """Create a real Account in the in-memory DB via the ORM."""
-    orm = OrmAccount(account_id=str(uuid.uuid4()), name="test-account", ip_address="127.0.0.1")
+    orm = OrmAccount(
+        account_id=str(uuid.uuid4()), name="test-account", ip_address="127.0.0.1"
+    )
     db_session.add(orm)
     db_session.commit()
     db_session.refresh(orm)
@@ -120,9 +124,9 @@ class TestSaveDocumentReturnsCopy:
         repo.save_document(db_session, original)
 
         # Assert — original MUST still have id=None
-        assert original.id is None, (
-            "save_document must NOT mutate the input entity's id"
-        )
+        assert (
+            original.id is None
+        ), "save_document must NOT mutate the input entity's id"
 
     def test_returned_copy_preserves_other_fields(
         self, db_session: Session, collection: DomainCollection
@@ -175,9 +179,7 @@ class TestSaveDocumentReturnsCopy:
 
         # Assert — query DB directly, verify row exists with same id
         orm_doc = (
-            db_session.query(OrmDocument)
-            .filter(OrmDocument.job_id == job_id)
-            .first()
+            db_session.query(OrmDocument).filter(OrmDocument.job_id == job_id).first()
         )
         assert orm_doc is not None, "document row must exist in DB"
         assert orm_doc.id == result.id

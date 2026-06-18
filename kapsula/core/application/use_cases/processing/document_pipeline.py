@@ -59,7 +59,7 @@ class DocumentPipeline:
             )
             return True
         except Exception as e:
-            logger.error("Pipeline failed for %s: %s", job_id, e, exc_info=True)
+            logger.exception("Pipeline failed for %s: %s", job_id, e)
             self._progress.set(
                 job_id,
                 status="failed",

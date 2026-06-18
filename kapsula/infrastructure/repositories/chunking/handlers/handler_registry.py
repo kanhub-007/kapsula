@@ -1,10 +1,10 @@
 """Strategy registry — maps domain element types to strategies."""
 
-from .title_handler import TitleHandler
-from .table_handler import TableHandler
-from .list_handler import ListHandler
 from .code_handler import CodeHandler
+from .list_handler import ListHandler
+from .table_handler import TableHandler
 from .text_handler import TextHandler
+from .title_handler import TitleHandler
 
 
 class HandlerRegistry:

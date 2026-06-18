@@ -1,7 +1,6 @@
 """Text processing utilities shared by indexer and searcher."""
 
 import re
-from typing import List
 
 _STEM_CACHE: dict[str, str] = {}
 
@@ -52,7 +51,7 @@ def simple_stem(word: str) -> str:
     return stemmed
 
 
-def tokenize(text: str) -> List[str]:
+def tokenize(text: str) -> list[str]:
     """Tokenize text for BM25 indexing and search."""
     words = re.findall(r"\b\w+\b", text.lower())
     return [simple_stem(w) for w in words]

@@ -1,42 +1,39 @@
 """Search routes."""
 
-import json
 import os
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from kapsula.core.application.dto.collection_search import CollectionSearch
+from kapsula.core.domain.text_processing import parse_node_type_filter
 from kapsula.infrastructure.data.connection import get_db
+from kapsula.infrastructure.data.tables.collection import Collection
 from kapsula.infrastructure.logging_config import get_logger
+from kapsula.presentation.api.search_presenter import (
+    build_collection_search_response,
+)
+from kapsula.startup import create_multi_index_searcher
+
+from ..models import CollectionSearchResponse
 from .search_helpers import extract_citation_from_result
 
 logger = get_logger(__name__)
 router = APIRouter()
 
-from kapsula.core.application.dto.collection_search import CollectionSearch
-from kapsula.core.domain.text_processing import parse_node_type_filter
-from kapsula.infrastructure.data.tables.collection import Collection
-from kapsula.presentation.api.search_presenter import (
-    build_collection_search_response,
-    collect_unique_citations,
-)
-from kapsula.startup import create_multi_index_searcher
-from ..models import CollectionSearchResponse
 
 @router.post("/collections", response_model=CollectionSearchResponse)
 @router.post("/search/collections", response_model=CollectionSearchResponse)
 async def search_across_collections(
     query: str = Query(..., description="Search query"),
-    account_id: Optional[str] = Query(
+    account_id: str | None = Query(
         None, description="Account ID to search within (optional)"
     ),
     top_k: int = Query(10, ge=1, le=100, description="Number of results to return"),
     context_mode: str = Query(
         "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
     ),
-    node_type_filter: Optional[str] = Query(
+    node_type_filter: str | None = Query(
         None, description="Comma-separated node types to filter (e.g., 'code,table')"
     ),
     routing_mode: str = Query("auto", description="Routing mode: auto, llm, or fast"),
@@ -90,7 +87,7 @@ async def search_across_collections(
         )
 
     except Exception as e:
-        logger.error(f"Collection search failed: {e}", exc_info=True)
+        logger.exception(f"Collection search failed: {e}")
         raise HTTPException(
             status_code=500, detail=f"Collection search failed: {str(e)}"
         )
@@ -104,7 +101,7 @@ async def search_collection(
     context_mode: str = Query(
         "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
     ),
-    node_type_filter: Optional[str] = Query(
+    node_type_filter: str | None = Query(
         None, description="Comma-separated node types to filter (e.g., 'code,table')"
     ),
     routing_mode: str = Query("auto", description="Routing mode: auto, llm, or fast"),
@@ -160,7 +157,7 @@ async def search_collection(
             extract_citation=extract_citation_from_result,
         )
     except Exception as e:
-        logger.error(f"Scoped collection search failed: {e}", exc_info=True)
+        logger.exception(f"Scoped collection search failed: {e}")
         raise HTTPException(
             status_code=500, detail=f"Collection search failed: {str(e)}"
         )
@@ -174,7 +171,7 @@ async def search_collection_by_query_param(
     context_mode: str = Query(
         "none", description="Context expansion mode: none, narrow (H3), deep (H2)"
     ),
-    node_type_filter: Optional[str] = Query(
+    node_type_filter: str | None = Query(
         None, description="Comma-separated node types to filter (e.g., 'code,table')"
     ),
     routing_mode: str = Query("auto", description="Routing mode: auto, llm, or fast"),
@@ -190,5 +187,3 @@ async def search_collection_by_query_param(
         routing_mode=routing_mode,
         db=db,
     )
-
-

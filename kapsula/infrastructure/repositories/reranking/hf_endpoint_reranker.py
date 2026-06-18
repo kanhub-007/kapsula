@@ -1,10 +1,10 @@
 """HuggingFace Inference Endpoint reranker."""
 
 import asyncio
-from typing import List, Dict, Any
+from typing import Any
 
-import numpy as np
 import aiohttp
+import numpy as np
 from huggingface_hub import InferenceClient
 
 from kapsula.infrastructure.logging_config import get_logger
@@ -22,8 +22,8 @@ class HFEndpointReranker:
         self._headers = {"Authorization": f"Bearer {token}"}
 
     async def rerank(
-        self, query: str, candidates: List[Dict[str, Any]], top_k: int
-    ) -> List[Dict[str, Any]]:
+        self, query: str, candidates: list[dict[str, Any]], top_k: int
+    ) -> list[dict[str, Any]]:
         if not candidates:
             return []
 
@@ -65,7 +65,7 @@ class HFEndpointReranker:
             return None
 
     async def _concurrent_fallback(
-        self, query: str, candidates: List[Dict[str, Any]]
+        self, query: str, candidates: list[dict[str, Any]]
     ) -> list[float]:
         logger.info("Falling back to concurrent individual reranking")
         pair_texts = [f"[CLS] {query} [SEP] {c['content']} [SEP]" for c in candidates]

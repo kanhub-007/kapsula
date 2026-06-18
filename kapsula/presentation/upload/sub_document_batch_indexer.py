@@ -86,11 +86,10 @@ class SubDocumentBatchIndexer:
         try:
             embeddings = self._builder.embed_texts(all_texts)
         except Exception as exc:
-            logger.error(
+            logger.exception(
                 "Job %s: Batch embedding failed; sub-document indexes were not built: %s",
                 job_id,
                 exc,
-                exc_info=True,
             )
             self._progress.set(
                 job_id,

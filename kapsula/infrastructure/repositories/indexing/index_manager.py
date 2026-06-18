@@ -4,21 +4,21 @@ import os
 
 from sqlalchemy.orm import Session
 
-from kapsula.core.domain.interfaces.embedder import Embedder
-from kapsula.core.domain.interfaces.index_manager import (
-    IndexManager,
-    IndexableDocument,
-    IndexableSubDocument,
-    IndexableCollection,
-)
 from kapsula.core.domain.entities.aggregate_index_paths import (
     AggregateIndexPaths,
 )
 from kapsula.core.domain.entities.rebuild_result import RebuildResult
+from kapsula.core.domain.interfaces.embedder import Embedder
+from kapsula.core.domain.interfaces.index_manager import (
+    IndexableCollection,
+    IndexableDocument,
+    IndexableSubDocument,
+    IndexManager,
+)
+from kapsula.infrastructure.logging_config import get_logger
 from kapsula.infrastructure.repositories.indexing.aggregate_index_builder import (
     AggregateIndexBuilder,
 )
-from kapsula.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
 
@@ -62,14 +62,24 @@ class FileSystemIndexManager(IndexManager):
         coll_paths = AggregateIndexPaths.for_collection(
             self._data_dir, account_guid, collection.collection_id
         )
-        for p in (coll_paths.faiss, coll_paths.bm25, coll_paths.mapping, coll_paths.faiss_npy):
+        for p in (
+            coll_paths.faiss,
+            coll_paths.bm25,
+            coll_paths.mapping,
+            coll_paths.faiss_npy,
+        ):
             if p and os.path.exists(p):
                 os.remove(p)
                 logger.debug("Deleted aggregate cache: %s", os.path.basename(p))
 
         if account_guid:
             acct_paths = AggregateIndexPaths.for_account(self._data_dir, account_guid)
-            for p in (acct_paths.faiss, acct_paths.bm25, acct_paths.mapping, acct_paths.faiss_npy):
+            for p in (
+                acct_paths.faiss,
+                acct_paths.bm25,
+                acct_paths.mapping,
+                acct_paths.faiss_npy,
+            ):
                 if p and os.path.exists(p):
                     os.remove(p)
 

@@ -1,7 +1,5 @@
 """Verify backward compatibility — old imports from tasks.py still resolve."""
 
-import pytest
-
 
 class TestBackwardCompatibility:
     """Imports that existed before the pipeline refactoring must still work."""

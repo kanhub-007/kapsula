@@ -2,12 +2,11 @@
 
 import asyncio
 import logging
-from typing import List
 
-from kapsula.core.domain.interfaces.retriever import Retriever
+from kapsula.core.application.use_cases.result_filter import filter_by_node_type
 from kapsula.core.domain.interfaces.fusion import Fusion
 from kapsula.core.domain.interfaces.reranker import Reranker
-from kapsula.core.application.use_cases.result_filter import filter_by_node_type
+from kapsula.core.domain.interfaces.retriever import Retriever
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,7 @@ class HybridSearcher:
         top_k: int = 10,
         retrieval_k: int = 50,
         rerank: bool = False,
-        node_type_filter: List[str] | None = None,
+        node_type_filter: list[str] | None = None,
         sub_document_id: int | None = None,
     ) -> list[dict]:
         query = query.strip()

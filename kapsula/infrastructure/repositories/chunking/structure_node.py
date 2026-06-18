@@ -1,14 +1,12 @@
 """Tree node for building unique structure from headings."""
 
-from typing import List
-
 
 class StructureNode:
     def __init__(self, text: str):
         self.text = text
-        self.children: dict[str, "StructureNode"] = {}
+        self.children: dict[str, StructureNode] = {}
 
-    def add_path(self, path_parts: List[str], remaining_children: List = None):
+    def add_path(self, path_parts: list[str], remaining_children: list = None):
         if not path_parts:
             if remaining_children:
                 for child in remaining_children:
@@ -25,7 +23,7 @@ class StructureNode:
             self.children[current] = StructureNode(current)
         self.children[current].add_path(rest, remaining_children)
 
-    def to_markdown(self, depth: int = 0, parent_text: str = "") -> List[str]:
+    def to_markdown(self, depth: int = 0, parent_text: str = "") -> list[str]:
         lines = []
         for child_text in sorted(self.children.keys()):
             child = self.children[child_text]

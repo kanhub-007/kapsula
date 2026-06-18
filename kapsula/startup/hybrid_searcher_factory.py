@@ -1,19 +1,19 @@
 """Cached HybridSearcher factory."""
 
-from kapsula.infrastructure.repositories.indexing import (
-    load_faiss_index,
-    load_bm25_index,
-)
-from kapsula.core.domain.interfaces.embedder import Embedder
-from kapsula.core.domain.interfaces.reranker import Reranker
-from kapsula.core.domain.interfaces.fusion import Fusion
+from kapsula.core.application.use_cases.hybrid_searcher import HybridSearcher
 from kapsula.core.domain.fusion.weighted_fusion import WeightedFusion
+from kapsula.core.domain.interfaces.embedder import Embedder
+from kapsula.core.domain.interfaces.fusion import Fusion
+from kapsula.core.domain.interfaces.reranker import Reranker
+from kapsula.infrastructure.logging_config import get_logger
+from kapsula.infrastructure.repositories.indexing import (
+    load_bm25_index,
+    load_faiss_index,
+)
 from kapsula.infrastructure.repositories.retrieval import (
     DenseRetriever,
     SparseRetriever,
 )
-from kapsula.core.application.use_cases.hybrid_searcher import HybridSearcher
-from kapsula.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
 

@@ -1,8 +1,15 @@
 """Document domain entity — canonical model, never imports infrastructure."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kapsula.core.domain.entities.chunk import Chunk
+    from kapsula.core.domain.entities.collection import Collection
+    from kapsula.core.domain.entities.sub_document import SubDocument
 
 
 @dataclass
@@ -24,6 +31,6 @@ class Document:
     bm25_index_path: str | None = None
 
     # Navigation (populated by repository when loading)
-    collection: Optional["Collection"] = None
-    chunks: list["Chunk"] = field(default_factory=list)
-    sub_documents: list["SubDocument"] = field(default_factory=list)
+    collection: Collection | None = None
+    chunks: list[Chunk] = field(default_factory=list)
+    sub_documents: list[SubDocument] = field(default_factory=list)

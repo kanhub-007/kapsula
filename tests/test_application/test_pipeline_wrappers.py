@@ -1,7 +1,7 @@
 """Tests for pipeline-wired process_document wrappers."""
 
-import uuid
 import logging
+import uuid
 
 import pytest
 from sqlalchemy import create_engine
@@ -16,7 +16,9 @@ from kapsula.infrastructure.data.tables.document import Document as OrmDocument
 @pytest.fixture
 def db_session():
     """In-memory SQLite database with all tables."""
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}
+    )
     Base.metadata.create_all(bind=engine)
     Sess = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     db = Sess()
@@ -29,12 +31,17 @@ def db_session():
 @pytest.fixture
 def seeded_db(db_session: Session):
     """Create account, collection, and document for processing."""
-    account = OrmAccount(account_id=str(uuid.uuid4()), name="test-account", ip_address="127.0.0.1")
+    account = OrmAccount(
+        account_id=str(uuid.uuid4()), name="test-account", ip_address="127.0.0.1"
+    )
     db_session.add(account)
     db_session.commit()
 
     coll = OrmCollection(
-        collection_id=str(uuid.uuid4()), account_id=account.id, name="Test", ip_address="127.0.0.1"
+        collection_id=str(uuid.uuid4()),
+        account_id=account.id,
+        name="Test",
+        ip_address="127.0.0.1",
     )
     db_session.add(coll)
     db_session.commit()
@@ -77,7 +84,9 @@ class TestPipelineWrappers:
 
         assert callable(process_subdocuments_via_pipeline)
 
-    def test_pipeline_wrapper_runs_without_crashing(self, db_session: Session, seeded_db: dict):
+    def test_pipeline_wrapper_runs_without_crashing(
+        self, db_session: Session, seeded_db: dict
+    ):
         """process_document_via_pipeline should execute stages without raising."""
         from kapsula.presentation.api.tasks import process_document_via_pipeline
 
@@ -90,11 +99,17 @@ class TestPipelineWrappers:
             ingestion_mode="indexed",
         )
 
-        doc = db_session.query(OrmDocument).filter(OrmDocument.job_id == "pipeline-test-1").first()
+        doc = (
+            db_session.query(OrmDocument)
+            .filter(OrmDocument.job_id == "pipeline-test-1")
+            .first()
+        )
         assert doc is not None
         assert doc.status in ("completed", "failed")
 
-    def test_pipeline_wrapper_preserves_progress(self, db_session: Session, seeded_db: dict):
+    def test_pipeline_wrapper_preserves_progress(
+        self, db_session: Session, seeded_db: dict
+    ):
         """Pipeline wrapper must populate processing_status dict."""
         from kapsula.presentation.api.tasks import (
             process_document_via_pipeline,

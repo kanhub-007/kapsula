@@ -1,25 +1,35 @@
 """Background task functions for document processing."""
 
-import time
 import json
-import os
 import re
-from typing import List, Dict, Any
+import time
+from typing import Any
+
 from sqlalchemy.orm import Session
 
+from kapsula.core.application.use_cases.collection_summary import (
+    CollectionSummaryGenerator,
+)
+from kapsula.core.application.use_cases.upload.upload_ingestion_strategy_factory import (
+    UploadIngestionStrategyFactory,
+)
+from kapsula.core.domain.services.citation_linker import (
+    add_citation_metadata_to_chunks,
+)
 from kapsula.infrastructure.data import (
+    DATA_DIR,
+    Chunk,
     Document,
     DocumentStructure,
-    Chunk,
     LibraryCard,
     SubDocument,
     SubDocumentPage,
-    Collection,
-    DATA_DIR,
 )
+from kapsula.infrastructure.external.llm.chat_client import HuggingFaceChatClient
+from kapsula.infrastructure.logging_config import get_logger
 from kapsula.infrastructure.repositories.chunking import (
-    extract_document_structure_skeleton,
     MarkdownChunker,
+    extract_document_structure_skeleton,
     extract_parent_sections,
 )
 from kapsula.infrastructure.repositories.chunking.breadcrumb_parser import (
@@ -31,22 +41,15 @@ from kapsula.infrastructure.repositories.chunking.header_matcher import (
     match_header_to_parents,
 )
 from kapsula.infrastructure.repositories.indexing import DocumentIndexBuilder
-from kapsula.infrastructure.external.llm.chat_client import HuggingFaceChatClient
-from kapsula.core.application.use_cases.collection_summary import (
-    CollectionSummaryGenerator,
+from kapsula.infrastructure.repositories.processing._chunk_linker import (
+    _build_document_indexes,
+    _link_chunks_to_parents,
 )
-from kapsula.core.application.use_cases.upload.upload_ingestion_strategy_factory import (
-    UploadIngestionStrategyFactory,
-)
-from kapsula.core.domain.services.citation_linker import (
-    add_citation_metadata_to_chunks,
+from kapsula.infrastructure.repositories.processing.aggregate_build_stage import (
+    rebuild_collection_aggregate_index,
 )
 from kapsula.infrastructure.repositories.processing.collection_summary_stage import (
     update_collection_library_card,
-)
-from kapsula.infrastructure.repositories.processing._chunk_linker import _link_chunks_to_parents, _build_document_indexes
-from kapsula.infrastructure.repositories.processing.aggregate_build_stage import (
-    rebuild_collection_aggregate_index,
 )
 from kapsula.presentation.upload.maintenance_state_manager import (
     MaintenanceStateManager,
@@ -56,7 +59,6 @@ from kapsula.presentation.upload.sub_document_batch_indexer import (
 )
 from kapsula.presentation.upload.upload_job_manager import UploadJobManager
 from kapsula.presentation.upload.upload_progress_tracker import UploadProgressTracker
-from kapsula.infrastructure.logging_config import get_logger
 from kapsula.startup import create_embedder
 
 logger = get_logger(__name__)
@@ -64,9 +66,7 @@ logger = get_logger(__name__)
 # Regex to strip image markdown (![alt](url)) and leading Figure labels from
 # structural library card content so previews show real text, not image noise.
 _IMG_MD_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
-_FIG_LABEL_RE = re.compile(
-    r"^\s*fig(?:ure)?\s*\d*[:.]?\s*", re.IGNORECASE
-)
+_FIG_LABEL_RE = re.compile(r"^\s*fig(?:ure)?\s*\d*[:.]?\s*", re.IGNORECASE)
 
 
 def _strip_section_images(content: str) -> str:
@@ -90,11 +90,6 @@ processing_status = {}
 
 _upload_progress = UploadProgressTracker(processing_status, logger)
 _upload_job_manager = UploadJobManager(_upload_progress)
-
-
-from kapsula.core.domain.citation_matching import (
-    find_chunk_in_markdown,
-)
 
 
 def process_document(
@@ -250,10 +245,14 @@ def process_document(
         db.commit()
         logger.debug(f"Job {job_id}: Parent sections saved to database")
 
-        _link_chunks_to_parents(job_id, document, parent_sections, db, processing_status)
+        _link_chunks_to_parents(
+            job_id, document, parent_sections, db, processing_status
+        )
 
         if ingestion_strategy.build_document_indexes:
-                    _build_document_indexes(job_id, document, chunks, db, ingestion_mode, _upload_progress)
+            _build_document_indexes(
+                job_id, document, chunks, db, ingestion_mode, _upload_progress
+            )
 
         # Calculate duration
         duration = time.time() - start_time
@@ -268,8 +267,11 @@ def process_document(
 
         if ingestion_strategy.rebuild_aggregate_indexes:
             # Step 4: Rebuild collection aggregate index
+            embedder = create_embedder()
             rebuild_collection_aggregate_index(
-                db, document, job_id,
+                db,
+                document,
+                job_id,
                 upload_progress=_upload_progress,
                 embedder=embedder,
                 upload_start_time=start_time,
@@ -322,9 +324,7 @@ def process_document(
         logger.info(f"Job {job_id}: SUCCESS - {len(chunks)} chunks in {duration:.2f}s")
 
     except Exception as e:
-        logger.error(
-            f"Job {job_id}: Processing failed with error: {str(e)}", exc_info=True
-        )
+        logger.exception(f"Job {job_id}: Processing failed with error: {str(e)}")
 
         # Update document with error status
         document = db.query(Document).filter(Document.job_id == job_id).first()
@@ -728,13 +728,18 @@ def process_document_with_subdocuments(
             logger.info(f"Job {job_id}: Updating collection library card")
             try:
                 import os
+
                 summary_generator = CollectionSummaryGenerator(
                     HuggingFaceChatClient(
                         token=os.getenv("HF_TOKEN", ""),
-                        model=os.getenv("INTELLIGENT_SEARCH_MODEL", "deepseek-ai/DeepSeek-V3.2-Exp"),
+                        model=os.getenv(
+                            "INTELLIGENT_SEARCH_MODEL", "deepseek-ai/DeepSeek-V3.2-Exp"
+                        ),
                     )
                 )
-                update_collection_library_card(document.id, db, summary_generator=summary_generator)
+                update_collection_library_card(
+                    document.id, db, summary_generator=summary_generator
+                )
             except Exception as e:
                 logger.error(
                     f"Job {job_id}: Failed to update collection library card: {e}"
@@ -749,8 +754,12 @@ def process_document_with_subdocuments(
 
         if ingestion_strategy.rebuild_aggregate_indexes:
             # Step 5: Rebuild collection aggregate index
+            if embedder is None:
+                embedder = create_embedder()
             rebuild_collection_aggregate_index(
-                db, document, job_id,
+                db,
+                document,
+                job_id,
                 upload_progress=_upload_progress,
                 embedder=embedder,
                 upload_start_time=start_time,
@@ -813,9 +822,7 @@ def process_document_with_subdocuments(
         )
 
     except Exception as e:
-        logger.error(
-            f"Job {job_id}: Russian Doll processing failed: {str(e)}", exc_info=True
-        )
+        logger.exception(f"Job {job_id}: Russian Doll processing failed: {str(e)}")
 
         # Update document with error status
         document = db.query(Document).filter(Document.job_id == job_id).first()

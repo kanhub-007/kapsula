@@ -8,8 +8,12 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from kapsula.infrastructure.data.tables.library_card import LibraryCard as OrmLibraryCard
-from kapsula.infrastructure.data.tables.sub_document import SubDocument as OrmSubDocument
+from kapsula.infrastructure.data.tables.library_card import (
+    LibraryCard as OrmLibraryCard,
+)
+from kapsula.infrastructure.data.tables.sub_document import (
+    SubDocument as OrmSubDocument,
+)
 
 
 def build_document_structure_from_subdocs(

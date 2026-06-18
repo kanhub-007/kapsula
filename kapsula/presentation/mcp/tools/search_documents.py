@@ -1,21 +1,17 @@
 """MCP document search tools — raw chunk retrieval."""
 
-import asyncio
-
 from fastmcp import FastMCP
 
 from kapsula.infrastructure.data import Document, SubDocument
 
-from ._shared import (
-    _get_db,
-    _hf_token,
-    _parse_node_type_filter,
-    _get_multi_index_searcher,
-    _get_search_job_manager,
-)
 from ._search_helpers import (
     run_search_documents_text,
-    log_search_miss,
+)
+from ._shared import (
+    _get_db,
+    _get_multi_index_searcher,
+    _hf_token,
+    _parse_node_type_filter,
 )
 
 
@@ -93,11 +89,11 @@ def register_search_document_tools(mcp: FastMCP):
         context_mode: str = "none",
         node_type_filter: str | None = None,
     ) -> str:
-        from kapsula.core.application.dto.sub_document_search import (
-            SubDocumentSearch,
-        )
         from kapsula.core.application.dto.single_index_search import (
             SingleIndexSearch,
+        )
+        from kapsula.core.application.dto.sub_document_search import (
+            SubDocumentSearch,
         )
 
         db = _get_db()

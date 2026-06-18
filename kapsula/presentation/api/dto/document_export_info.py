@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from typing import List, Optional
-
 from pydantic import BaseModel
+
 from kapsula.presentation.api.dto.library_card_info import LibraryCardInfo
 
 
@@ -15,6 +14,6 @@ class DocumentExportInfo(BaseModel):
     size: int
     status: str
     created_at: str
-    duration: Optional[float]
+    duration: float | None
     chunk_count: int
-    library_cards: List[LibraryCardInfo]
+    library_cards: list[LibraryCardInfo]

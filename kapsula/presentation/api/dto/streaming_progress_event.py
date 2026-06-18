@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -11,4 +11,4 @@ class StreamingProgressEvent(BaseModel):
     event_type: (
         str  # 'planning', 'subquestion_start', 'subquestion_complete', 'final_answer'
     )
-    data: Dict[str, Any]  # Event-specific data
+    data: dict[str, Any]  # Event-specific data

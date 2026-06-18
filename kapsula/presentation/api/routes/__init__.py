@@ -1,7 +1,8 @@
 from fastapi import APIRouter
-from .documents import router as documents_router
-from .collections import router as collections_router
+
 from .accounts import router as accounts_router
+from .collections import router as collections_router
+from .documents import router as documents_router
 from .health import router as health_router
 from .search_collection import router as search_collection_router
 from .search_document import router as search_document_router

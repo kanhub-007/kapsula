@@ -2,16 +2,17 @@
 
 import asyncio
 import logging
-from typing import List, Dict, Any, Optional, Callable, Awaitable
-from kapsula.core.domain.interfaces.chat_client import ChatClient
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from kapsula.core.application.use_cases.intelligent_search_prompts import (
-    SYSTEM_PROMPT_EVALUATE,
-    USER_MESSAGE_EVALUATE,
-    SYSTEM_PROMPT_COMBINE,
-    USER_MESSAGE_COMBINE,
     _NO_ANSWER_PHRASES,
+    SYSTEM_PROMPT_COMBINE,
+    SYSTEM_PROMPT_EVALUATE,
+    USER_MESSAGE_COMBINE,
+    USER_MESSAGE_EVALUATE,
 )
+from kapsula.core.domain.interfaces.chat_client import ChatClient
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,8 @@ class IntelligentSearcher:
     async def evaluate_and_answer_with_planning_streaming(
         self,
         query: str,
-        search_function: Callable[[str], Awaitable[List[Dict[str, Any]]]],
-        plan: Optional[Dict[str, Any]] = None,
+        search_function: Callable[[str], Awaitable[list[dict[str, Any]]]],
+        plan: dict[str, Any] | None = None,
         max_context_length: int = 8000,
         top_k: int = 10,
     ):
@@ -70,7 +71,7 @@ class IntelligentSearcher:
             self._process_sub_query(q, search_function, max_context_length, top_k)
             for q in plan["queries"]
         ]
-        sub_answers: List[Dict[str, Any]] = []
+        sub_answers: list[dict[str, Any]] = []
 
         for idx, task in enumerate(asyncio.as_completed(tasks)):
             yield {
@@ -121,11 +122,11 @@ class IntelligentSearcher:
     async def evaluate_and_answer_with_planning(
         self,
         query: str,
-        search_function: Callable[[str], Awaitable[List[Dict[str, Any]]]],
-        plan: Optional[Dict[str, Any]] = None,
+        search_function: Callable[[str], Awaitable[list[dict[str, Any]]]],
+        plan: dict[str, Any] | None = None,
         max_context_length: int = 8000,
         top_k: int = 10,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Execute a search plan and return a single result dict."""
 
         if not plan:
@@ -162,9 +163,9 @@ class IntelligentSearcher:
     def evaluate_and_answer(
         self,
         query: str,
-        search_results: List[Dict[str, Any]],
+        search_results: list[dict[str, Any]],
         max_context_length: int = 8000,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Evaluate search results and generate a context-grounded answer."""
 
         if not search_results:
@@ -213,7 +214,7 @@ class IntelligentSearcher:
                 temperature=0.3,
             )
         except Exception as e:
-            logger.error(f"Intelligent search failed: {e}", exc_info=True)
+            logger.exception(f"Intelligent search failed: {e}")
             return {
                 "answer": f"An error occurred while processing your query: {e}",
                 "relevant_results": [],
@@ -238,10 +239,10 @@ class IntelligentSearcher:
     async def _process_sub_query(
         self,
         planned_query: str,
-        search_function: Callable[[str], Awaitable[List[Dict[str, Any]]]],
+        search_function: Callable[[str], Awaitable[list[dict[str, Any]]]],
         max_context_length: int,
         top_k: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         results = await search_function(planned_query)
         top = sorted(results, key=lambda x: x.get("score", 0), reverse=True)[:top_k]
 
@@ -271,9 +272,9 @@ class IntelligentSearcher:
     def _combine_sub_answers(
         self,
         original_query: str,
-        sub_answers: List[Dict[str, Any]],
+        sub_answers: list[dict[str, Any]],
         max_context_length: int = 8000,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if not sub_answers:
             return {
                 "answer": "No information was found to answer your question.",
@@ -319,7 +320,7 @@ class IntelligentSearcher:
                 temperature=0.3,
             )
         except Exception as e:
-            logger.error(f"Failed to combine sub-answers: {e}", exc_info=True)
+            logger.exception(f"Failed to combine sub-answers: {e}")
             return {
                 "answer": f"An error occurred while synthesizing the answer: {e}",
                 "relevant_results": [],

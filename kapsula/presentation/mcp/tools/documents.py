@@ -13,6 +13,7 @@ from kapsula.infrastructure.repositories.data.sql_document_repository import (
 from kapsula.infrastructure.repositories.data.sql_query_repositories import (
     SqlChunkRepository,
 )
+
 from ._shared import _get_db
 
 _doc_repo = SqlDocumentRepository()
@@ -415,8 +416,9 @@ def register_document_tools(mcp: FastMCP):
     def get_upload_metrics() -> str:
         db = _get_db()
         try:
-            from kapsula.infrastructure.data import UploadJob as OrmUploadJob
             from sqlalchemy import func
+
+            from kapsula.infrastructure.data import UploadJob as OrmUploadJob
 
             total = db.query(OrmUploadJob).count()
             if total == 0:

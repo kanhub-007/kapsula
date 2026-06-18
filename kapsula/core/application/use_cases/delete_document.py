@@ -1,14 +1,15 @@
 """Delete document use case — archives document, removes chunks, rebuilds indexes."""
 
+import logging
+
 from kapsula.core.application.dto.delete_document_result import (
     DeleteDocumentResult,
 )
 from kapsula.core.application.dto.rebuild_result import RebuildResult
-from kapsula.core.domain.interfaces.index_manager import IndexManager
 from kapsula.core.domain.interfaces.document_repository import (
     DocumentRepository,
 )
-import logging
+from kapsula.core.domain.interfaces.index_manager import IndexManager
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,9 @@ class DeleteDocumentUseCase:
 
         logger.info(
             "Deleting document: job_id=%s filename=%s collection=%s",
-            job_id, filename, collection_name,
+            job_id,
+            filename,
+            collection_name,
         )
 
         # 1. Delete index files from disk (before DB changes)

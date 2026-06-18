@@ -1,9 +1,9 @@
 """Search scope kind enum."""
 
-from enum import Enum
+from enum import StrEnum
 
 
-class SearchScopeKind(str, Enum):
+class SearchScopeKind(StrEnum):
     """Supported collection-search scopes."""
 
     GLOBAL = "global"

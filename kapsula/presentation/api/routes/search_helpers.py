@@ -4,17 +4,21 @@ Each route sub-module imports its own dependencies directly.
 """
 
 import json
+from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
 from kapsula.infrastructure.logging_config import get_logger
+
+if TYPE_CHECKING:
+    from kapsula.presentation.api.models import Citation
 
 logger = get_logger(__name__)
 
 
 def extract_citation_from_result(
     result: dict, db: Session, document_id: int = None
-) -> "Citation | None":
+) -> Citation | None:
     """Extract citation information from a search result.
 
     Args:

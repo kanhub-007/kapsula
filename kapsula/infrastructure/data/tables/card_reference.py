@@ -11,20 +11,12 @@ from ..connection import Base
 class CardReference(Base):
     __tablename__ = "card_references"
 
-    source_card_id = Column(
-        Integer, ForeignKey("library_cards.id"), primary_key=True
-    )
-    target_card_id = Column(
-        Integer, ForeignKey("library_cards.id"), primary_key=True
-    )
+    source_card_id = Column(Integer, ForeignKey("library_cards.id"), primary_key=True)
+    target_card_id = Column(Integer, ForeignKey("library_cards.id"), primary_key=True)
     relation_type = Column(
         String, nullable=False
     )  # 'synthesizes_from', 'contradicts', 'extends', 'deprecates'
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
-    source_card = relationship(
-        "LibraryCard", foreign_keys=[source_card_id]
-    )
-    target_card = relationship(
-        "LibraryCard", foreign_keys=[target_card_id]
-    )
+    source_card = relationship("LibraryCard", foreign_keys=[source_card_id])
+    target_card = relationship("LibraryCard", foreign_keys=[target_card_id])

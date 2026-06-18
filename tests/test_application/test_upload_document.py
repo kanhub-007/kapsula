@@ -9,17 +9,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from kapsula.core.application.dto.upload_document_result import UploadDocumentResult
-from kapsula.core.domain.entities.account import Account as DomainAccount
+from kapsula.core.application.use_cases.upload_document import UploadDocumentUseCase
 from kapsula.core.domain.entities.collection import Collection as DomainCollection
 from kapsula.core.domain.entities.document import Document as DomainDocument
 from kapsula.core.domain.interfaces.background_processor import BackgroundProcessor
 from kapsula.core.domain.interfaces.document_repository import DocumentRepository
 from kapsula.core.domain.interfaces.progress_tracker import ProgressTracker
-from kapsula.core.application.use_cases.upload_document import UploadDocumentUseCase
 from kapsula.infrastructure.data.connection import Base
 from kapsula.infrastructure.data.tables.account import Account as OrmAccount
 from kapsula.infrastructure.data.tables.collection import Collection as OrmCollection
-
 
 # ── Fakes ──────────────────────────────────────────────────────
 
@@ -37,14 +35,20 @@ class InMemoryDocumentRepository(DocumentRepository):
                 return doc
         return None
 
-    def find_collection_by_guid(self, db, collection_id: str) -> DomainCollection | None:
+    def find_collection_by_guid(
+        self, db, collection_id: str
+    ) -> DomainCollection | None:
         return self._collection
 
     def list_all(self, db) -> list[DomainDocument]:
         return list(self.saved)
 
     def list_by_collection(self, db, collection_guid: str) -> list[DomainDocument]:
-        return [d for d in self.saved if self._collection and d.collection_id == self._collection.id]
+        return [
+            d
+            for d in self.saved
+            if self._collection and d.collection_id == self._collection.id
+        ]
 
     def save_document(self, db, document: DomainDocument) -> DomainDocument:
         doc = DomainDocument(
@@ -75,7 +79,9 @@ class FakeBackgroundProcessor(BackgroundProcessor):
         self.last_max_tokens: int | None = None
         self.last_ingestion_mode: str | None = None
 
-    def start_processing(self, job_id: str, content: str, max_tokens: int, ingestion_mode: str) -> None:
+    def start_processing(
+        self, job_id: str, content: str, max_tokens: int, ingestion_mode: str
+    ) -> None:
         self.last_job_id = job_id
         self.last_content = content
         self.last_max_tokens = max_tokens
@@ -88,7 +94,9 @@ class InMemoryProgressTracker(ProgressTracker):
     def __init__(self):
         self.jobs: dict[str, dict] = {}
 
-    def register_job(self, job_id: str, filename: str, collection_name: str, ingestion_mode: str) -> None:
+    def register_job(
+        self, job_id: str, filename: str, collection_name: str, ingestion_mode: str
+    ) -> None:
         self.jobs[job_id] = {
             "filename": filename,
             "collection_name": collection_name,
@@ -105,7 +113,9 @@ class InMemoryProgressTracker(ProgressTracker):
 @pytest.fixture
 def db_session():
     """In-memory SQLite database with tables for ORM-backed collection lookup."""
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}
+    )
     Base.metadata.create_all(bind=engine)
     Sess = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     db = Sess()
@@ -118,7 +128,9 @@ def db_session():
 @pytest.fixture
 def domain_collection(db_session: Session) -> DomainCollection:
     """Create a real collection in the in-memory DB (needed for ORM-backed repo tests)."""
-    account = OrmAccount(account_id=str(uuid.uuid4()), name="test-account", ip_address="127.0.0.1")
+    account = OrmAccount(
+        account_id=str(uuid.uuid4()), name="test-account", ip_address="127.0.0.1"
+    )
     db_session.add(account)
     db_session.commit()
     coll = OrmCollection(
@@ -146,7 +158,9 @@ def domain_collection(db_session: Session) -> DomainCollection:
 class TestUploadDocumentUseCase:
     """Tests for UploadDocumentUseCase.execute() and execute_from_content()."""
 
-    def test_execute_with_valid_md_file_succeeds(self, domain_collection: DomainCollection):
+    def test_execute_with_valid_md_file_succeeds(
+        self, domain_collection: DomainCollection
+    ):
         """Happy path: valid .md file, existing collection → returns UploadDocumentResult."""
         repo = InMemoryDocumentRepository(collection=domain_collection)
         progress = InMemoryProgressTracker()
@@ -200,11 +214,15 @@ class TestUploadDocumentUseCase:
 
         try:
             with pytest.raises(ValueError, match="Only .md files accepted"):
-                use_case.execute(db=None, file_path=tmp_path, collection_id="coll-test-123")
+                use_case.execute(
+                    db=None, file_path=tmp_path, collection_id="coll-test-123"
+                )
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 
-    def test_execute_rejects_missing_collection(self, domain_collection: DomainCollection):
+    def test_execute_rejects_missing_collection(
+        self, domain_collection: DomainCollection
+    ):
         """Missing collection should raise ValueError."""
         # Repository returns None for unknown collection
         repo = InMemoryDocumentRepository(collection=None)
@@ -219,11 +237,15 @@ class TestUploadDocumentUseCase:
 
         try:
             with pytest.raises(ValueError, match="Collection not found"):
-                use_case.execute(db=None, file_path=tmp_path, collection_id="nonexistent")
+                use_case.execute(
+                    db=None, file_path=tmp_path, collection_id="nonexistent"
+                )
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 
-    def test_execute_with_invalid_ingestion_mode(self, domain_collection: DomainCollection):
+    def test_execute_with_invalid_ingestion_mode(
+        self, domain_collection: DomainCollection
+    ):
         """Invalid ingestion_mode should raise ValueError."""
         repo = InMemoryDocumentRepository(collection=domain_collection)
         progress = InMemoryProgressTracker()
@@ -237,7 +259,12 @@ class TestUploadDocumentUseCase:
 
         try:
             with pytest.raises(ValueError):
-                use_case.execute(db=None, file_path=tmp_path, collection_id="coll-test-123", ingestion_mode="invalid")
+                use_case.execute(
+                    db=None,
+                    file_path=tmp_path,
+                    collection_id="coll-test-123",
+                    ingestion_mode="invalid",
+                )
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 
@@ -270,7 +297,9 @@ class TestExecuteFromContent:
         assert repo.saved[0].content == "# Hello from bytes\nThis is content."
         assert processor.last_job_id == result.job_id
 
-    def test_execute_from_content_rejects_bad_extension(self, domain_collection: DomainCollection):
+    def test_execute_from_content_rejects_bad_extension(
+        self, domain_collection: DomainCollection
+    ):
         """Non-.md filename should raise ValueError."""
         repo = InMemoryDocumentRepository(collection=domain_collection)
         progress = InMemoryProgressTracker()

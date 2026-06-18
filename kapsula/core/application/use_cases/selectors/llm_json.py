@@ -1,27 +1,24 @@
-"""Shared LLM JSON response extraction utility."""
+"""Typed extractors for LLM JSON responses.
+
+JSON parsing itself lives in :mod:`kapsula.core.domain.json_utils` (single
+source of truth). This module adds typed, key-level accessors on top of the
+parsed dict.
+"""
 
 from __future__ import annotations
 
-import json
-import re
 from typing import Any
+
+from kapsula.core.domain.json_utils import _parse_json_safely
 
 
 def extract_json_object(response: str) -> dict[str, Any]:
     """Extract the first JSON object from an LLM response.
 
-    Handles common LLM formatting like markdown code fences and
-    explanatory text around the JSON payload.
+    Delegates to ``_parse_json_safely`` so all LLM-output quirks (code fences,
+    prose wrapping, trailing commas, curly quotes) are handled in one place.
     """
-    text = _strip_code_fences(response.strip())
-    start = text.find("{")
-    end = text.rfind("}")
-    if start >= 0 and end >= start:
-        text = text[start : end + 1]
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return {}
+    return _parse_json_safely(response)
 
 
 def extract_json_float(
@@ -43,15 +40,3 @@ def extract_json_int(payload: dict[str, Any], key: str, default: int = 0) -> int
 def extract_json_list(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
     items = payload.get(key, [])
     return items if isinstance(items, list) else []
-
-
-def _strip_code_fences(text: str) -> str:
-    if not text.startswith("```"):
-        return text
-    lines = [line for line in text.splitlines() if not _is_fence_line(line)]
-    return "\n".join(lines).strip()
-
-
-def _is_fence_line(line: str) -> bool:
-    stripped = line.strip()
-    return bool(re.match(r"^```", stripped))

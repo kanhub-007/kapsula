@@ -4,6 +4,7 @@ import uuid
 
 from fastmcp import FastMCP
 
+from kapsula.core.domain.entities.collection import Collection
 from kapsula.infrastructure.data import (
     Account as OrmAccount,
 )
@@ -16,7 +17,7 @@ from kapsula.infrastructure.repositories.data.sql_collection_repository import (
 from kapsula.infrastructure.repositories.data.sql_query_repositories import (
     SqlLibraryCardRepository,
 )
-from kapsula.core.domain.entities.collection import Collection
+
 from ._shared import _get_db
 
 # Library card level constants — the levels used for structural (extractive)
@@ -117,8 +118,9 @@ def register_collection_tools(mcp: FastMCP):
                 return "No collections found."
             lines = [f"Collections ({len(collections)}):\n"]
             # Bulk-load document counts to avoid N+1 queries
-            from kapsula.infrastructure.data import Document as OrmDocument
             from sqlalchemy import func
+
+            from kapsula.infrastructure.data import Document as OrmDocument
 
             doc_counts = dict(
                 db.query(OrmDocument.collection_id, func.count(OrmDocument.id))
@@ -196,6 +198,7 @@ def register_collection_tools(mcp: FastMCP):
     )
     def run_collection_maintenance(collection_id: str) -> str:
         import threading
+
         db = _get_db()
         try:
             from kapsula.infrastructure.data import Collection as OrmCollection
@@ -228,7 +231,7 @@ def register_collection_tools(mcp: FastMCP):
             return (
                 f"Maintenance started for '{col.name}'\n"
                 f"  maintenance_job_id: {job.job_id}\n"
-                f"  Poll progress: get_maintenance_job(\"{job.job_id}\")"
+                f'  Poll progress: get_maintenance_job("{job.job_id}")'
             )
         finally:
             db.close()
@@ -331,8 +334,12 @@ def register_collection_tools(mcp: FastMCP):
         try:
             from kapsula.infrastructure.data import (
                 Collection as OrmCollection,
-                LibraryCard as OrmLibraryCard,
+            )
+            from kapsula.infrastructure.data import (
                 Document as OrmDocument,
+            )
+            from kapsula.infrastructure.data import (
+                LibraryCard as OrmLibraryCard,
             )
 
             col = (
@@ -400,7 +407,11 @@ def register_collection_tools(mcp: FastMCP):
                     doc_names.get(card.document_id, "?") if card.document_id else "?"
                 )
                 preview = card.content[:200].replace("\n", " ").strip()
-                desc = f" — {card.description}" if getattr(card, "description", None) else ""
+                desc = (
+                    f" — {card.description}"
+                    if getattr(card, "description", None)
+                    else ""
+                )
                 lines.append(
                     f"{ind}[{lvl_label}] {card.title}{desc} — "
                     f'"{preview}..." ({doc_name})'
@@ -423,7 +434,11 @@ def register_collection_tools(mcp: FastMCP):
         try:
             from kapsula.infrastructure.data import (
                 Collection as OrmCollection,
+            )
+            from kapsula.infrastructure.data import (
                 ConsolidationRun,
+            )
+            from kapsula.infrastructure.data import (
                 LibraryCard as OrmLibraryCard,
             )
 

@@ -9,8 +9,10 @@ from kapsula.core.domain.interfaces.collection_repository import (
     CollectionRepository,
 )
 from kapsula.infrastructure.data import (
-    Collection as OrmCollection,
     Account as OrmAccount,
+)
+from kapsula.infrastructure.data import (
+    Collection as OrmCollection,
 )
 from kapsula.infrastructure.repositories.data.mappers import (
     collection_from_orm,
@@ -23,15 +25,11 @@ class SqlCollectionRepository(CollectionRepository):
 
     def list_all(self, db: Session) -> list[DomainCollection]:
         orm_list = (
-            db.query(OrmCollection)
-            .order_by(OrmCollection.created_at.desc())
-            .all()
+            db.query(OrmCollection).order_by(OrmCollection.created_at.desc()).all()
         )
         return [collection_from_orm(c) for c in orm_list]
 
-    def list_by_account(
-        self, db: Session, account_id: str
-    ) -> list[DomainCollection]:
+    def list_by_account(self, db: Session, account_id: str) -> list[DomainCollection]:
         orm_list = (
             db.query(OrmCollection)
             .join(OrmAccount)
@@ -64,4 +62,6 @@ class SqlCollectionRepository(CollectionRepository):
         db.add(orm_collection)
         db.commit()
         db.refresh(orm_collection)
-        return replace(collection, id=orm_collection.id, created_at=orm_collection.created_at)
+        return replace(
+            collection, id=orm_collection.id, created_at=orm_collection.created_at
+        )

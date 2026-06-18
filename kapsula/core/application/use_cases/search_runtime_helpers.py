@@ -6,6 +6,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
+
 def _select(selector, query: str, metadata: list[dict]) -> list[dict]:
     ids = selector.select(query, metadata)
     return [m for m in metadata if m["id"] in ids]

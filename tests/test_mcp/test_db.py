@@ -2,6 +2,7 @@
 
 import pytest
 from sqlalchemy import text
+
 from kapsula.presentation.mcp.db import get_db_session
 
 

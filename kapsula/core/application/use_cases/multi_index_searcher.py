@@ -2,10 +2,9 @@
 
 import asyncio
 import logging
-import os
+from collections.abc import Callable
 from time import perf_counter
-from typing import Callable
-from typing import List, Dict, Any
+from typing import Any
 
 from kapsula.core.application.dto.collection_search import CollectionSearch
 from kapsula.core.application.dto.search_scope import SearchScopeKind
@@ -23,17 +22,22 @@ from kapsula.core.application.use_cases.ranking.source_quota_policy import (
 from kapsula.core.application.use_cases.search_metadata_builder import (
     SearchMetadataBuilder,
 )
+from kapsula.core.application.use_cases.search_runtime_helpers import (
+    _document_concurrency,
+    _gather,
+    _select,
+)
 from kapsula.core.application.use_cases.search_strategy.collection_search_strategy import (
     CollectionSearchStrategy,
 )
 from kapsula.core.application.use_cases.selectors.batched_sub_document_selector import (
     BatchedSubDocumentSelector,
 )
-from kapsula.core.application.use_cases.selectors.metadata_preselector import (
-    MetadataPreselector,
-)
 from kapsula.core.application.use_cases.selectors.collection_routing_strategy import (
     make_collection_routing_strategy,
+)
+from kapsula.core.application.use_cases.selectors.metadata_preselector import (
+    MetadataPreselector,
 )
 from kapsula.core.application.use_cases.selectors.sub_document_selector import (
     SubDocumentSelector,
@@ -75,7 +79,7 @@ class MultiIndexSearcher:
 
     async def search_subdocuments(
         self, search: SubDocumentSearch
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         subdocs = self._data.get_sub_documents(search.document_id)
         if not subdocs:
             return []
@@ -133,7 +137,7 @@ class MultiIndexSearcher:
 
     async def search_single_index(
         self, search: SingleIndexSearch
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         searcher = self._get_searcher(search.faiss_path, search.bm25_path)
         return await searcher.search(
             query=search.query,
@@ -143,7 +147,7 @@ class MultiIndexSearcher:
 
     async def search_collections(
         self, search: CollectionSearch
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         total_started = perf_counter()
         scope = search.scope
         if scope.kind == SearchScopeKind.COLLECTION:
@@ -176,7 +180,9 @@ class MultiIndexSearcher:
             if aggregate_results is not None:
                 self._route_scorer.compute_weights(aggregate_results)
                 aggregate_results.sort(key=lambda r: r.get("score", 0), reverse=True)
-                aggregate_results = self._quota_policy.apply(aggregate_results, search.top_k)
+                aggregate_results = self._quota_policy.apply(
+                    aggregate_results, search.top_k
+                )
                 logger.info(
                     "Collection search total time %.3fs: aggregate fast path returned=%s",
                     perf_counter() - total_started,
@@ -269,8 +275,8 @@ class MultiIndexSearcher:
         search: CollectionSearch,
         document_semaphore: asyncio.Semaphore,
     ) -> list:
-        subdoc_candidates, single_index_docs = self._metadata.collect_collection_search_targets(
-            collection, docs
+        subdoc_candidates, single_index_docs = (
+            self._metadata.collect_collection_search_targets(collection, docs)
         )
         tasks = []
         if subdoc_candidates:
@@ -478,7 +484,3 @@ class MultiIndexSearcher:
                 )
             )
         return expanded
-
-
-
-from kapsula.core.application.use_cases._search_utils import _select, _document_concurrency, _gather

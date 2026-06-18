@@ -5,26 +5,26 @@ from dataclasses import replace
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from kapsula.core.domain.entities.document import Document as DomainDocument
 from kapsula.core.domain.entities.collection import Collection as DomainCollection
+from kapsula.core.domain.entities.document import Document as DomainDocument
 from kapsula.core.domain.interfaces.document_repository import (
     DocumentRepository,
 )
 from kapsula.infrastructure.data import (
-    Document,
-    Collection,
     Chunk,
+    Collection,
+    Document,
+    DocumentStructure,
+    LibraryCard,
     SubDocument,
     SubDocumentPage,
-    LibraryCard,
-    DocumentStructure,
-)
-from kapsula.infrastructure.repositories.data.mappers import (
-    document_from_orm,
-    document_to_orm,
-    collection_from_orm,
 )
 from kapsula.infrastructure.logging_config import get_logger
+from kapsula.infrastructure.repositories.data.mappers import (
+    collection_from_orm,
+    document_from_orm,
+    document_to_orm,
+)
 
 logger = get_logger(__name__)
 
@@ -58,11 +58,10 @@ class SqlDocumentRepository(DocumentRepository):
         self, db: Session, job_id: str
     ) -> DomainDocument | None:
         from sqlalchemy.orm import joinedload
+
         orm_doc = (
             db.query(Document)
-            .options(
-                joinedload(Document.collection).joinedload(Collection.account)
-            )
+            .options(joinedload(Document.collection).joinedload(Collection.account))
             .filter(Document.job_id == job_id)
             .first()
         )
@@ -94,13 +93,9 @@ class SqlDocumentRepository(DocumentRepository):
             return 0
         doc_id = document.id
 
-        chunks_deleted = (
-            db.query(Chunk).filter(Chunk.document_id == doc_id).delete()
-        )
+        chunks_deleted = db.query(Chunk).filter(Chunk.document_id == doc_id).delete()
 
-        sub_doc_ids = select(SubDocument.id).where(
-            SubDocument.document_id == doc_id
-        )
+        sub_doc_ids = select(SubDocument.id).where(SubDocument.document_id == doc_id)
         db.query(SubDocumentPage).filter(
             SubDocumentPage.sub_document_id.in_(sub_doc_ids)
         ).delete(synchronize_session=False)

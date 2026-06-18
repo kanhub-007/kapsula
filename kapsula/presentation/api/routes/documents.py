@@ -4,35 +4,37 @@ import json
 
 from fastapi import (
     APIRouter,
-    File,
-    UploadFile,
-    Depends,
-    HTTPException,
-    Request,
     BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    UploadFile,
 )
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from kapsula.infrastructure.data import (
-    get_db,
     SessionLocal,
+    get_db,
 )
-from kapsula.infrastructure.data.tables.document import Document as OrmDocument
-from kapsula.infrastructure.data.tables.document_structure import DocumentStructure as OrmDocumentStructure
 from kapsula.infrastructure.data.tables.chunk import Chunk as OrmChunk
+from kapsula.infrastructure.data.tables.document import Document as OrmDocument
+from kapsula.infrastructure.data.tables.document_structure import (
+    DocumentStructure as OrmDocumentStructure,
+)
 from kapsula.infrastructure.logging_config import get_logger
+from kapsula.presentation.upload.stale_progress_guard import StaleProgressGuard
+
 from ..models import (
-    UploadResponse,
-    ProgressResponse,
-    DocumentListResponse,
     DocumentDetailResponse,
     DocumentListItem,
+    DocumentListResponse,
+    ProgressResponse,
+    UploadResponse,
 )
-from kapsula.presentation.upload.stale_progress_guard import StaleProgressGuard
 from ..tasks import (
-    process_document_with_subdocuments,
     get_processing_status,
+    process_document_with_subdocuments,
 )
 
 logger = get_logger(__name__)
@@ -65,6 +67,7 @@ async def upload_document(
     content = await file.read()
 
     from kapsula.startup import create_upload_document_use_case
+
     use_case = create_upload_document_use_case()
 
     try:
@@ -91,7 +94,10 @@ async def upload_document(
 
     logger.info(
         "Upload started: job_id=%s filename=%s collection=%s mode=%s",
-        result.job_id, result.filename, result.collection_name, result.ingestion_mode,
+        result.job_id,
+        result.filename,
+        result.collection_name,
+        result.ingestion_mode,
     )
 
     return UploadResponse(

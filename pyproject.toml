@@ -31,3 +31,26 @@ dev = [
     "ruff>=0.1.0",
     "openapi-python-client==0.28.0"
 ]
+
+[tool.ruff]
+line-length = 88
+extend-exclude = [".venv", "venv"]
+
+[tool.ruff.lint]
+# Enable rules beyond the default set that match project conventions.
+# F = pyflakes, E/W = pycodestyle, I = isort (import ordering),
+# UP = pyupgrade (Optional -> | None), G = logging format, N = naming.
+select = ["E", "F", "I", "UP", "G", "W"]
+ignore = [
+    "E501",   # line length handled by black
+    "G004",   # f-string logging: too widespread to fix atomically; tracked separately
+]
+
+[tool.ruff.lint.per-file-ignores]
+# MCP tool modules legitimately use module-level cached singletons (documented
+# exception in AGENTS.md).
+"kapsula/presentation/mcp/**" = ["E402"]
+
+[tool.black]
+line-length = 88
+
