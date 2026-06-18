@@ -273,16 +273,18 @@ class TestUploadDocumentUseCase:
 
 
 class TestExecuteFromContent:
-    """Tests for the new execute_from_content() method."""
+    """Tests for execute_from_content() — bytes path (no temp file)."""
 
-    def test_writes_temp_file_and_cleans_up(self, domain_collection: DomainCollection):
-        """execute_from_content should write bytes to temp file, delegate, and delete."""
+    def test_persists_decoded_content_and_dispatches(
+        self, domain_collection: DomainCollection
+    ):
+        """execute_from_content decodes bytes and dispatches to background processing."""
         repo = InMemoryDocumentRepository(collection=domain_collection)
         progress = InMemoryProgressTracker()
         processor = FakeBackgroundProcessor()
         use_case = UploadDocumentUseCase(processor, repo, progress)
 
-        content_bytes = b"# Hello from bytes\nThis is content."
+        content_bytes = "# Hello from bytes\nUnicode: café ☕".encode()
         result = use_case.execute_from_content(
             db=None,
             content_bytes=content_bytes,
@@ -293,9 +295,14 @@ class TestExecuteFromContent:
 
         assert result.job_id is not None
         assert result.filename == "test.md"
+        assert result.ingestion_mode == "indexed"
         assert len(repo.saved) == 1
-        assert repo.saved[0].content == "# Hello from bytes\nThis is content."
+        # Content is decoded UTF-8, not a temp-file path.
+        assert repo.saved[0].content == "# Hello from bytes\nUnicode: café ☕"
+        assert repo.saved[0].filename == "test.md"
+        assert repo.saved[0].size == len(content_bytes)
         assert processor.last_job_id == result.job_id
+        assert processor.last_content == repo.saved[0].content
 
     def test_execute_from_content_rejects_bad_extension(
         self, domain_collection: DomainCollection

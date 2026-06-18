@@ -20,8 +20,8 @@ class MaintenanceStateManager:
     surviving process restarts.
     """
 
-    def __init__(self):
-        self._path = os.path.join(DATA_DIR, "maintenance_state.json")
+    def __init__(self, path: str | None = None):
+        self._path = path or os.path.join(DATA_DIR, "maintenance_state.json")
 
     def mark_collection_stale(
         self,
