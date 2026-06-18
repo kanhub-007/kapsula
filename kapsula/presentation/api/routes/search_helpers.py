@@ -1,40 +1,20 @@
-"""Search route helpers — shared imports and citation extraction."""
+"""Search route helpers — citation extraction only.
+
+Each route sub-module imports its own dependencies directly.
+"""
 
 import json
-import os
-from typing import Optional
 
-from fastapi import HTTPException, Query
-from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from kapsula.core.application.dto.collection_search import CollectionSearch
-from kapsula.core.application.dto.single_index_search import SingleIndexSearch
-from kapsula.core.application.dto.sub_document_search import SubDocumentSearch
-from kapsula.core.domain.text_processing import parse_node_type_filter
-from kapsula.infrastructure.data.connection import get_db
-from kapsula.infrastructure.data.tables.collection import Collection
-from kapsula.infrastructure.data.tables.document import Document
-from kapsula.infrastructure.data.tables.library_card import LibraryCard
-from kapsula.infrastructure.data.tables.sub_document import SubDocument
 from kapsula.infrastructure.logging_config import get_logger
-from kapsula.presentation.api.search_presenter import (
-    build_collection_search_response,
-    collect_unique_citations,
-)
-from kapsula.startup import (
-    create_multi_index_searcher,
-    create_query_planner,
-    create_intelligent_searcher,
-    create_chat_client,
-)
 
 logger = get_logger(__name__)
 
 
 def extract_citation_from_result(
     result: dict, db: Session, document_id: int = None
-) -> Optional["Citation"]:
+) -> "Citation | None":
     """Extract citation information from a search result.
 
     Args:

@@ -880,7 +880,14 @@ def process_document_with_subdocuments(
             )
             logger.info(f"Job {job_id}: Updating collection library card")
             try:
-                update_collection_library_card(document.id, db)
+                import os
+                summary_generator = CollectionSummaryGenerator(
+                    HuggingFaceChatClient(
+                        token=os.getenv("HF_TOKEN", ""),
+                        model=os.getenv("INTELLIGENT_SEARCH_MODEL", "deepseek-ai/DeepSeek-V3.2-Exp"),
+                    )
+                )
+                update_collection_library_card(document.id, db, summary_generator=summary_generator)
             except Exception as e:
                 logger.error(
                     f"Job {job_id}: Failed to update collection library card: {e}"

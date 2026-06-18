@@ -18,6 +18,13 @@ from kapsula.infrastructure.data import (
     SearchMissLog,
 )
 
+# ORM aliases per project convention
+OrmAccount = Account
+OrmCollection = Collection
+OrmDocument = Document
+OrmLibraryCard = LibraryCard
+OrmSubDocument = SubDocument
+
 from ._shared import (
     _get_db,
     _hf_token,
@@ -53,12 +60,12 @@ def log_search_miss(
 def get_topic_card_summary(db, collection_db_id: int) -> str:
     """Return a summary of topic cards for the collection (Phase 3)."""
     cards = (
-        db.query(LibraryCard)
+        db.query(OrmLibraryCard)
         .filter(
-            LibraryCard.collection_id == collection_db_id,
-            LibraryCard.card_type == "topic",
+            OrmLibraryCard.collection_id == collection_db_id,
+            OrmLibraryCard.card_type == "topic",
         )
-        .order_by(LibraryCard.importance.desc())
+        .order_by(OrmLibraryCard.importance.desc())
         .limit(5)
         .all()
     )
@@ -142,7 +149,7 @@ async def run_intelligent_collection_search(
     def _db_work():
         q = db.query(Collection)
         if account_id:
-            q = q.join(Account).filter(Account.account_id == account_id)
+            q = q.join(OrmAccount).filter(OrmAccount.account_id == account_id)
         collections = q.all()
         if not collections:
             return None, None, None, None
@@ -151,10 +158,10 @@ async def run_intelligent_collection_search(
         meta = []
         for c in collections:
             card = (
-                db.query(LibraryCard)
+                db.query(OrmLibraryCard)
                 .filter(
-                    LibraryCard.collection_id == c.id,
-                    LibraryCard.level == "collection",
+                    OrmLibraryCard.collection_id == c.id,
+                    OrmLibraryCard.level == "collection",
                 )
                 .first()
             )

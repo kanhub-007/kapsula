@@ -8,16 +8,21 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from kapsula.core.application.dto.collection_search import CollectionSearch
-from kapsula.core.application.dto.single_index_search import SingleIndexSearch
-from kapsula.core.application.dto.sub_document_search import SubDocumentSearch
-from kapsula.core.domain.text_processing import parse_node_type_filter
 from kapsula.infrastructure.data.connection import get_db
+from kapsula.infrastructure.logging_config import get_logger
+from .search_helpers import extract_citation_from_result
+
+logger = get_logger(__name__)
+router = APIRouter()
+
+from ._intelligent_search_prepare import _prepare_intelligent_search
+
+from kapsula.core.application.dto.collection_search import CollectionSearch
+from kapsula.core.domain.text_processing import parse_node_type_filter
 from kapsula.infrastructure.data.tables.collection import Collection
 from kapsula.infrastructure.data.tables.document import Document
 from kapsula.infrastructure.data.tables.library_card import LibraryCard
 from kapsula.infrastructure.data.tables.sub_document import SubDocument
-from kapsula.infrastructure.logging_config import get_logger
 from kapsula.presentation.api.search_presenter import (
     build_collection_search_response,
     collect_unique_citations,
@@ -29,113 +34,16 @@ from kapsula.startup import (
     create_chat_client,
 )
 from ..models import (
-    SearchResponse,
-    SearchResult,
     CollectionSearchResponse,
-    IntelligentSearchResponse,
     IntelligentCollectionSearchResponse,
     SearchPlan,
     SubAnswer,
     Citation,
 )
-from .search_helpers import extract_citation_from_result
-
-logger = get_logger(__name__)
-router = APIRouter()
-
 @router.post(
     "/intelligent_search/collections",
     response_model=IntelligentCollectionSearchResponse,
 )
-
-# ── shared preparation ────────────────────────────────────────
-
-
-async def _prepare_intelligent_search(query, account_id, enable_planning, db):
-    """Route to collection, build document structure, create query plan.
-    
-    Returns (search_plan, collections, routed_collection) tuple or raises HTTPException.
-    """
-    from kapsula.core.application.use_cases.selectors.collection_selector import CollectionSelector
-
-    collections_query = db.query(Collection)
-    if account_id:
-        collections_query = collections_query.join(Collection.account).filter(
-            Collection.account.has(account_id=account_id)
-        )
-    collections = collections_query.all()
-
-    if not collections:
-        logger.warning("No collections found")
-        raise HTTPException(status_code=404, detail="No collections available")
-
-    router = CollectionSelector(create_chat_client())
-    collection_metadata = []
-    for coll in collections:
-        card = (
-            db.query(LibraryCard)
-            .filter(
-                LibraryCard.collection_id == coll.id,
-                LibraryCard.level == "collection",
-            )
-            .first()
-        )
-        collection_metadata.append(
-            {
-                "id": coll.id,
-                "name": coll.name,
-                "library_card_summary": (
-                    card.content[:500] if card else f"Collection: {coll.name}"
-                ),
-                "document_count": len(coll.documents),
-            }
-        )
-
-    routed_collection_ids = router.select(query, collection_metadata)
-    routed_collection_id = (
-        routed_collection_ids[0] if routed_collection_ids else collections[0].id
-    )
-    logger.info(f"Routed to collection ID: {routed_collection_id}")
-
-    routed_collection = (
-        db.query(Collection).filter(Collection.id == routed_collection_id).first()
-    )
-
-    from kapsula.presentation.shared.document_structure_builder import (
-        build_document_structure_from_subdocs,
-    )
-    document_structure = []
-    if routed_collection:
-        documents = (
-            db.query(Document)
-            .filter(Document.collection_id == routed_collection_id)
-            .all()
-        )
-        for doc in documents:
-            subdocs = (
-                db.query(SubDocument)
-                .filter(SubDocument.document_id == doc.id)
-                .all()
-            )
-            document_structure.extend(
-                build_document_structure_from_subdocs(subdocs, db)
-            )
-
-    search_plan = None
-    if enable_planning and document_structure:
-        logger.info(
-            f"Creating query plan using {len(document_structure)} sections from routed collection"
-        )
-        planner = create_query_planner()
-        search_plan = planner.plan_document_search(
-            query, document_library_card=None, document_structure=document_structure
-        )
-        logger.info(
-            f"Query plan: {search_plan['strategy']} - {search_plan.get('reasoning', '')}"
-        )
-
-    return search_plan, collections, routed_collection
-
 
 async def intelligent_search_across_collections(
     query: str = Query(..., description="Search query"),

@@ -1,7 +1,6 @@
 """Update collection library card after document upload."""
 
 import json
-import os
 import time
 
 from sqlalchemy.orm import Session
@@ -10,22 +9,23 @@ from kapsula.infrastructure.data.tables.collection import Collection as OrmColle
 from kapsula.infrastructure.data.tables.document import Document as OrmDocument
 from kapsula.infrastructure.data.tables.library_card import LibraryCard as OrmLibraryCard
 from kapsula.infrastructure.logging_config import get_logger
-from kapsula.core.application.use_cases.collection_summary import CollectionSummaryGenerator
-from kapsula.infrastructure.external.llm.chat_client import HuggingFaceChatClient
 
 logger = get_logger(__name__)
 
 
-def update_collection_library_card(document_id: int, db: Session):
-    """
-    Create or update collection library card when a document is added.
+def update_collection_library_card(
+    document_id: int, db: Session, *, summary_generator
+) -> None:
+    """Create or update collection library card when a document is added.
 
     Args:
-        document_id: ID of the document that was just processed
-        db: Database session
+        document_id: ID of the document that was just processed.
+        db: Database session.
+        summary_generator: ``CollectionSummaryGenerator`` instance (injected
+            by the caller to avoid infrastructure importing from application).
     """
     # Get document and its library card
-    document = db.query(Document).filter(Document.id == document_id).first()
+    document = db.query(OrmDocument).filter(OrmDocument.id == document_id).first()
     if not document:
         logger.error(f"Document {document_id} not found")
         return
@@ -70,14 +70,6 @@ def update_collection_library_card(document_id: int, db: Session):
             )
 
     # Initialize summary generator
-    summary_generator = CollectionSummaryGenerator(
-        HuggingFaceChatClient(
-            token=os.getenv("HF_TOKEN", ""),
-            model=os.getenv(
-                "INTELLIGENT_SEARCH_MODEL", "deepseek-ai/DeepSeek-V3.2-Exp"
-            ),
-        )
-    )
 
     if not existing_collection_card:
         # Create new collection library card

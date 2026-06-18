@@ -8,20 +8,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from kapsula.core.application.dto.collection_search import CollectionSearch
+from kapsula.infrastructure.data.connection import get_db
+from kapsula.infrastructure.logging_config import get_logger
+from .search_helpers import extract_citation_from_result
+
+logger = get_logger(__name__)
+router = APIRouter()
+
 from kapsula.core.application.dto.single_index_search import SingleIndexSearch
 from kapsula.core.application.dto.sub_document_search import SubDocumentSearch
 from kapsula.core.domain.text_processing import parse_node_type_filter
-from kapsula.infrastructure.data.connection import get_db
 from kapsula.infrastructure.data.tables.collection import Collection
 from kapsula.infrastructure.data.tables.document import Document
 from kapsula.infrastructure.data.tables.library_card import LibraryCard
 from kapsula.infrastructure.data.tables.sub_document import SubDocument
-from kapsula.infrastructure.logging_config import get_logger
-from kapsula.presentation.api.search_presenter import (
-    build_collection_search_response,
-    collect_unique_citations,
-)
+from kapsula.infrastructure.data import Chunk
+from kapsula.presentation.api.search_presenter import collect_unique_citations
 from kapsula.startup import (
     create_multi_index_searcher,
     create_query_planner,
@@ -31,17 +33,11 @@ from kapsula.startup import (
 from ..models import (
     SearchResponse,
     SearchResult,
-    CollectionSearchResponse,
     IntelligentSearchResponse,
-    IntelligentCollectionSearchResponse,
     SearchPlan,
-    SubAnswer,
     Citation,
+    SubAnswer,
 )
-from .search_helpers import extract_citation_from_result
-
-logger = get_logger(__name__)
-router = APIRouter()
 
 @router.post("/search/{job_id}", response_model=SearchResponse)
 async def search_document(

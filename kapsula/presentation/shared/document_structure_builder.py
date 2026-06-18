@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from kapsula.infrastructure.data.tables.library_card import LibraryCard
-from kapsula.infrastructure.data.tables.sub_document import SubDocument
+from kapsula.infrastructure.data.tables.library_card import LibraryCard as OrmLibraryCard
+from kapsula.infrastructure.data.tables.sub_document import SubDocument as OrmSubDocument
 
 
 def build_document_structure_from_subdocs(
-    subdocs: list[SubDocument],
+    subdocs: list[OrmSubDocument],
     db: Session,
 ) -> list[dict]:
     """Build a hierarchical structure list from sub-documents for query planning.
@@ -65,19 +65,19 @@ def _fetch_hierarchy_cards(
     limit: int = 20,
 ) -> list:
     """Fetch level_1/level_2/level_3 library cards for a sub-document or document."""
-    query = db.query(LibraryCard).filter(
-        LibraryCard.level.in_(["level_1", "level_2", "level_3"])
+    query = db.query(OrmLibraryCard).filter(
+        OrmLibraryCard.level.in_(["level_1", "level_2", "level_3"])
     )
     if sub_document_id is not None:
-        query = query.filter(LibraryCard.sub_document_id == sub_document_id)
+        query = query.filter(OrmLibraryCard.sub_document_id == sub_document_id)
     elif document_id is not None:
         query = query.filter(
-            LibraryCard.document_id == document_id,
-            LibraryCard.sub_document_id.is_(None),
+            OrmLibraryCard.document_id == document_id,
+            OrmLibraryCard.sub_document_id.is_(None),
         )
     else:
         return []
-    return query.order_by(LibraryCard.level.desc()).limit(limit).all()
+    return query.order_by(OrmLibraryCard.level.desc()).limit(limit).all()
 
 
 def _cards_to_sections(cards: list) -> list[dict]:
