@@ -2,14 +2,11 @@
 
 from fastmcp import FastMCP
 
-from kapsula.infrastructure.data import Document, SubDocument
-
 from ._search_helpers import (
     run_search_documents_text,
 )
 from ._shared import (
     _get_db,
-    _get_multi_index_searcher,
     _parse_node_type_filter,
 )
 
@@ -88,60 +85,32 @@ def register_search_document_tools(mcp: FastMCP):
         context_mode: str = "none",
         node_type_filter: str | None = None,
     ) -> str:
-        from kapsula.core.application.dto.single_index_search import (
-            SingleIndexSearch,
-        )
-        from kapsula.core.application.dto.sub_document_search import (
-            SubDocumentSearch,
-        )
+        from kapsula.startup import create_search_single_document_use_case
 
         db = _get_db()
         try:
-            doc = db.query(Document).filter(Document.job_id == job_id).first()
-            if not doc:
-                return f"Document not found: {job_id}"
-            if doc.status != "completed":
-                return f"Document not ready. Status: {doc.status}"
-
-            subdocs = (
-                db.query(SubDocument).filter(SubDocument.document_id == doc.id).all()
-            )
-
-            if subdocs:
-                searcher = _get_multi_index_searcher(db)
-                results = await searcher.search_subdocuments(
-                    SubDocumentSearch(
-                        query=query,
-                        document_id=doc.id,
-                        top_k=min(top_k, 100),
-                        context_mode=context_mode,
-                        node_type_filter=_parse_node_type_filter(node_type_filter),
-                    )
+            try:
+                results = await create_search_single_document_use_case(db).execute(
+                    db=db,
+                    job_id=job_id,
+                    query=query,
+                    top_k=min(top_k, 100),
+                    context_mode=context_mode,
+                    node_type_filter=_parse_node_type_filter(node_type_filter),
                 )
-            else:
-                if not doc.faiss_index_path or not doc.bm25_index_path:
-                    return "No search indexes available for this document."
-                searcher = _get_multi_index_searcher(db)
-                results = await searcher.search_single_index(
-                    SingleIndexSearch(
-                        query=query,
-                        faiss_path=doc.faiss_index_path,
-                        bm25_path=doc.bm25_index_path,
-                        document_id=doc.id,
-                        top_k=min(top_k, 100),
-                        context_mode=context_mode,
-                        node_type_filter=_parse_node_type_filter(node_type_filter),
-                    )
-                )
+            except ValueError as exc:
+                return str(exc)
 
             if not results:
                 return "No results found."
 
-            out = [f"Found {len(results)} results in '{doc.filename}' for: {query}\n"]
+            out = [f"Found {len(results)} results for: {query}\n"]
             for i, r in enumerate(results, 1):
-                score = r.get("rerank_score") or r.get("score", 0)
-                content = r.get("expanded_content", r.get("content", ""))
-                sub_key = r.get("sub_document_key", "")
+                score = r.rerank_score if r.rerank_score is not None else r.score
+                content = (
+                    r.expanded_content if r.expanded_content is not None else r.content
+                )
+                sub_key = r.sub_document_key or ""
                 src = f" [{sub_key}]" if sub_key else ""
                 out.append(f"--- Result {i}{src} score={score:.3f} ---")
                 out.append(content[:1500])

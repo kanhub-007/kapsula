@@ -141,75 +141,41 @@ class ConsolidationRunner:
         self._gaps_found = 0
 
     def run(self) -> dict[str, Any]:
-        """Execute the full consolidation pipeline."""
+        """Execute the full consolidation pipeline.
+
+        A single ``record_run`` call covers every exit path (success, no
+        work to do, or failure) so the audit row is written exactly once
+        (closes M1 — previously four near-identical call sites). Control
+        flow is preserved: when there are no extractive cards or no clusters
+        form, gap-card generation is skipped just as before.
+        """
         logger.info(
             "Starting consolidation for collection %s (run %s)",
             self._collection_guid,
             self._run_id,
         )
 
+        error: str | None = None
         try:
             cards = self._cards.fetch_extractive_cards(self._collection_id)
-            if not cards:
-                logger.info("No extractive cards to consolidate")
-                self._cards.record_run(
-                    self._run_id,
-                    self._collection_guid,
-                    self._cards_created,
-                    self._cards_updated,
-                    self._conflicts_found,
-                    self._gaps_found,
-                    error=None,
-                )
-                return self._result()
-
-            # Step 1: cluster into topics (LLM call — no session held)
-            clusters = self._cluster_topics(cards)
-            if not clusters:
-                logger.info("No topic clusters formed")
-                self._cards.record_run(
-                    self._run_id,
-                    self._collection_guid,
-                    self._cards_created,
-                    self._cards_updated,
-                    self._conflicts_found,
-                    self._gaps_found,
-                    error=None,
-                )
-                return self._result()
-
-            # Step 2: generate topic cards per cluster.
-            for cluster in clusters:
-                try:
-                    self._generate_topic_card(cluster)
-                except Exception as exc:
-                    logger.error(
-                        "Topic card generation failed for '%s': %s",
-                        cluster.get("label", "?"),
-                        exc,
+            if cards:
+                clusters = self._cluster_topics(cards)
+                if clusters:
+                    self._generate_topic_cards(clusters)
+                    self._safe_call(
+                        self._generate_evolution_card,
+                        clusters,
+                        label="Evolution card generation",
                     )
+                    self._safe_call(
+                        self._generate_gap_cards,
+                        label="Gap card generation",
+                    )
+                else:
+                    logger.info("No topic clusters formed")
+            else:
+                logger.info("No extractive cards to consolidate")
 
-            # Step 3: generate evolution card
-            try:
-                self._generate_evolution_card(clusters)
-            except Exception as exc:
-                logger.error("Evolution card generation failed: %s", exc)
-
-            # Step 4: generate gap cards from search miss log
-            try:
-                self._generate_gap_cards()
-            except Exception as exc:
-                logger.error("Gap card generation failed: %s", exc)
-
-            self._cards.record_run(
-                self._run_id,
-                self._collection_guid,
-                self._cards_created,
-                self._cards_updated,
-                self._conflicts_found,
-                self._gaps_found,
-                error=None,
-            )
             logger.info(
                 "Consolidation complete: %d created, %d updated, "
                 "%d conflicts, %d gaps",
@@ -218,20 +184,41 @@ class ConsolidationRunner:
                 self._conflicts_found,
                 self._gaps_found,
             )
-            return self._result()
-
         except Exception as exc:
             logger.exception("Consolidation failed: %s", exc)
-            self._cards.record_run(
-                self._run_id,
-                self._collection_guid,
-                self._cards_created,
-                self._cards_updated,
-                self._conflicts_found,
-                self._gaps_found,
-                error=str(exc),
-            )
-            return self._result()
+            error = str(exc)
+
+        self._cards.record_run(
+            self._run_id,
+            self._collection_guid,
+            self._cards_created,
+            self._cards_updated,
+            self._conflicts_found,
+            self._gaps_found,
+            error=error,
+        )
+        return self._result()
+
+    # ── step orchestration helpers ───────────────────────────
+
+    def _generate_topic_cards(self, clusters: list[dict]) -> None:
+        """Generate a topic card for each cluster, logging per-cluster failures."""
+        for cluster in clusters:
+            try:
+                self._generate_topic_card(cluster)
+            except Exception as exc:
+                logger.error(
+                    "Topic card generation failed for '%s': %s",
+                    cluster.get("label", "?"),
+                    exc,
+                )
+
+    def _safe_call(self, step, *args, label: str) -> None:
+        """Run an optional LLM step, logging failures without aborting the run."""
+        try:
+            step(*args)
+        except Exception as exc:
+            logger.error("%s failed: %s", label, exc)
 
     # ── step implementations ─────────────────────────────────
 

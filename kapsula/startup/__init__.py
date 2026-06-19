@@ -1,13 +1,21 @@
 """Composition root — wires all dependencies for API and MCP entry points."""
 
+from __future__ import annotations
+
 import os
 import uuid
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
 
 from kapsula.infrastructure.data.connection import SessionLocal, init_db
 from kapsula.infrastructure.data.tables.account import Account
 from kapsula.infrastructure.logging_config import get_logger
+
+if TYPE_CHECKING:
+    from kapsula.core.domain.interfaces.chat_client import ChatClient
+    from kapsula.core.domain.interfaces.embedder import Embedder
+    from kapsula.core.domain.interfaces.reranker import Reranker
 
 load_dotenv()
 logger = get_logger(__name__)
@@ -126,7 +134,7 @@ def create_reranker():
     )
 
 
-def create_intelligent_searcher(chat_client=None):
+def create_intelligent_searcher(chat_client: ChatClient | None = None):
     from kapsula.core.application.use_cases.intelligent_searcher import (
         IntelligentSearcher,
     )
@@ -182,7 +190,7 @@ def create_prepare_intelligent_search_use_case(db):
     )
 
 
-def create_query_planner(chat_client=None):
+def create_query_planner(chat_client: ChatClient | None = None):
     from kapsula.core.application.use_cases.planning.query_planner import (
         QueryPlanner,
     )
@@ -191,7 +199,7 @@ def create_query_planner(chat_client=None):
     return QueryPlanner(client)
 
 
-def create_collection_summary_generator(chat_client=None):
+def create_collection_summary_generator(chat_client: ChatClient | None = None):
     from kapsula.core.application.use_cases.collection_summary import (
         CollectionSummaryGenerator,
     )
@@ -201,7 +209,10 @@ def create_collection_summary_generator(chat_client=None):
 
 
 def create_multi_index_searcher(
-    db_session=None, embedder=None, reranker=None, chat_client=None
+    db_session=None,
+    embedder: Embedder | None = None,
+    reranker: Reranker | None = None,
+    chat_client: ChatClient | None = None,
 ):
     from kapsula.core.application.use_cases.multi_index_searcher import (
         MultiIndexSearcher,
@@ -330,6 +341,24 @@ def create_account_search_strategy(embedder=None):
     )
 
 
+def create_search_single_document_use_case(db_session=None):
+    """Wire SearchSingleDocumentUseCase (closes H5).
+
+    The searcher is built per-call against the request's DB session.
+    """
+    from kapsula.core.application.use_cases.search_single_document import (
+        SearchSingleDocumentUseCase,
+    )
+    from kapsula.infrastructure.repositories.data.sql_document_repository import (
+        SqlDocumentRepository,
+    )
+
+    def make_searcher():
+        return create_multi_index_searcher(db_session)
+
+    return SearchSingleDocumentUseCase(SqlDocumentRepository(), make_searcher)
+
+
 def create_delete_document_use_case():
     """Create a DeleteDocumentUseCase with wired dependencies."""
     from kapsula.core.application.use_cases.delete_document import (
@@ -346,7 +375,11 @@ def create_delete_document_use_case():
     embedder = create_embedder()
     index_manager = FileSystemIndexManager(embedder, DATA_DIR)
     document_repository = SqlDocumentRepository()
-    return DeleteDocumentUseCase(index_manager, document_repository)
+    return DeleteDocumentUseCase(
+        index_manager,
+        document_repository,
+        create_maintenance_state_manager(),
+    )
 
 
 def create_upload_document_use_case():
@@ -383,7 +416,10 @@ def create_upload_document_use_case():
     job_repository = SqlUploadJobRepository()
     progress_tracker = UploadProgressTracker(job_repository)
     return UploadDocumentUseCase(
-        background_processor, document_repository, progress_tracker
+        background_processor,
+        document_repository,
+        progress_tracker,
+        create_maintenance_state_manager(),
     )
 
 
@@ -416,5 +452,8 @@ def create_api_upload_document_use_case():
     job_repository = SqlUploadJobRepository()
     progress_tracker = UploadProgressTracker(job_repository)
     return UploadDocumentUseCase(
-        NoOpBackgroundProcessor(), document_repository, progress_tracker
+        NoOpBackgroundProcessor(),
+        document_repository,
+        progress_tracker,
+        create_maintenance_state_manager(),
     )

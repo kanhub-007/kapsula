@@ -1,6 +1,7 @@
 """Collection maintenance runner."""
 
 import json
+from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
@@ -20,6 +21,9 @@ from kapsula.startup import (
     create_maintenance_state_manager,
 )
 
+if TYPE_CHECKING:
+    from kapsula.core.domain.interfaces.chat_client import ChatClient
+
 logger = get_logger(__name__)
 
 
@@ -31,7 +35,7 @@ class CollectionMaintenanceRunner:
     cached client from :func:`kapsula.startup.get_shared_chat_client`.
     """
 
-    def __init__(self, db: Session, chat_client=None):
+    def __init__(self, db: Session, chat_client: ChatClient | None = None):
         self._db = db
         self._chat_client = chat_client
 

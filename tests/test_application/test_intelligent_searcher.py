@@ -7,6 +7,7 @@ sub-answers. Asserts on the returned result, never on chat_client calls.
 
 import asyncio
 
+from kapsula.core.application.dto.search_result_hit import SearchResultHit
 from kapsula.core.application.use_cases.intelligent_searcher import (
     IntelligentSearcher,
 )
@@ -27,8 +28,8 @@ class FakeChatClient(ChatClient):
         return self._responses.pop(0)
 
 
-def _result(score: float, content: str, idx: int = 0) -> dict:
-    return {"index": idx, "score": score, "content": content}
+def _result(score: float, content: str, idx: int = 0) -> SearchResultHit:
+    return SearchResultHit(index=idx, score=score, content=content)
 
 
 class TestEvaluateAndAnswer:

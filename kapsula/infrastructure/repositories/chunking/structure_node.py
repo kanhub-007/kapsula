@@ -6,7 +6,7 @@ class StructureNode:
         self.text = text
         self.children: dict[str, StructureNode] = {}
 
-    def add_path(self, path_parts: list[str], remaining_children: list = None):
+    def add_path(self, path_parts: list[str], remaining_children: list | None = None):
         if not path_parts:
             if remaining_children:
                 for child in remaining_children:

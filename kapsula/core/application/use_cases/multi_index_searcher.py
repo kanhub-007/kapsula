@@ -7,7 +7,11 @@ from time import perf_counter
 from typing import Any
 
 from kapsula.core.application.dto.collection_search import CollectionSearch
+from kapsula.core.application.dto.search_result_hit import SearchResultHit
 from kapsula.core.application.dto.search_scope import SearchScopeKind
+from kapsula.core.application.dto.single_document_search import (
+    SingleDocumentSearch,
+)
 from kapsula.core.application.dto.single_index_search import SingleIndexSearch
 from kapsula.core.application.dto.sub_document_search import SubDocumentSearch
 from kapsula.core.application.use_cases.context_expansion import (
@@ -46,6 +50,7 @@ from kapsula.core.domain.interfaces.chat_client import ChatClient
 from kapsula.core.domain.interfaces.embedder import Embedder
 from kapsula.core.domain.interfaces.reranker import Reranker
 from kapsula.core.domain.interfaces.search_data_access import SearchDataAccess
+from kapsula.core.domain.interfaces.searcher import Searcher
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +64,7 @@ class MultiIndexSearcher:
         embedder: Embedder,
         reranker: Reranker,
         chat_client: ChatClient,
-        make_searcher: Callable[[str, str], Any],
+        make_searcher: Callable[[str, str], Searcher],
         strategies: list[CollectionSearchStrategy] | None = None,
         quota_policy: SourceQuotaPolicy | None = None,
         route_scorer: RouteConfidenceScorer | None = None,
@@ -76,12 +81,12 @@ class MultiIndexSearcher:
         self._route_scorer = route_scorer or RouteConfidenceScorer()
         self._document_concurrency = max(1, document_concurrency)
 
-    def _get_searcher(self, faiss_path: str, bm25_path: str):
+    def _get_searcher(self, faiss_path: str, bm25_path: str) -> Searcher:
         return self._make_searcher(faiss_path, bm25_path)
 
     async def search_subdocuments(
         self, search: SubDocumentSearch
-    ) -> list[dict[str, Any]]:
+    ) -> list[SearchResultHit]:
         subdocs = self._data.get_sub_documents(search.document_id)
         if not subdocs:
             return []
@@ -105,6 +110,10 @@ class MultiIndexSearcher:
         per_k = search.top_k * search.per_subdoc_multiplier
 
         async def _search_one(sd: dict) -> list:
+            # The searcher returns fresh dicts each call; we annotate them
+            # in place with provenance. That ownership assumption is fine
+            # here (closes L7) but is exactly why callers receive typed
+            # SearchResultHit, not these dicts.
             try:
                 searcher = self._get_searcher(sd["faiss_path"], sd["bm25_path"])
                 results = await searcher.search(
@@ -116,6 +125,7 @@ class MultiIndexSearcher:
                 for r in results:
                     r["sub_document_id"] = sd["id"]
                     r["sub_document_key"] = sd["breadcrumb_key"]
+                    r["document_id"] = search.document_id
                 return results
             except Exception as e:
                 logger.error(f"Failed to search sub-doc '{sd['breadcrumb_key']}': {e}")
@@ -135,21 +145,58 @@ class MultiIndexSearcher:
             top = expand_context_with_parents(
                 top, self._data, search.document_id, search.context_mode
             )
-        return top
+        return SearchResultHit.from_dicts(top)
 
     async def search_single_index(
         self, search: SingleIndexSearch
-    ) -> list[dict[str, Any]]:
+    ) -> list[SearchResultHit]:
         searcher = self._get_searcher(search.faiss_path, search.bm25_path)
-        return await searcher.search(
+        results = await searcher.search(
             query=search.query,
             top_k=search.top_k,
             node_type_filter=search.node_type_filter,
         )
+        for r in results:
+            r["document_id"] = search.document_id
+        return SearchResultHit.from_dicts(results)
+
+    async def search_document(
+        self, search: SingleDocumentSearch
+    ) -> list[SearchResultHit]:
+        """Search one document, dispatching on its architecture (closes H5).
+
+        Sub-document docs route through :meth:`search_subdocuments`; flat
+        docs use the document-level FAISS+BM25 pair. This centralises the
+        branch that was previously inlined in four API/MCP entry points.
+        Requires a ready (completed) document with index paths when flat.
+        """
+        if self._data.count_sub_documents(search.document_id) > 0:
+            return await self.search_subdocuments(
+                SubDocumentSearch(
+                    query=search.query,
+                    document_id=search.document_id,
+                    top_k=search.top_k,
+                    context_mode=search.context_mode,
+                    node_type_filter=search.node_type_filter,
+                )
+            )
+        if not search.faiss_path or not search.bm25_path:
+            raise ValueError("No search indexes available for this document.")
+        return await self.search_single_index(
+            SingleIndexSearch(
+                query=search.query,
+                faiss_path=search.faiss_path,
+                bm25_path=search.bm25_path,
+                document_id=search.document_id,
+                top_k=search.top_k,
+                context_mode=search.context_mode,
+                node_type_filter=search.node_type_filter,
+            )
+        )
 
     async def search_collections(
         self, search: CollectionSearch
-    ) -> list[dict[str, Any]]:
+    ) -> list[SearchResultHit]:
         total_started = perf_counter()
         scope = search.scope
         if scope.kind == SearchScopeKind.COLLECTION:
@@ -190,7 +237,7 @@ class MultiIndexSearcher:
                     perf_counter() - total_started,
                     len(aggregate_results),
                 )
-                return aggregate_results
+                return SearchResultHit.from_dicts(aggregate_results)
 
         metadata = self._metadata.build_collection_metadata(collections)
         routing_started = perf_counter()
@@ -268,7 +315,7 @@ class MultiIndexSearcher:
             len(selected),
             len(top),
         )
-        return top
+        return SearchResultHit.from_dicts(top)
 
     async def _search_collection_documents(
         self,

@@ -44,12 +44,14 @@ class SearchMetadataBuilder:
         """Build a list of metadata dicts for collection routing.
 
         Each dict includes library card summary, document count, account
-        GUID, and collection GUID.
+        GUID, and collection GUID. The summary is capped at 500 chars and
+        falls back to a name-based label when no card exists, so LLM routing
+        always has some context to chew on.
         """
         metadata: list[dict] = []
         for coll in collections:
             card = self._data.get_collection_library_card(coll.id)
-            doc_count, doc_list, summary = _parse_collection_card(card)
+            doc_count, doc_list, summary = _parse_collection_card(coll, card)
             metadata.append(
                 {
                     "id": coll.id,
@@ -106,19 +108,26 @@ def _parse_page_titles(card: Any | None) -> list[str]:
         return []
 
 
-def _parse_collection_card(card: Any | None) -> tuple[int, list[str], str]:
-    """Extract document_count, document_list, and summary from a collection library card."""
+def _parse_collection_card(coll: Any, card: Any | None) -> tuple[int, list[str], str]:
+    """Extract document_count, document_list, and summary from a collection library card.
+
+    Summary is capped at 500 chars and falls back to a name-based label when
+    no card exists (closes M5: the duplicate builder in
+    PrepareIntelligentSearchUseCase did this; the single source of truth now
+    does too).
+    """
+    fallback = f"Collection: {getattr(coll, 'name', '?')}"
     if not (card and card.extra_metadata):
-        return 0, [], card.content if card else ""
+        return 0, [], (card.content[:500] if card else fallback)
     try:
         meta = json.loads(card.extra_metadata)
         return (
             meta.get("total_documents", 0),
             [d["filename"] for d in meta.get("document_summaries", [])],
-            card.content,
+            (card.content or fallback)[:500],
         )
     except json.JSONDecodeError:
-        return 0, [], card.content
+        return 0, [], (card.content or fallback)[:500]
 
 
 def _resolve_account_guid(coll: Any) -> str | None:

@@ -38,10 +38,37 @@ from kapsula.startup import (
 
 logger = get_logger(__name__)
 
-# Shared progress tracker + job manager (singletons for the process).
-_upload_progress = UploadProgressTracker(processing_status, logger)
-_upload_job_manager = SqlUploadJobRepository()
-_maintenance_state = create_maintenance_state_manager()
+# Lazy singletons (closes M7). Previously these were constructed at module
+# import time, coupling import order to singleton creation and making them
+# hard to substitute from tests. They are stateless, so a cached lazy init
+# is equivalent at runtime but avoids the import-time side effect.
+_upload_progress: UploadProgressTracker | None = None
+_upload_job_manager: SqlUploadJobRepository | None = None
+_maintenance_state = None
+
+
+def get_upload_progress() -> UploadProgressTracker:
+    """Return the process-wide upload progress tracker (lazy)."""
+    global _upload_progress
+    if _upload_progress is None:
+        _upload_progress = UploadProgressTracker(processing_status, logger)
+    return _upload_progress
+
+
+def get_upload_job_manager() -> SqlUploadJobRepository:
+    """Return the process-wide upload job repository (lazy)."""
+    global _upload_job_manager
+    if _upload_job_manager is None:
+        _upload_job_manager = SqlUploadJobRepository()
+    return _upload_job_manager
+
+
+def get_maintenance_state():
+    """Return the process-wide maintenance state manager (lazy)."""
+    global _maintenance_state
+    if _maintenance_state is None:
+        _maintenance_state = create_maintenance_state_manager()
+    return _maintenance_state
 
 
 def process_document_with_subdocuments(
@@ -79,8 +106,8 @@ def process_document_with_subdocuments(
             markdown_content=markdown_content,
             chunker=MarkdownChunker(max_tokens=max_tokens),
             embedder=create_embedder(),
-            progress=_upload_progress,
-            maintenance_state=_maintenance_state,
+            progress=get_upload_progress(),
+            maintenance_state=get_maintenance_state(),
             card_repo=None,
             chunk_repo=None,
         )
@@ -94,7 +121,7 @@ def process_document_with_subdocuments(
             job_id,
             f"Job {job_id}: Processing failed: {exc}",
             processing_status,
-            _upload_job_manager,
+            get_upload_job_manager(),
         )
     finally:
         db.close()
@@ -102,7 +129,7 @@ def process_document_with_subdocuments(
 
 def get_processing_status(job_id: str) -> dict:
     """Return the current processing status for a job, or None."""
-    return _upload_progress.get(job_id)
+    return get_upload_progress().get(job_id)
 
 
 # ── internals ────────────────────────────────────────────────────────
@@ -113,7 +140,8 @@ def _finalize_progress(ctx: UploadPipelineContext) -> None:
     chunk_count = len(ctx.chunks)
     subdocument_count = len(ctx.subdoc_plan) if ctx.subdoc_plan else None
     extra = {"subdocument_count": subdocument_count} if subdocument_count else {}
-    _upload_progress.set(
+    _upload_progress_local = get_upload_progress()
+    _upload_progress_local.set(
         ctx.job_id,
         status="completed",
         progress=100,
@@ -127,7 +155,7 @@ def _finalize_progress(ctx: UploadPipelineContext) -> None:
         ingestion_mode=ctx.ingestion_mode,
         **extra,
     )
-    _upload_job_manager.update(
+    get_upload_job_manager().update(
         ctx.job_id,
         status="completed",
         progress=100,

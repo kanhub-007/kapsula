@@ -21,4 +21,3 @@ class TitleHandler:
             state.header_stack.pop()
         state.header_stack.append((element.level, element.content))
         state.current_header = " > ".join(h[1] for h in state.header_stack)
-        state.i = idx + 1

@@ -10,6 +10,9 @@ from kapsula.core.domain.interfaces.document_repository import (
     DocumentRepository,
 )
 from kapsula.core.domain.interfaces.index_manager import IndexManager
+from kapsula.core.domain.interfaces.maintenance_state_tracker import (
+    MaintenanceStateTracker,
+)
 from kapsula.core.domain.interfaces.session import Session
 
 logger = logging.getLogger(__name__)
@@ -23,9 +26,11 @@ class DeleteDocumentUseCase:
         self,
         index_manager: IndexManager,
         document_repository: DocumentRepository,
+        maintenance_state: MaintenanceStateTracker,
     ):
         self._index_manager = index_manager
         self._document_repository = document_repository
+        self._maintenance_state = maintenance_state
 
     def execute(self, db: Session, job_id: str) -> DeleteDocumentResult:
         """Execute the delete operation.
@@ -80,6 +85,20 @@ class DeleteDocumentUseCase:
                 rebuild_error = str(exc)
 
         logger.info("Document deleted: job_id=%s chunks=%s", job_id, chunks_deleted)
+
+        # Mark consolidation stale for the collection so deferred maintenance
+        # re-synthesizes topic/gap cards without the deleted content. Best-effort
+        # (closes H1 — previously only the MCP path did this, so the REST API
+        # delete silently skipped it and stale topic cards lingered).
+        if collection:
+            try:
+                self._maintenance_state.increment_uploads(collection.collection_id)
+            except (OSError, ValueError, KeyError) as exc:
+                logger.warning(
+                    "Delete: maintenance state update failed for %s: %s",
+                    collection.collection_id,
+                    exc,
+                )
 
         return DeleteDocumentResult(
             job_id=job_id,

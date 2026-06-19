@@ -18,12 +18,15 @@ class CodeHandler:
             ctx.flush()
 
         text = _with_next_if_small(elements, idx, element.content, ctx.tk)
-        if text != element.content:
-            idx += 1
+        fused_next = text != element.content
 
         ctx.add_atomic(text, "code")
         state.chunk_start_header = state.current_header
-        state.i = idx + 1
+        if fused_next:
+            # Consumed the following element too — skip past it. When no
+            # fusion happened the loop in MarkdownChunker advances by one
+            # for us, so we must not overwrite state.i here.
+            state.i = idx + 2
 
 
 def _with_next_if_small(

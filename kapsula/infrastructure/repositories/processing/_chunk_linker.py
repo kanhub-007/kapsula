@@ -2,6 +2,8 @@
 
 import json
 
+from sqlalchemy.orm import Session
+
 from kapsula.infrastructure.data import Chunk, LibraryCard
 from kapsula.infrastructure.logging_config import get_logger
 from kapsula.infrastructure.repositories.chunking.header_matcher import (
@@ -37,7 +39,13 @@ def _resolve_chunk_citation(
         del citation["library_card_doc_id"]
 
 
-def _link_chunks_to_parents(job_id, document, parent_sections, db, processing_status):
+def _link_chunks_to_parents(
+    job_id: str,
+    document,
+    parent_sections: dict,
+    db: Session,
+    processing_status: dict,
+) -> None:
     """Link chunks to parent sections and resolve citation library_card_ids."""
     # Update progress: Linking chunks to parent sections
     processing_status[job_id] = {
@@ -128,8 +136,14 @@ def _link_chunks_to_parents(job_id, document, parent_sections, db, processing_st
 
 
 def _build_document_indexes(
-    job_id, document, chunks, db, ingestion_mode, upload_progress, embedder=None
-):
+    job_id: str,
+    document,
+    chunks: list[dict],
+    db: Session,
+    ingestion_mode: str,
+    upload_progress,
+    embedder=None,
+) -> None:
     """Build FAISS and BM25 search indexes for a document.
 
     Args:

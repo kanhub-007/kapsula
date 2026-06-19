@@ -20,13 +20,18 @@ class TableHandler:
         text = (
             transform_table_to_text(element.html) if element.html else element.content
         )
-        text = _with_next_if_small(elements, idx, text, ctx.tk)
-        if text != element.content:
-            idx += 1
+        fused_text = _with_next_if_small(elements, idx, text, ctx.tk)
+        fused_next = fused_text != text
 
-        ctx.add_atomic(text, "table")
+        ctx.add_atomic(fused_text, "table")
         state.chunk_start_header = state.current_header
-        state.i = idx + 1
+        if fused_next:
+            # Only advance past the fused element when fusion actually
+            # happened. Previously this compared fused_text to
+            # element.content, which is also True for HTML-transformed
+            # tables — and then wrongly skipped the next element (latent
+            # bug closed here alongside L3).
+            state.i = idx + 2
 
 
 def _with_next_if_small(

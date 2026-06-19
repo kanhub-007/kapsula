@@ -107,6 +107,16 @@ class InMemoryProgressTracker(ProgressTracker):
         pass
 
 
+class RecordingMaintenanceState:
+    """Fake MaintenanceStateTracker — records increment_uploads calls."""
+
+    def __init__(self):
+        self.calls: list[str] = []
+
+    def increment_uploads(self, collection_id: str) -> None:
+        self.calls.append(collection_id)
+
+
 # ── Fixtures ───────────────────────────────────────────────────
 
 
@@ -165,7 +175,9 @@ class TestUploadDocumentUseCase:
         repo = InMemoryDocumentRepository(collection=domain_collection)
         progress = InMemoryProgressTracker()
         processor = FakeBackgroundProcessor()
-        use_case = UploadDocumentUseCase(processor, repo, progress)
+        use_case = UploadDocumentUseCase(
+            processor, repo, progress, RecordingMaintenanceState()
+        )
 
         with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
             f.write("# Test Document\nContent goes here.")
@@ -205,7 +217,9 @@ class TestUploadDocumentUseCase:
         repo = InMemoryDocumentRepository(collection=domain_collection)
         progress = InMemoryProgressTracker()
         processor = FakeBackgroundProcessor()
-        use_case = UploadDocumentUseCase(processor, repo, progress)
+        use_case = UploadDocumentUseCase(
+            processor, repo, progress, RecordingMaintenanceState()
+        )
 
         with tempfile.NamedTemporaryFile(suffix=".txt", mode="w", delete=False) as f:
             f.write("not markdown")
@@ -228,7 +242,9 @@ class TestUploadDocumentUseCase:
         repo = InMemoryDocumentRepository(collection=None)
         progress = InMemoryProgressTracker()
         processor = FakeBackgroundProcessor()
-        use_case = UploadDocumentUseCase(processor, repo, progress)
+        use_case = UploadDocumentUseCase(
+            processor, repo, progress, RecordingMaintenanceState()
+        )
 
         with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
             f.write("# Test")
@@ -250,7 +266,9 @@ class TestUploadDocumentUseCase:
         repo = InMemoryDocumentRepository(collection=domain_collection)
         progress = InMemoryProgressTracker()
         processor = FakeBackgroundProcessor()
-        use_case = UploadDocumentUseCase(processor, repo, progress)
+        use_case = UploadDocumentUseCase(
+            processor, repo, progress, RecordingMaintenanceState()
+        )
 
         with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
             f.write("# Test")
@@ -282,7 +300,9 @@ class TestExecuteFromContent:
         repo = InMemoryDocumentRepository(collection=domain_collection)
         progress = InMemoryProgressTracker()
         processor = FakeBackgroundProcessor()
-        use_case = UploadDocumentUseCase(processor, repo, progress)
+        use_case = UploadDocumentUseCase(
+            processor, repo, progress, RecordingMaintenanceState()
+        )
 
         content_bytes = "# Hello from bytes\nUnicode: café ☕".encode()
         result = use_case.execute_from_content(
@@ -311,7 +331,9 @@ class TestExecuteFromContent:
         repo = InMemoryDocumentRepository(collection=domain_collection)
         progress = InMemoryProgressTracker()
         processor = FakeBackgroundProcessor()
-        use_case = UploadDocumentUseCase(processor, repo, progress)
+        use_case = UploadDocumentUseCase(
+            processor, repo, progress, RecordingMaintenanceState()
+        )
 
         with pytest.raises(ValueError, match="Only .md files accepted"):
             use_case.execute_from_content(
@@ -320,3 +342,37 @@ class TestExecuteFromContent:
                 filename="bad.txt",
                 collection_id="coll-test-123",
             )
+
+    # ── H1: consolidation side-effect lives in the use case, not the route ──
+
+    def test_upload_marks_consolidation_stale(
+        self, domain_collection: DomainCollection
+    ):
+        """Upload must flag the collection stale so deferred maintenance runs.
+
+        Previously this side-effect lived only in the MCP tool wrapper, so the
+        REST API path silently skipped it (H1). Now the use case owns it, so
+        every caller (MCP, API, future ones) gets it for free.
+        """
+        repo = InMemoryDocumentRepository(collection=domain_collection)
+        progress = InMemoryProgressTracker()
+        processor = FakeBackgroundProcessor()
+        maintenance = RecordingMaintenanceState()
+        use_case = UploadDocumentUseCase(processor, repo, progress, maintenance)
+
+        with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
+            f.write("# Test\nContent.")
+            f.flush()
+            tmp_path = f.name
+
+        try:
+            use_case.execute(
+                db=None,
+                file_path=tmp_path,
+                collection_id="coll-test-123",
+                ingestion_mode="indexed",
+            )
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+        assert maintenance.calls == ["coll-test-123"]

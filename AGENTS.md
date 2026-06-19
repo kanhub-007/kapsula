@@ -109,6 +109,14 @@ referenced via `_shared.py` helpers with lazy initialization. This is acceptable
 because MCP tools live in the presentation layer (outermost), not in application
 or domain.
 
+**API route modules** (e.g. `presentation/api/routes/collections.py`,
+`accounts.py`, `documents.py`) also keep stateless repository instances
+(``SqlCollectionRepository()` etc.) at module level. This is the same
+presentation-layer exemption applied narrowly to *stateless* repositories
+(those with no constructor arguments and no shared mutable state). Stateless
+repositories are safe to share across requests. If a repository acquires state
+or requires a per-request DB session, inject it via FastAPI ``Depends`` instead.
+
 ### 2. Repository Pattern
 
 All database access goes through repository classes that implement domain

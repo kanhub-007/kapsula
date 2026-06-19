@@ -2,14 +2,17 @@
 
 Closes A6/D5/O1: previously the API route (``_intelligent_search_prepare``)
 and the MCP tool (``_search_helpers._db_work``) duplicated the same
-5-step flow (query collections → build metadata → route → build document
-structure → plan). This single use case is the one place that flow lives.
+5-step flow (query collections -> build metadata -> route -> build document
+structure -> plan). This single use case is the one place that flow lives.
 """
 
 import logging
 from collections.abc import Callable
 
 from kapsula.core.application.dto.search_preparation import SearchPreparation
+from kapsula.core.application.use_cases.search_metadata_builder import (
+    SearchMetadataBuilder,
+)
 from kapsula.core.domain.interfaces.chat_client import ChatClient
 from kapsula.core.domain.interfaces.search_data_access import SearchDataAccess
 
@@ -35,6 +38,7 @@ class PrepareIntelligentSearchUseCase:
         self._query_planner = query_planner
         self._collection_selector = collection_selector
         self._structure_builder = structure_builder
+        self._metadata = SearchMetadataBuilder(data)
 
     def prepare(
         self,
@@ -85,20 +89,9 @@ class PrepareIntelligentSearchUseCase:
         return self._data.get_all_collections()
 
     def _build_collection_metadata(self, collections) -> list[dict]:
-        metadata: list[dict] = []
-        for coll in collections:
-            card = self._data.get_collection_library_card(coll.id)
-            metadata.append(
-                {
-                    "id": coll.id,
-                    "name": coll.name,
-                    "library_card_summary": (
-                        card.content[:500] if card else f"Collection: {coll.name}"
-                    ),
-                    "document_count": 0,
-                }
-            )
-        return metadata
+        # Delegate to the single shared builder (closes M5 — this was a
+        # near-duplicate of SearchMetadataBuilder.build_collection_metadata).
+        return self._metadata.build_collection_metadata(collections)
 
     def _route(self, query, collections, metadata: list[dict]):
         routed_ids = self._collection_selector.select(query, metadata)

@@ -35,8 +35,14 @@ class ChunkPipeline:
         s = self.state
         if not s.current:
             s.chunk_start_header = s.current_header
+        # Incremental token count: only count the new text plus the joining
+        # newline pair, instead of re-counting the whole buffer every call
+        # (closes M9: was O(n^2) on chunk size).
+        if s.current:
+            s.current_tokens += self.tk(text) + self.tk("\n\n")
+        else:
+            s.current_tokens = self.tk(text)
         s.current.append(text)
-        s.current_tokens = self.tk("\n\n".join(s.current))
 
     def flush(self) -> None:
         s = self.state
@@ -84,10 +90,13 @@ class ChunkPipeline:
         }
 
     def _split_large(self, content: str) -> list[str]:
+        # Running token count per paragraph instead of re-counting the whole
+        # accumulated join on every iteration (closes M9: was O(n^2)).
         paragraphs = content.split("\n\n")
         parts = []
-        current_part = []
+        current_part: list[str] = []
         current_tokens = 0
+        join_cost = self.tk("\n\n")
         for para in paragraphs:
             pt = self.tk(para)
             if current_tokens + pt > self.max_tokens and current_part:
@@ -96,7 +105,7 @@ class ChunkPipeline:
                 current_tokens = pt
             else:
                 current_part.append(para)
-                current_tokens += pt
+                current_tokens += pt + (join_cost if len(current_part) > 1 else 0)
         if current_part:
             parts.append("\n\n".join(current_part))
         return parts

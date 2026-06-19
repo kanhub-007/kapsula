@@ -18,6 +18,9 @@ if TYPE_CHECKING:
     from kapsula.core.domain.entities.chunk import Chunk as DomainChunk
     from kapsula.core.domain.entities.collection import Collection as DomainCollection
     from kapsula.core.domain.entities.document import Document as DomainDocument
+    from kapsula.core.domain.entities.library_card import (
+        LibraryCard as DomainLibraryCard,
+    )
     from kapsula.core.domain.entities.sub_document import (
         SubDocument as DomainSubDocument,
     )
@@ -32,6 +35,9 @@ if TYPE_CHECKING:
         Collection as OrmCollection,
     )
     from kapsula.infrastructure.data.tables.document import Document as OrmDocument
+    from kapsula.infrastructure.data.tables.library_card import (
+        LibraryCard as OrmLibraryCard,
+    )
     from kapsula.infrastructure.data.tables.sub_document import (
         SubDocument as OrmSubDocument,
     )
@@ -303,7 +309,7 @@ def collection_to_read(orm: OrmCollection) -> CollectionRead:
     )
 
 
-def library_card_from_orm(orm):
+def library_card_from_orm(orm: OrmLibraryCard) -> DomainLibraryCard:
     """Convert ORM LibraryCard to domain LibraryCard.
 
     Closes D4: previously ``SqlLibraryCardRepository`` mapped inline.
@@ -342,7 +348,7 @@ def chunk_to_read(orm: OrmChunk) -> ChunkRead:
     )
 
 
-def library_card_to_read(orm) -> LibraryCardRead:
+def library_card_to_read(orm: OrmLibraryCard) -> LibraryCardRead:
     """Project an ORM LibraryCard to the search read-model DTO (closes M5)."""
     from kapsula.core.domain.read_models.library_card_read import LibraryCardRead
 

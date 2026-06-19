@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
+from kapsula.core.application.dto.search_result_hit import SearchResultHit
 from kapsula.infrastructure.logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -19,12 +20,12 @@ logger = get_logger(__name__)
 
 
 def extract_citation_from_result(
-    result: dict, db: Session, document_id: int = None
+    result: SearchResultHit, db: Session, document_id: int | None = None
 ) -> Citation | None:
     """Extract citation information from a search result.
 
     Args:
-        result: Search result dictionary containing chunk index.
+        result: A typed search-result hit carrying the chunk index.
         db: Database session.
         document_id: Document ID to filter chunks.
 
@@ -34,8 +35,8 @@ def extract_citation_from_result(
     from ..models import Citation
 
     try:
-        chunk_index = result.get("index")
-        if chunk_index is None:
+        chunk_index = result.index
+        if chunk_index is None or chunk_index < 0:
             return None
 
         from kapsula.infrastructure.data import Chunk
@@ -45,7 +46,7 @@ def extract_citation_from_result(
         if document_id is not None:
             query = query.filter(Chunk.document_id == document_id)
 
-        sub_document_id = result.get("sub_document_id")
+        sub_document_id = result.sub_document_id
         if sub_document_id is not None:
             query = query.filter(Chunk.sub_document_id == sub_document_id)
 

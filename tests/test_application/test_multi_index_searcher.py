@@ -9,7 +9,12 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
+import pytest
+
 from kapsula.core.application.dto.collection_search import CollectionSearch
+from kapsula.core.application.dto.single_document_search import (
+    SingleDocumentSearch,
+)
 from kapsula.core.application.dto.sub_document_search import SubDocumentSearch
 from kapsula.core.application.use_cases.multi_index_searcher import (
     MultiIndexSearcher,
@@ -163,8 +168,8 @@ class TestSearchSubdocuments:
         )
 
         assert len(results) == 1
-        assert results[0]["sub_document_id"] == 10
-        assert results[0]["sub_document_key"] == "ch1"
+        assert results[0].sub_document_id == 10
+        assert results[0].sub_document_key == "ch1"
 
 
 class TestSourceQuotaPolicy:
@@ -227,7 +232,7 @@ class TestSearchCollections:
         results = asyncio.run(searcher.search_collections(search))
 
         assert len(results) == 1
-        assert results[0]["content"] == "agg"
+        assert results[0].content == "agg"
 
     def test_aggregate_fast_path_sorts_by_score(self):
         """The fast path sorts strategy results by score descending."""
@@ -258,6 +263,73 @@ class TestSearchCollections:
 
         results = asyncio.run(searcher.search_collections(search))
 
-        scores = [r["score"] for r in results]
+        scores = [r.score for r in results]
         assert scores == sorted(scores, reverse=True)
-        assert results[0]["content"] == "high"
+        assert results[0].content == "high"
+
+
+class TestSearchDocumentDispatch:
+    """H5: search_document picks subdoc vs flat based on architecture."""
+
+    def test_dispatches_to_subdocuments_when_present(self):
+        subdocs = [
+            _FakeSubDoc(
+                id=10, breadcrumb_key="ch", faiss_index_path="a", bm25_index_path="b"
+            )
+        ]
+        data = FakeSearchDataAccess(subdocs=subdocs)
+        fake = _FakeIndexSearcher([{"index": 0, "content": "hit", "score": 0.9}])
+        searcher = _make_searcher(lambda faiss, bm25: fake, data)
+
+        results = asyncio.run(
+            searcher.search_document(
+                SingleDocumentSearch(
+                    query="q",
+                    document_id=1,
+                    faiss_path="ignored",
+                    bm25_path="ignored",
+                    context_mode="none",
+                )
+            )
+        )
+
+        assert len(results) == 1
+        assert results[0].sub_document_id == 10
+        assert results[0].document_id == 1
+
+    def test_dispatches_to_single_index_when_no_subdocuments(self):
+        data = FakeSearchDataAccess(subdocs=[])
+        fake = _FakeIndexSearcher([{"index": 4, "content": "flat", "score": 0.5}])
+        searcher = _make_searcher(lambda faiss, bm25: fake, data)
+
+        results = asyncio.run(
+            searcher.search_document(
+                SingleDocumentSearch(
+                    query="q",
+                    document_id=7,
+                    faiss_path="f.faiss",
+                    bm25_path="b.pkl",
+                    context_mode="none",
+                )
+            )
+        )
+
+        assert len(results) == 1
+        assert results[0].content == "flat"
+        assert results[0].document_id == 7
+
+    def test_flat_without_indexes_raises(self):
+        data = FakeSearchDataAccess(subdocs=[])
+        searcher = _make_searcher(lambda faiss, bm25: None, data)
+
+        with pytest.raises(ValueError, match="No search indexes"):
+            asyncio.run(
+                searcher.search_document(
+                    SingleDocumentSearch(
+                        query="q",
+                        document_id=7,
+                        faiss_path=None,
+                        bm25_path=None,
+                    )
+                )
+            )

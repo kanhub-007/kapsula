@@ -39,15 +39,7 @@ class AggregateIndexBuilder:
         collection_guid: str | None = None,
     ) -> tuple[str | None, str | None]:
         """Build collection-level aggregate indexes."""
-        docs = (
-            db.query(Document)
-            .filter(
-                Document.collection_id == collection_id,
-                Document.status == "completed",
-                Document.doc_state == "active",
-            )
-            .all()
-        )
+        docs = self._completed_active_documents(db, collection_id=collection_id)
         if not docs:
             logger.info("No completed documents for collection %s", collection_id)
             return None, None
@@ -77,15 +69,7 @@ class AggregateIndexBuilder:
             logger.info("No collections for account %s", account_id)
             return None, None
 
-        docs = (
-            db.query(Document)
-            .filter(
-                Document.collection_id.in_(cids),
-                Document.status == "completed",
-                Document.doc_state == "active",
-            )
-            .all()
-        )
+        docs = self._completed_active_documents(db, collection_ids=cids)
         if not docs:
             logger.info("No completed documents for account %s", account_id)
             return None, None
@@ -95,6 +79,28 @@ class AggregateIndexBuilder:
             AggregateIndexPaths.for_account(self._data_dir, account_guid),
             label=f"account {account_id}",
         )
+
+    @staticmethod
+    def _completed_active_documents(
+        db: Session,
+        *,
+        collection_id: int | None = None,
+        collection_ids: list[int] | None = None,
+    ) -> list[Document]:
+        """Query completed, non-archived documents for one or more collections.
+
+        Shared by :meth:`build` and :meth:`build_account` (closes L2: the
+        same status/doc_state filter was duplicated in both).
+        """
+        query = db.query(Document).filter(
+            Document.status == "completed",
+            Document.doc_state == "active",
+        )
+        if collection_id is not None:
+            query = query.filter(Document.collection_id == collection_id)
+        elif collection_ids:
+            query = query.filter(Document.collection_id.in_(collection_ids))
+        return query.all()
 
     # ── shared build pipeline ─────────────────────────────────────
 
@@ -126,41 +132,13 @@ class AggregateIndexBuilder:
                 return paths.faiss, paths.bm25
             return None, None
 
-        new_count = len(new_texts)
-        total_count = len(all_texts)
-        if (
-            new_count == 0
-            and existing_embeddings is not None
-            and len(existing_embeddings) > 0
-        ):
-            logger.info(
-                "All %s chunks for %s already indexed; no embedding needed",
-                total_count,
-                label,
-            )
-            embeddings = existing_embeddings
-        elif new_count > 0:
-            logger.info(
-                "Building aggregate indexes for %s: %s new chunks + %s cached = %s total from %s documents",
-                label,
-                new_count,
-                total_count - new_count,
-                total_count,
-                len(docs),
-            )
-            new_embeddings = self._embedder.embed(new_texts)
-            if existing_embeddings is not None and len(existing_embeddings) > 0:
-                embeddings = np.vstack([existing_embeddings, new_embeddings])
-            else:
-                embeddings = new_embeddings
-        else:
-            logger.info(
-                "Building aggregate indexes for %s: %s chunks from %s documents",
-                label,
-                total_count,
-                len(docs),
-            )
-            embeddings = self._embedder.embed(all_texts)
+        embeddings = self._resolve_embeddings(
+            all_texts,
+            new_texts,
+            existing_embeddings,
+            label=label,
+            doc_count=len(docs),
+        )
 
         faiss_path = self._build_faiss_at(embeddings, paths.faiss)
         bm25_path = self._build_bm25_at(all_texts, paths.bm25)
@@ -174,10 +152,59 @@ class AggregateIndexBuilder:
             label,
             os.path.basename(faiss_path) if faiss_path else "none",
             os.path.basename(bm25_path) if bm25_path else "none",
-            total_count,
-            new_count,
+            len(all_texts),
+            len(new_texts),
         )
         return faiss_path, bm25_path
+
+    def _resolve_embeddings(
+        self,
+        all_texts: list[str],
+        new_texts: list[str],
+        existing_embeddings: np.ndarray | None,
+        *,
+        label: str,
+        doc_count: int,
+    ) -> np.ndarray:
+        """Decide which texts to embed and stack with cached embeddings (H6).
+
+        Extracted from ``_build_from_docs`` so that method stays focused on
+        orchestration. Reuses cached embeddings when nothing is new; embeds
+        only the new texts and vstacks otherwise.
+        """
+        new_count = len(new_texts)
+        total_count = len(all_texts)
+        has_existing = existing_embeddings is not None and len(existing_embeddings) > 0
+
+        if new_count == 0 and has_existing:
+            logger.info(
+                "All %s chunks for %s already indexed; no embedding needed",
+                total_count,
+                label,
+            )
+            return existing_embeddings
+
+        if new_count > 0:
+            logger.info(
+                "Building aggregate indexes for %s: %s new chunks + %s cached = %s total from %s documents",
+                label,
+                new_count,
+                total_count - new_count,
+                total_count,
+                doc_count,
+            )
+            new_embeddings = self._embedder.embed(new_texts)
+            if has_existing:
+                return np.vstack([existing_embeddings, new_embeddings])
+            return new_embeddings
+
+        logger.info(
+            "Building aggregate indexes for %s: %s chunks from %s documents",
+            label,
+            total_count,
+            doc_count,
+        )
+        return self._embedder.embed(all_texts)
 
     @staticmethod
     def _collect_texts_and_mapping(

@@ -6,6 +6,7 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from kapsula.core.application.dto.search_result_hit import SearchResultHit
 from kapsula.core.application.use_cases.intelligent_search_prompts import (
     NO_ANSWER_PHRASES,
     SYSTEM_PROMPT_COMBINE,
@@ -35,7 +36,7 @@ class IntelligentSearcher:
     async def evaluate_and_answer_with_planning_streaming(
         self,
         query: str,
-        search_function: Callable[[str], Awaitable[list[dict[str, Any]]]],
+        search_function: Callable[[str], Awaitable[list[SearchResultHit]]],
         plan: dict[str, Any] | None = None,
         max_context_length: int = 8000,
         top_k: int = 10,
@@ -123,7 +124,7 @@ class IntelligentSearcher:
     async def evaluate_and_answer_with_planning(
         self,
         query: str,
-        search_function: Callable[[str], Awaitable[list[dict[str, Any]]]],
+        search_function: Callable[[str], Awaitable[list[SearchResultHit]]],
         plan: dict[str, Any] | None = None,
         max_context_length: int = 8000,
         top_k: int = 10,
@@ -155,7 +156,7 @@ class IntelligentSearcher:
     def evaluate_and_answer(
         self,
         query: str,
-        search_results: list[dict[str, Any]],
+        search_results: list[SearchResultHit],
         max_context_length: int = 8000,
     ) -> dict[str, Any]:
         """Evaluate search results and generate a context-grounded answer."""
@@ -174,10 +175,8 @@ class IntelligentSearcher:
         evaluated = 0
 
         for idx, result in enumerate(search_results):
-            content = result.get("content", "")
-            text = (
-                f"[Result {idx + 1}] (Score: {result.get('score', 0):.3f})\n{content}\n"
-            )
+            content = result.content
+            text = f"[Result {idx + 1}] (Score: {result.score:.3f})\n{content}\n"
             if current_length + len(text) > max_context_length:
                 break
             context_parts.append(text)
@@ -240,12 +239,12 @@ class IntelligentSearcher:
     async def _process_sub_query(
         self,
         planned_query: str,
-        search_function: Callable[[str], Awaitable[list[dict[str, Any]]]],
+        search_function: Callable[[str], Awaitable[list[SearchResultHit]]],
         max_context_length: int,
         top_k: int,
     ) -> dict[str, Any]:
         results = await search_function(planned_query)
-        top = sorted(results, key=lambda x: x.get("score", 0), reverse=True)[:top_k]
+        top = sorted(results, key=lambda x: x.score, reverse=True)[:top_k]
 
         if top:
             intermediate = await asyncio.to_thread(

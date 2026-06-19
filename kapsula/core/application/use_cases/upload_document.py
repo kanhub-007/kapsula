@@ -17,6 +17,9 @@ from kapsula.core.domain.interfaces.background_processor import (
 from kapsula.core.domain.interfaces.document_repository import (
     DocumentRepository,
 )
+from kapsula.core.domain.interfaces.maintenance_state_tracker import (
+    MaintenanceStateTracker,
+)
 from kapsula.core.domain.interfaces.progress_tracker import (
     ProgressTracker,
 )
@@ -34,10 +37,12 @@ class UploadDocumentUseCase:
         background_processor: BackgroundProcessor,
         document_repository: DocumentRepository,
         progress_tracker: ProgressTracker,
+        maintenance_state: MaintenanceStateTracker,
     ):
         self._background_processor = background_processor
         self._document_repository = document_repository
         self._progress_tracker = progress_tracker
+        self._maintenance_state = maintenance_state
 
     def execute(
         self,
@@ -64,10 +69,7 @@ class UploadDocumentUseCase:
             ValueError: On validation failure.
         """
         # Normalise and validate ingestion mode
-        try:
-            ingestion_mode = UploadIngestionMode.normalize(ingestion_mode)
-        except ValueError as exc:
-            raise ValueError(str(exc)) from exc
+        ingestion_mode = UploadIngestionMode.normalize(ingestion_mode)
 
         # Validate file
         p = Path(file_path)
@@ -114,10 +116,7 @@ class UploadDocumentUseCase:
         if suffix != ".md":
             raise ValueError(f"Only .md files accepted, got: {suffix}")
 
-        try:
-            ingestion_mode = UploadIngestionMode.normalize(ingestion_mode)
-        except ValueError as exc:
-            raise ValueError(str(exc)) from exc
+        ingestion_mode = UploadIngestionMode.normalize(ingestion_mode)
 
         col = self._document_repository.find_collection_by_guid(db, collection_id)
         if not col:
@@ -174,6 +173,12 @@ class UploadDocumentUseCase:
             job_id, content, max_tokens, ingestion_mode
         )
 
+        # Mark consolidation stale for the collection so deferred
+        # maintenance picks this upload up. Best-effort: state-tracking must
+        # never abort the upload (closes H1 — previously only the MCP path
+        # did this, so the REST API silently skipped it).
+        self._mark_consolidation_stale(collection.collection_id)
+
         logger.info(
             "Upload started: job_id=%s filename=%s collection=%s mode=%s",
             job_id,
@@ -187,3 +192,14 @@ class UploadDocumentUseCase:
             collection_name=collection.name,
             ingestion_mode=ingestion_mode,
         )
+
+    def _mark_consolidation_stale(self, collection_id: str) -> None:
+        """Best-effort: flag the collection for re-consolidation."""
+        try:
+            self._maintenance_state.increment_uploads(collection_id)
+        except (OSError, ValueError, KeyError) as exc:
+            logger.warning(
+                "Upload: maintenance state update failed for %s: %s",
+                collection_id,
+                exc,
+            )

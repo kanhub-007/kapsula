@@ -11,14 +11,14 @@ logger = get_logger(__name__)
 from kapsula.infrastructure.data import (
     DocumentStructure as OrmDocumentStructure,
 )
+from kapsula.infrastructure.repositories.data.sql_chunk_repository import (
+    SqlChunkRepository,
+)
 from kapsula.infrastructure.repositories.data.sql_document_repository import (
     SqlDocumentRepository,
 )
-from kapsula.infrastructure.repositories.data.sql_query_repositories import (
-    SqlChunkRepository,
-)
 
-from ._shared import _get_db, _get_maintenance_state_manager
+from ._shared import _get_db
 
 _doc_repo = SqlDocumentRepository()
 _chunk_repo = SqlChunkRepository()
@@ -56,16 +56,8 @@ def register_document_tools(mcp: FastMCP):
             result = use_case.execute(
                 db, file_path, collection_id, max_tokens, ingestion_mode
             )
-            # Mark consolidation as stale after successful upload
-            try:
-                _get_maintenance_state_manager().increment_uploads(collection_id)
-            except (OSError, ValueError, KeyError) as state_exc:
-                # Best-effort: don't break the upload tool on state-tracking
-                # failure, but surface it so silent staleness is detectable.
-                logger.warning(
-                    "upload_document: maintenance state update failed: %s",
-                    state_exc,
-                )
+            # Consolidation-stale marking moved into the use case (closes H1)
+            # so the REST API path gets it too, not just this MCP wrapper.
         except ValueError as exc:
             return f"Error: {exc}"
         finally:
@@ -95,27 +87,9 @@ def register_document_tools(mcp: FastMCP):
 
         db = _get_db()
         try:
-            # Look up collection_id before deletion so we can mark consolidation stale
-            from kapsula.infrastructure.data import Document as OrmDocument
-
-            orm_doc = db.query(OrmDocument).filter(OrmDocument.job_id == job_id).first()
-            collection_id = (
-                orm_doc.collection.collection_id
-                if orm_doc and orm_doc.collection
-                else None
-            )
-
             use_case = create_delete_document_use_case()
             result = use_case.execute(db, job_id)
-            # Mark consolidation as stale after successful deletion
-            if collection_id:
-                try:
-                    _get_maintenance_state_manager().increment_uploads(collection_id)
-                except (OSError, ValueError, KeyError) as state_exc:
-                    logger.warning(
-                        "delete_document: maintenance state update failed: %s",
-                        state_exc,
-                    )
+            # Consolidation-stale marking moved into the use case (closes H1).
         except ValueError as exc:
             return str(exc)
         finally:
@@ -310,7 +284,12 @@ def register_document_tools(mcp: FastMCP):
                     try:
                         meta = json.loads(ch.chunk_metadata)
                     except json.JSONDecodeError:
-                        pass
+                        logger.warning(
+                            "Corrupt chunk_metadata for chunk %s in job %s "
+                            "(treated as empty)",
+                            ch.chunk_index,
+                            job_id,
+                        )
                 header = meta.get("header", "")
                 node_type = meta.get("node_type", "text")
                 lines.append(

@@ -1,5 +1,6 @@
 """MCP-facing search result formatting."""
 
+from kapsula.core.application.dto.search_result_hit import SearchResultHit
 from kapsula.core.domain.quality_filter import DENSE_SIGNAL_THRESHOLD
 
 # Re-exported for any presenter that wants the same threshold; the single
@@ -8,7 +9,7 @@ from kapsula.core.domain.quality_filter import DENSE_SIGNAL_THRESHOLD
 
 def format_search_results(
     query: str,
-    results: list[dict],
+    results: list[SearchResultHit],
     scope: str = "",
     context_mode: str = "none",
 ) -> str:
@@ -20,7 +21,7 @@ def format_search_results(
 
     Args:
         query: Original search query.
-        results: List of search result dicts with keys ``score``, ``content``, etc.
+        results: Typed search-result hits.
         scope: Optional scope label (e.g., ``"in collection 'Foo'"``).
         context_mode: Context expansion mode (``none``, ``narrow``, ``deep``).
 
@@ -38,13 +39,17 @@ def format_search_results(
     ]
 
     for i, result in enumerate(results, 1):
-        src = result.get("collection_name", "?")
-        doc = result.get("document_filename", "?")
-        score = result.get("rerank_score") or result.get("score", 0)
-        dense = result.get("dense_score")
-        sparse = result.get("sparse_score")
-        content = result.get("expanded_content", result.get("content", ""))
-        result_context = result.get("context_mode", context_mode)
+        src = result.collection_name or "?"
+        doc = result.document_filename or "?"
+        score = result.rerank_score if result.rerank_score is not None else result.score
+        dense = result.dense_score
+        sparse = result.sparse_score
+        content = (
+            result.expanded_content
+            if result.expanded_content is not None
+            else result.content
+        )
+        result_context = result.context_mode or context_mode
 
         # Score breakdown
         score_parts = [f"fused={score:.3f}"]
@@ -70,7 +75,7 @@ def format_search_results(
         ctx_labels = {"none": "chunk", "narrow": "H3 section", "deep": "H2 chapter"}
         ctx_label = ctx_labels.get(result_context, result_context)
 
-        sub_key = result.get("sub_document_key", "")
+        sub_key = result.sub_document_key or ""
         sub_info = f" [{sub_key}]" if sub_key else ""
 
         out.append(f"--- Result {i} [{src}/{doc}]{sub_info} ---")

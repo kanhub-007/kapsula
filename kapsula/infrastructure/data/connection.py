@@ -51,16 +51,38 @@ def _run_lightweight_migrations():
     SQLAlchemy's ``create_all`` only creates missing tables, not missing
     columns on existing tables. For SQLite we use ALTER TABLE ADD COLUMN,
     guarded by an introspection check so it is idempotent.
+
+    Each entry is ``(column_name, ddl_clause)`` where ``ddl_clause`` is the
+    text after ``ADD COLUMN``. NOT NULL columns MUST carry a DEFAULT so
+    pre-existing rows populate cleanly (SQLite requires this).
     """
     from sqlalchemy import inspect, text
+
+    # Columns added to library_cards after the initial schema. Keep this list
+    # in sync with the ORM model in tables/library_card.py. Closes C1: a
+    # previously incomplete migration added only `description`, so upgraded
+    # databases crashed on any query filtering by card_type/importance/etc.
+    library_card_columns: list[tuple[str, str]] = [
+        # Phase 2 consolidation columns
+        ("card_type", "TEXT NOT NULL DEFAULT 'extractive'"),
+        ("importance", "FLOAT NOT NULL DEFAULT 0.5"),
+        ("updated_at", "DATETIME"),
+        ("consolidation_run_id", "TEXT"),
+        # Slice 2 enrichment
+        ("description", "TEXT"),
+    ]
 
     inspector = inspect(engine)
     if "library_cards" not in inspector.get_table_names():
         return
     existing = {c["name"] for c in inspector.get_columns("library_cards")}
-    if "description" not in existing:
+    missing = [
+        (name, ddl) for name, ddl in library_card_columns if name not in existing
+    ]
+    if missing:
         with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE library_cards ADD COLUMN description TEXT"))
+            for name, ddl in missing:
+                conn.execute(text(f"ALTER TABLE library_cards ADD COLUMN {name} {ddl}"))
 
 
 def get_db():

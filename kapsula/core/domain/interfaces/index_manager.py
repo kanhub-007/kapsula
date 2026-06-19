@@ -1,9 +1,12 @@
 """Interface for managing search index files on disk."""
 
 from abc import ABC, abstractmethod
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from kapsula.core.domain.entities.rebuild_result import RebuildResult
+
+if TYPE_CHECKING:
+    from kapsula.core.domain.interfaces.session import Session
 
 
 class HasAccountId(Protocol):
@@ -48,7 +51,9 @@ class IndexManager(ABC):
         to force a full rebuild on the next aggregate index build."""
 
     @abstractmethod
-    def rebuild_aggregates(self, db, collection: IndexableCollection) -> RebuildResult:
+    def rebuild_aggregates(
+        self, db: Session, collection: IndexableCollection
+    ) -> RebuildResult:
         """Rebuild collection and account aggregate indexes."""
 
     @abstractmethod

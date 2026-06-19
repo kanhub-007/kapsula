@@ -19,4 +19,3 @@ class TextHandler:
             ctx.flush()
 
         ctx.append(element.content)
-        state.i = idx + 1

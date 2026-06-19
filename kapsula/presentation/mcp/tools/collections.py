@@ -1,12 +1,26 @@
 """Collection management MCP tools."""
 
+import threading
 import uuid
 
 from fastmcp import FastMCP
+from sqlalchemy import func
 
 from kapsula.core.domain.entities.collection import Collection
 from kapsula.infrastructure.data import (
     Account as OrmAccount,
+)
+from kapsula.infrastructure.data import (
+    Collection as OrmCollection,
+)
+from kapsula.infrastructure.data import (
+    ConsolidationRun,
+)
+from kapsula.infrastructure.data import (
+    Document as OrmDocument,
+)
+from kapsula.infrastructure.data import (
+    LibraryCard as OrmLibraryCard,
 )
 from kapsula.infrastructure.repositories.data.sql_account_repository import (
     SqlAccountRepository,
@@ -14,8 +28,12 @@ from kapsula.infrastructure.repositories.data.sql_account_repository import (
 from kapsula.infrastructure.repositories.data.sql_collection_repository import (
     SqlCollectionRepository,
 )
-from kapsula.infrastructure.repositories.data.sql_query_repositories import (
+from kapsula.infrastructure.repositories.data.sql_library_card_repository import (
     SqlLibraryCardRepository,
+)
+from kapsula.presentation.upload.maintenance_runner import (
+    get_maintenance_manager,
+    run_maintenance_in_background,
 )
 
 from ._shared import _get_db, _get_maintenance_state_manager
@@ -39,6 +57,7 @@ def register_collection_tools(mcp: FastMCP):
     def create_collection(name: str, account_id: str | None = None) -> str:
         db = _get_db()
         try:
+            acc = None
             acc_id = None
             if account_id:
                 acc = _account_repo.find_by_account_id(db, account_id)
@@ -90,7 +109,6 @@ def register_collection_tools(mcp: FastMCP):
                 lines.append(f"\nSummary: {card.content[:300]}")
 
             # Domain entities carry documents=[], so always load ORM for full list
-            from kapsula.infrastructure.data import Collection as OrmCollection
 
             orm_col = db.query(OrmCollection).filter(OrmCollection.id == col.id).first()
             if orm_col and orm_col.documents:
@@ -118,9 +136,6 @@ def register_collection_tools(mcp: FastMCP):
                 return "No collections found."
             lines = [f"Collections ({len(collections)}):\n"]
             # Bulk-load document counts to avoid N+1 queries
-            from sqlalchemy import func
-
-            from kapsula.infrastructure.data import Document as OrmDocument
 
             doc_counts = dict(
                 db.query(OrmDocument.collection_id, func.count(OrmDocument.id))
@@ -193,11 +208,9 @@ def register_collection_tools(mcp: FastMCP):
         ),
     )
     def run_collection_maintenance(collection_id: str) -> str:
-        import threading
 
         db = _get_db()
         try:
-            from kapsula.infrastructure.data import Collection as OrmCollection
 
             col = (
                 db.query(OrmCollection)
@@ -206,11 +219,6 @@ def register_collection_tools(mcp: FastMCP):
             )
             if not col:
                 return f"Collection not found: {collection_id}"
-
-            from kapsula.presentation.upload.maintenance_runner import (
-                get_maintenance_manager,
-                run_maintenance_in_background,
-            )
 
             manager = get_maintenance_manager()
             job = manager.create(
@@ -241,10 +249,6 @@ def register_collection_tools(mcp: FastMCP):
         ),
     )
     def get_maintenance_job(job_id: str) -> str:
-        from kapsula.presentation.upload.maintenance_runner import (
-            get_maintenance_manager,
-        )
-
         manager = get_maintenance_manager()
         job = manager.get(job_id)
         if not job:
@@ -285,10 +289,6 @@ def register_collection_tools(mcp: FastMCP):
         ),
     )
     def get_collection_maintenance_status(collection_id: str) -> str:
-        from kapsula.presentation.upload.maintenance_runner import (
-            get_maintenance_manager,
-        )
-
         manager = get_maintenance_manager()
         job = manager.get_latest_for_collection(collection_id)
         if not job:
@@ -328,16 +328,6 @@ def register_collection_tools(mcp: FastMCP):
     ) -> str:
         db = _get_db()
         try:
-            from kapsula.infrastructure.data import (
-                Collection as OrmCollection,
-            )
-            from kapsula.infrastructure.data import (
-                Document as OrmDocument,
-            )
-            from kapsula.infrastructure.data import (
-                LibraryCard as OrmLibraryCard,
-            )
-
             col = (
                 db.query(OrmCollection)
                 .filter(OrmCollection.collection_id == collection_id)
@@ -428,16 +418,6 @@ def register_collection_tools(mcp: FastMCP):
     def get_consolidation_status(collection_id: str) -> str:
         db = _get_db()
         try:
-            from kapsula.infrastructure.data import (
-                Collection as OrmCollection,
-            )
-            from kapsula.infrastructure.data import (
-                ConsolidationRun,
-            )
-            from kapsula.infrastructure.data import (
-                LibraryCard as OrmLibraryCard,
-            )
-
             col = (
                 db.query(OrmCollection)
                 .filter(OrmCollection.collection_id == collection_id)

@@ -10,6 +10,7 @@ from kapsula.core.application.dto.collection_search import CollectionSearch
 from kapsula.infrastructure.data.connection import get_db
 from kapsula.infrastructure.logging_config import get_logger
 from kapsula.presentation.api.search_presenter import (
+    collect_intelligent_citations,
     collect_unique_citations,
 )
 from kapsula.startup import (
@@ -124,34 +125,10 @@ async def intelligent_search_across_collections(
                 for sub_answer in intelligent_result["sub_answers"]
             ]
 
-        # Extract citations from relevant results
-        # Note: relevant_results are indices into the search results array
-        # The intelligent search engine returns the search results for us
-        all_citations = []
-        search_results = intelligent_result.get("search_results", [])
-
-        if search_results:
-            relevant_indices = intelligent_result.get("relevant_results", [])
-
-            # If relevant_results is empty (multi-query planning mode), extract citations from all results
-            if not relevant_indices:
-                logger.info(
-                    "No relevant_results indices (planning mode), extracting citations from all search results"
-                )
-                for result in search_results:
-                    citation = extract_citation_from_result(result, db)
-                    if citation:
-                        all_citations.append(citation)
-            else:
-                # Single query mode - use only relevant result indices
-                for result_index in relevant_indices:
-                    if result_index < len(search_results):
-                        result = search_results[result_index]
-                        citation = extract_citation_from_result(result, db)
-                        if citation:
-                            all_citations.append(citation)
-
-        unique_citations = collect_unique_citations(all_citations)
+        # Extract citations from relevant results (shared helper closes H7).
+        unique_citations = collect_intelligent_citations(
+            intelligent_result, db, extract_citation_from_result
+        )
 
         return IntelligentCollectionSearchResponse(
             query=query,

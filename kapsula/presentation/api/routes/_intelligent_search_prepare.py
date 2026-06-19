@@ -1,8 +1,10 @@
-"""Shared intelligent search preparation logic.
+"""Shared intelligent search preparation logic (HTTP-mapped).
 
-Thin adapter: delegates to ``PrepareIntelligentSearchUseCase`` (closes A6).
-Kept as a module function so the route handlers can stay synchronous-ish
-and so the streaming route can reuse the same preparation path.
+Thin adapter: delegates to ``PrepareIntelligentSearchUseCase`` (closes A6)
+and maps the use case's ``ValueError`` ("no collections") to an HTTP 404.
+Kept as a module function so both the regular and streaming route handlers
+share one preparation path; the name carries the HTTP mapping explicitly
+(closes L6).
 """
 
 from fastapi import HTTPException

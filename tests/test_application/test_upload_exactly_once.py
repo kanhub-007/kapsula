@@ -118,7 +118,9 @@ class TestUploadExactlyOnce:
         processor = RecordingBackgroundProcessor()
         repo = SqlDocumentRepository()
         progress = InMemoryTracker()
-        use_case = UploadDocumentUseCase(processor, repo, progress)
+        use_case = UploadDocumentUseCase(
+            processor, repo, progress, RecordingMaintenanceState()
+        )
 
         md = tmp_path / "doc.md"
         md.write_text("# Title\n\n" + ("body content here\n\n" * 20))
@@ -155,6 +157,16 @@ class InMemoryTracker(ProgressTracker):
 
     def set_queued(self, job_id, ingestion_mode) -> None:
         pass
+
+
+class RecordingMaintenanceState:
+    """Fake MaintenanceStateTracker — records increment_uploads calls."""
+
+    def __init__(self):
+        self.calls: list[str] = []
+
+    def increment_uploads(self, collection_id: str) -> None:
+        self.calls.append(collection_id)
 
 
 # Re-use the in-memory repo from the upload tests to avoid needing the temp DB

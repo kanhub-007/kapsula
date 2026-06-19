@@ -7,10 +7,11 @@ held only for the brief write, never across long LLM calls (per the
 """
 
 import uuid
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import joinedload
 
 from kapsula.core.domain.interfaces.consolidation_card_repository import (
     ConsolidationCardRepository,
@@ -32,13 +33,31 @@ class SqlConsolidationCardRepository(ConsolidationCardRepository):
     def __init__(self, session_factory):
         self._session_factory = session_factory
 
-    def _short_session(self) -> Session:
+    def _short_session(self):
         """Open a fresh session. Caller MUST close."""
         return self._session_factory()
 
-    def fetch_extractive_cards(self, collection_id: int) -> list[Any]:
+    @contextmanager
+    def _session(self):
+        """Short-lived session with automatic rollback/close (closes M2).
+
+        Replaces the ``session = self._short_session(); try: ... except:
+        rollback; raise; finally: close`` boilerplate that was copy-pasted
+        across every write method. Reads also use this so cursor cleanup is
+        uniform. Commit is the caller's responsibility; on any exception we
+        roll back and re-raise.
+        """
         session = self._short_session()
         try:
+            yield session
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def fetch_extractive_cards(self, collection_id: int) -> list[Any]:
+        with self._session() as session:
             cards = (
                 session.query(LibraryCard)
                 .options(joinedload(LibraryCard.document))
@@ -53,12 +72,9 @@ class SqlConsolidationCardRepository(ConsolidationCardRepository):
             for card in cards:
                 session.expunge(card)
             return cards
-        finally:
-            session.close()
 
     def fetch_existing_topic_labels(self, collection_id: int) -> list[str]:
-        session = self._short_session()
-        try:
+        with self._session() as session:
             rows = (
                 session.query(LibraryCard.title)
                 .filter(
@@ -68,8 +84,6 @@ class SqlConsolidationCardRepository(ConsolidationCardRepository):
                 .all()
             )
             return [r[0] for r in rows if r[0]]
-        finally:
-            session.close()
 
     def upsert_topic_card(
         self,
@@ -83,8 +97,7 @@ class SqlConsolidationCardRepository(ConsolidationCardRepository):
     ) -> tuple[str, int]:
         import json
 
-        session = self._short_session()
-        try:
+        with self._session() as session:
             existing = (
                 session.query(LibraryCard)
                 .filter(
@@ -133,17 +146,11 @@ class SqlConsolidationCardRepository(ConsolidationCardRepository):
 
             session.commit()
             return status, card.id
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
 
     def upsert_evolution_card(
         self, collection_id: int, run_id: str, content: str
     ) -> None:
-        session = self._short_session()
-        try:
+        with self._session() as session:
             existing = (
                 session.query(LibraryCard)
                 .filter(
@@ -172,15 +179,9 @@ class SqlConsolidationCardRepository(ConsolidationCardRepository):
                     )
                 )
             session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
 
     def fetch_previous_topic_labels(self, collection_id: int) -> set[str]:
-        session = self._short_session()
-        try:
+        with self._session() as session:
             rows = (
                 session.query(LibraryCard)
                 .filter(
@@ -190,12 +191,9 @@ class SqlConsolidationCardRepository(ConsolidationCardRepository):
                 .all()
             )
             return {c.title for c in rows}
-        finally:
-            session.close()
 
     def has_previous_run(self, collection_guid: str, run_id: str) -> bool:
-        session = self._short_session()
-        try:
+        with self._session() as session:
             previous = (
                 session.query(ConsolidationRun)
                 .filter(
@@ -206,13 +204,10 @@ class SqlConsolidationCardRepository(ConsolidationCardRepository):
                 .first()
             )
             return previous is not None
-        finally:
-            session.close()
 
     def add_gap_cards(self, collection_id: int, run_id: str, gaps: list[dict]) -> int:
-        session = self._short_session()
         inserted = 0
-        try:
+        with self._session() as session:
             for gap in gaps:
                 session.add(
                     LibraryCard(
@@ -230,16 +225,10 @@ class SqlConsolidationCardRepository(ConsolidationCardRepository):
                 )
                 inserted += 1
             session.commit()
-            return inserted
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
+        return inserted
 
     def fetch_search_misses(self, collection_guid: str, limit: int = 100) -> list[Any]:
-        session = self._short_session()
-        try:
+        with self._session() as session:
             return (
                 session.query(SearchMissLog)
                 .filter(SearchMissLog.collection_id == collection_guid)
@@ -247,8 +236,6 @@ class SqlConsolidationCardRepository(ConsolidationCardRepository):
                 .limit(limit)
                 .all()
             )
-        finally:
-            session.close()
 
     def record_run(
         self,
@@ -260,6 +247,14 @@ class SqlConsolidationCardRepository(ConsolidationCardRepository):
         gaps_found: int,
         error: str | None,
     ) -> None:
+        """Persist the ConsolidationRun audit row.
+
+        Unlike the other write methods, this does NOT swallow persistence
+        failures: the ConsolidationRun table is an audit log, and silently
+        dropping a row here would hide the fact that a run happened at all
+        (closes M11). The caller (ConsolidationRunner) already guards the
+        whole run with a top-level try/except.
+        """
         session = self._short_session()
         try:
             session.add(
@@ -276,11 +271,8 @@ class SqlConsolidationCardRepository(ConsolidationCardRepository):
                 )
             )
             session.commit()
-        except Exception as exc:
-            logger.error("Failed to record consolidation run %s: %s", run_id, exc)
-            try:
-                session.rollback()
-            except Exception:
-                pass
+        except Exception:
+            session.rollback()
+            raise
         finally:
             session.close()
