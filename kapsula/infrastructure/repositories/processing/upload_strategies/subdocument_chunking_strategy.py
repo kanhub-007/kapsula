@@ -13,9 +13,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from kapsula.core.application.dto.upload_pipeline_context import (
-    UploadPipelineContext,
-)
 from kapsula.core.domain.services.citation_linker import (
     add_citation_metadata_to_chunks,
 )
@@ -25,12 +22,15 @@ from kapsula.infrastructure.repositories.chunking.breadcrumb_parser import (
     extract_subdocuments,
     validate_subdocuments,
 )
+from kapsula.infrastructure.repositories.processing.upload_pipeline_context import (
+    UploadPipelineContext,
+)
 
 logger = get_logger(__name__)
 
 
 if TYPE_CHECKING:
-    from kapsula.core.application.use_cases.upload.flat_chunking_strategy import (
+    from kapsula.infrastructure.repositories.processing.upload_strategies.flat_chunking_strategy import (
         FlatChunkingStrategy,
     )
 
@@ -41,7 +41,7 @@ class SubDocumentChunkingStrategy:
     def __init__(self, flat: FlatChunkingStrategy | None = None):
         # Lazy import to avoid a circular dependency at module load.
         if flat is None:
-            from kapsula.core.application.use_cases.upload.flat_chunking_strategy import (
+            from kapsula.infrastructure.repositories.processing.upload_strategies.flat_chunking_strategy import (
                 FlatChunkingStrategy,
             )
 

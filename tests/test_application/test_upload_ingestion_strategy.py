@@ -15,19 +15,19 @@ from __future__ import annotations
 
 import pytest
 
-from kapsula.core.application.dto.upload_pipeline_context import (
+from kapsula.core.domain.entities.document import Document
+from kapsula.infrastructure.repositories.processing.upload_pipeline_context import (
     UploadPipelineContext,
 )
-from kapsula.core.application.use_cases.upload.fast_upload_ingestion_strategy import (
+from kapsula.infrastructure.repositories.processing.upload_strategies.fast_upload_ingestion_strategy import (
     FastUploadIngestionStrategy,
 )
-from kapsula.core.application.use_cases.upload.full_upload_ingestion_strategy import (
+from kapsula.infrastructure.repositories.processing.upload_strategies.full_upload_ingestion_strategy import (
     FullUploadIngestionStrategy,
 )
-from kapsula.core.application.use_cases.upload.indexed_upload_ingestion_strategy import (
+from kapsula.infrastructure.repositories.processing.upload_strategies.indexed_upload_ingestion_strategy import (
     IndexedUploadIngestionStrategy,
 )
-from kapsula.core.domain.entities.document import Document
 
 # ── helpers ──────────────────────────────────────────────────────────
 
@@ -159,7 +159,7 @@ class TestFastStrategyIsNoOp:
 
 class TestFactoryReturnsNewShape:
     def test_factory_returns_strategy_with_methods_not_flags(self):
-        from kapsula.core.application.use_cases.upload.upload_ingestion_strategy_factory import (
+        from kapsula.infrastructure.repositories.processing.upload_strategies.upload_ingestion_strategy_factory import (
             UploadIngestionStrategyFactory,
         )
 

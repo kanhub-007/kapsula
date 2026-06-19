@@ -12,13 +12,15 @@ from __future__ import annotations
 
 import inspect
 
-from kapsula.core.application.use_cases.upload.flat_chunking_strategy import (
+from kapsula.infrastructure.repositories.processing.upload_strategies.flat_chunking_strategy import (
     FlatChunkingStrategy,
 )
-from kapsula.core.application.use_cases.upload.subdocument_chunking_strategy import (
+from kapsula.infrastructure.repositories.processing.upload_strategies.subdocument_chunking_strategy import (
     SubDocumentChunkingStrategy,
 )
-from kapsula.core.application.use_cases.upload.upload_pipeline import UploadPipeline
+from kapsula.infrastructure.repositories.processing.upload_strategies.upload_pipeline import (
+    UploadPipeline,
+)
 
 
 class TestS31SharedPersistence:
@@ -65,10 +67,10 @@ class TestS32MaintenanceViaStrategyMethods:
         )
 
     def test_no_flag_branches_remain_in_upload_module(self):
-        """No file in the upload use-case package branches on the old flags."""
+        """No file in the upload-strategies package branches on the old flags."""
         import os
 
-        import kapsula.core.application.use_cases.upload as pkg
+        import kapsula.infrastructure.repositories.processing.upload_strategies as pkg
 
         pkg_dir = os.path.dirname(pkg.__file__)
         for filename in os.listdir(pkg_dir):

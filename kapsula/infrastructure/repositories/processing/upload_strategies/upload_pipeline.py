@@ -16,13 +16,10 @@ from __future__ import annotations
 
 import time
 
-from kapsula.core.application.dto.upload_pipeline_context import (
-    UploadPipelineContext,
-)
-from kapsula.core.application.use_cases.upload.chunking_strategy import (
+from kapsula.core.domain.interfaces.chunking_strategy import (
     ChunkingStrategy,
 )
-from kapsula.core.application.use_cases.upload.upload_ingestion_strategy import (
+from kapsula.core.domain.interfaces.upload_ingestion_strategy import (
     UploadIngestionStrategy,
 )
 from kapsula.infrastructure.data import DocumentStructure, LibraryCard
@@ -32,6 +29,9 @@ from kapsula.infrastructure.repositories.chunking import (
 )
 from kapsula.infrastructure.repositories.processing._chunk_linker import (
     _link_chunks_to_parents,
+)
+from kapsula.infrastructure.repositories.processing.upload_pipeline_context import (
+    UploadPipelineContext,
 )
 
 logger = get_logger(__name__)
@@ -93,7 +93,6 @@ class UploadPipeline:
             )
 
             persist_subdocuments(ctx.db, ctx.document, ctx.subdoc_plan)
-            _link_subdocument_chunks(ctx)
         else:
             from kapsula.infrastructure.repositories.processing.upload_persistence import (
                 persist_flat_chunks,
@@ -133,23 +132,18 @@ class UploadPipeline:
 
 
 def _progress_store(ctx: UploadPipelineContext):
-    """Return a dict-like store for the legacy _link_chunks_to_parents helper."""
-    # _link_chunks_to_parents writes processing_status[ctx.job_id] = {...}.
-    # The context's progress tracker is the source of truth; expose a plain
-    # dict the legacy helper can mutate.
+    """Return the legacy dict store used by ``_link_chunks_to_parents``.
+
+    The context's progress tracker is the source of truth; the legacy flat
+    linker writes ``processing_status[job_id]`` directly, so we expose the
+    same backing dict to keep both in sync until the linker is ported to
+    the tracker interface.
+    """
     from kapsula.infrastructure.repositories.processing.upload_progress_store import (
         processing_status,
     )
 
     return processing_status
-
-
-def _link_subdocument_chunks(ctx: UploadPipelineContext) -> None:
-    """Link subdocument chunks to parents (citation resolution happens in
-    persist_subdocuments). Currently a placeholder for future parent-linking."""
-    # Citation resolution is done inside persist_subdocuments per subdoc.
-    # No additional linking needed here for the subdocument path.
-    pass
 
 
 def _create_document_card(ctx: UploadPipelineContext) -> None:

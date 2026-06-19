@@ -16,8 +16,16 @@ _STATE_LOCK = threading.RLock()
 class MaintenanceStateManager:
     """Marks and clears deferred collection/account maintenance state.
 
-    State is persisted as JSON under DATA_DIR to avoid schema changes while still
-    surviving process restarts.
+    State is persisted as JSON under DATA_DIR to avoid schema changes while
+    still surviving process restarts.
+
+    Concurrency: thread-safe via a process-wide ``RLock``. NOT safe across
+    multiple processes sharing the same ``DATA_DIR`` — the read-modify-write
+    cycle on ``maintenance_state.json`` is only guarded within one process
+    (M8). Kapsula is currently single-process per deployment; if you run
+    several processes against one data dir (e.g. multiple uvicorn workers
+    or separate API+MCP containers), move this state into SQLite (which
+    already serialises writers via WAL) or add file-locking.
     """
 
     def __init__(self, path: str | None = None):

@@ -21,6 +21,11 @@ if TYPE_CHECKING:
     from kapsula.core.domain.entities.sub_document import (
         SubDocument as DomainSubDocument,
     )
+    from kapsula.core.domain.read_models.chunk_read import ChunkRead
+    from kapsula.core.domain.read_models.collection_read import CollectionRead
+    from kapsula.core.domain.read_models.document_read import DocumentRead
+    from kapsula.core.domain.read_models.library_card_read import LibraryCardRead
+    from kapsula.core.domain.read_models.sub_document_read import SubDocumentRead
     from kapsula.infrastructure.data.tables.account import Account as OrmAccount
     from kapsula.infrastructure.data.tables.chunk import Chunk as OrmChunk
     from kapsula.infrastructure.data.tables.collection import (
@@ -253,9 +258,9 @@ def _collection_from_orm_shallow(orm: OrmCollection) -> DomainCollection:
 # ── read-model mappers (ORM → application DTOs for search) ───────
 
 
-def sub_document_to_read(orm: OrmSubDocument):
+def sub_document_to_read(orm: OrmSubDocument) -> SubDocumentRead:
     """Project an ORM SubDocument to the search read-model DTO."""
-    from kapsula.core.application.dto.sub_document_read import SubDocumentRead
+    from kapsula.core.domain.read_models.sub_document_read import SubDocumentRead
 
     return SubDocumentRead(
         id=orm.id,
@@ -266,9 +271,9 @@ def sub_document_to_read(orm: OrmSubDocument):
     )
 
 
-def document_to_read(orm: OrmDocument):
+def document_to_read(orm: OrmDocument) -> DocumentRead:
     """Project an ORM Document to the search read-model DTO."""
-    from kapsula.core.application.dto.document_read import DocumentRead
+    from kapsula.core.domain.read_models.document_read import DocumentRead
 
     return DocumentRead(
         id=orm.id,
@@ -279,9 +284,9 @@ def document_to_read(orm: OrmDocument):
     )
 
 
-def collection_to_read(orm: OrmCollection):
+def collection_to_read(orm: OrmCollection) -> CollectionRead:
     """Project an ORM Collection to the search read-model DTO."""
-    from kapsula.core.application.dto.collection_read import CollectionRead
+    from kapsula.core.domain.read_models.collection_read import CollectionRead
 
     account_guid = None
     try:
@@ -316,4 +321,42 @@ def library_card_from_orm(orm):
         content=orm.content,
         extra_metadata=orm.extra_metadata,
         created_at=orm.created_at,
+    )
+
+
+# ── read-model mappers for chunk / library-card search projections ──
+
+
+def chunk_to_read(orm: OrmChunk) -> ChunkRead:
+    """Project an ORM Chunk to the search read-model DTO (closes M5)."""
+    from kapsula.core.domain.read_models.chunk_read import ChunkRead
+
+    return ChunkRead(
+        id=orm.id,
+        document_id=orm.document_id,
+        sub_document_id=orm.sub_document_id,
+        chunk_index=orm.chunk_index,
+        content=orm.content,
+        token_count=orm.token_count,
+        chunk_metadata=orm.chunk_metadata,
+    )
+
+
+def library_card_to_read(orm) -> LibraryCardRead:
+    """Project an ORM LibraryCard to the search read-model DTO (closes M5)."""
+    from kapsula.core.domain.read_models.library_card_read import LibraryCardRead
+
+    return LibraryCardRead(
+        id=orm.id,
+        doc_id=orm.doc_id,
+        level=orm.level,
+        title=orm.title,
+        content=orm.content,
+        extra_metadata=orm.extra_metadata,
+        collection_id=orm.collection_id,
+        document_id=orm.document_id,
+        sub_document_id=orm.sub_document_id,
+        description=getattr(orm, "description", None),
+        card_type=getattr(orm, "card_type", None),
+        importance=getattr(orm, "importance", None),
     )

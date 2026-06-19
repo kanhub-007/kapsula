@@ -12,11 +12,11 @@ from dataclasses import fields
 
 import pytest
 
-from kapsula.core.application.dto.upload_pipeline_context import (
-    UploadPipelineContext,
-)
 from kapsula.core.domain.entities.document import Document
 from kapsula.core.domain.entities.sub_document import SubDocument
+from kapsula.infrastructure.repositories.processing.upload_pipeline_context import (
+    UploadPipelineContext,
+)
 
 # ── lightweight stand-ins for injected infrastructure deps ──────────
 # The context is a pure carrier; it never calls these, so simple sentinels

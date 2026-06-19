@@ -19,6 +19,7 @@ from kapsula.startup import (
     create_query_planner,
 )
 
+from .._http import internal_server_error
 from ..models import (
     IntelligentSearchResponse,
     SearchPlan,
@@ -180,7 +181,7 @@ async def search_document(
 
     except Exception as e:
         logger.exception(f"Search failed for {job_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+        raise internal_server_error() from e
 
 
 @router.post("/intelligent_search/{job_id}", response_model=IntelligentSearchResponse)
@@ -318,12 +319,15 @@ async def intelligent_search_document(
         # Step 2: Execute search with or without planning
         intelligent_engine = create_intelligent_searcher()
 
+        # Hoist searcher construction once per request (closes PE3/M7) —
+        # previously rebuilt inside execute_search for every sub-query.
+        multi_searcher = create_multi_index_searcher(db)
+
         # Create search function closure
         async def execute_search(search_query: str):
             if subdocs:
                 # Use new multi-index search with LLM routing
-                searcher = create_multi_index_searcher(db)
-                return await searcher.search_subdocuments(
+                return await multi_searcher.search_subdocuments(
                     SubDocumentSearch(
                         query=search_query,
                         document_id=document.id,
@@ -339,7 +343,7 @@ async def intelligent_search_document(
                         detail="Search indexes not available for this document",
                     )
 
-                return await create_multi_index_searcher(db).search_single_index(
+                return await multi_searcher.search_single_index(
                     SingleIndexSearch(
                         query=search_query,
                         faiss_path=document.faiss_index_path,
@@ -426,6 +430,4 @@ async def intelligent_search_document(
 
     except Exception as e:
         logger.exception(f"Intelligent search failed for {job_id}: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Intelligent search failed: {str(e)}"
-        )
+        raise internal_server_error("Intelligent search failed") from e

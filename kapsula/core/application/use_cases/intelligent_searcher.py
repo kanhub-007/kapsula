@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -143,7 +144,12 @@ class IntelligentSearcher:
             if event["event_type"] == "final_answer":
                 final = event["data"]
         # The streaming variant always yields exactly one final_answer.
-        assert final is not None
+        # Raise (not ``assert``) so this is not stripped under ``python -O``.
+        if final is None:
+            raise RuntimeError(
+                "evaluate_and_answer_with_planning_streaming did not yield "
+                "a final_answer event"
+            )
         return final
 
     def evaluate_and_answer(
@@ -191,7 +197,7 @@ class IntelligentSearcher:
         user_message = USER_MESSAGE_EVALUATE.format(query=query, context=context)
 
         try:
-            answer = self._chat_client.send(
+            raw_answer = self._chat_client.send(
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT_EVALUATE},
                     {"role": "user", "content": user_message},
@@ -210,8 +216,16 @@ class IntelligentSearcher:
                 "search_results": search_results,
             }
 
+        # Split off the optional ``SUPPORTING_RESULTS: [...]`` trailer the
+        # model is asked to emit, so the displayed answer stays clean and
+        # ``relevant_results`` reflects the chunks that actually supported
+        # it (closes M1: previously ALL evaluated chunks were flagged).
+        answer, supporting = _split_supporting_results(raw_answer)
         has_answer = not any(p in answer.lower() for p in NO_ANSWER_PHRASES)
-        relevant = list(range(evaluated)) if has_answer else []
+        if has_answer:
+            relevant = _resolve_relevant_indices(supporting, evaluated)
+        else:
+            relevant = []
 
         return {
             "answer": answer,
@@ -323,3 +337,61 @@ class IntelligentSearcher:
             "total_evaluated": total,
             "has_answer": has_answer,
         }
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers for the SUPPORTING_RESULTS trailer (single-call
+# relevance extraction — closes M1).
+# ---------------------------------------------------------------------------
+
+_SUPPORTING_RE = re.compile(r"SUPPORTING_RESULTS\s*:\s*\[([^\]]*)\]", re.IGNORECASE)
+
+
+def _split_supporting_results(raw_answer: str) -> tuple[str, list[int] | None]:
+    """Split a model answer into (clean_answer, supporting_indices|None).
+
+    The model is asked to append ``SUPPORTING_RESULTS: [1, 3, 5]``. We parse
+    it defensively: any malformed trailer is ignored and the whole text is
+    returned as the answer. Returns ``None`` for the indices when no trailer
+    is present so the caller can apply its fallback policy.
+    """
+    match = _SUPPORTING_RE.search(raw_answer)
+    if not match:
+        return raw_answer.strip(), None
+    inner = match.group(1)
+    indices: list[int] = []
+    for token in inner.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            indices.append(int(token))
+        except ValueError:
+            continue
+    # Remove the trailer so the user-facing answer stays clean.
+    clean = raw_answer[: match.start()].rstrip()
+    tail = raw_answer[match.end() :].strip()
+    if tail:
+        clean = f"{clean}\n{tail}" if clean else tail
+    return clean, indices
+
+
+def _resolve_relevant_indices(
+    supporting: list[int] | None, evaluated: int
+) -> list[int]:
+    """Normalise 1-based supporting indices to validated 0-based indices.
+
+    Falls back to ``list(range(evaluated))`` only when the model emitted no
+    trailer at all (preserves the previous behaviour as a last resort).
+    Out-of-range / non-positive values are dropped.
+    """
+    if supporting is None:
+        return list(range(evaluated))
+    resolved: list[int] = []
+    seen: set[int] = set()
+    for one_based in supporting:
+        idx = one_based - 1
+        if 0 <= idx < evaluated and idx not in seen:
+            seen.add(idx)
+            resolved.append(idx)
+    return resolved

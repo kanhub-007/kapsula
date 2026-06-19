@@ -16,6 +16,32 @@ from ._shared import _get_search_job_manager
 logger = get_logger(__name__)
 
 
+def _format_search_job_progress(job) -> str:
+    """Shared progress formatter for search jobs (closes M12).
+
+    Previously the four progress/results tools duplicated this text layout.
+    """
+    return (
+        f"Search job: {job.job_id}\n"
+        f"status: {job.status}\n"
+        f"progress: {job.progress}\n"
+        f"created_at: {job.created_at.isoformat()}\n"
+        f"updated_at: {job.updated_at.isoformat()}"
+        + (f"\nerror: {job.error}" if job.error else "")
+    )
+
+
+def _format_search_job_results(job) -> str:
+    """Shared results formatter for search jobs (closes M12)."""
+    if job.status == "completed":
+        return job.result or "No results found."
+    if job.status == "failed":
+        return f"Search job failed: {job.error or 'unknown error'}"
+    if job.status == "cancelled":
+        return "Search job was cancelled."
+    return f"Search job not complete yet. status={job.status}, progress={job.progress}"
+
+
 @asynccontextmanager
 async def job_lifecycle(manager, job, running_label: str):
     """Shared running → completed/cancelled/failed transition (closes P5).
@@ -112,14 +138,7 @@ def register_search_background_tools(mcp: FastMCP):
         job = _get_search_job_manager().get(search_job_id)
         if not job:
             return f"Search job not found: {search_job_id}"
-        return (
-            f"Search job: {job.job_id}\n"
-            f"status: {job.status}\n"
-            f"progress: {job.progress}\n"
-            f"created_at: {job.created_at.isoformat()}\n"
-            f"updated_at: {job.updated_at.isoformat()}"
-            + (f"\nerror: {job.error}" if job.error else "")
-        )
+        return _format_search_job_progress(job)
 
     @mcp.tool(
         name="get_search_results",
@@ -129,15 +148,7 @@ def register_search_background_tools(mcp: FastMCP):
         job = _get_search_job_manager().get(search_job_id)
         if not job:
             return f"Search job not found: {search_job_id}"
-        if job.status == "completed":
-            return job.result or "No results found."
-        if job.status == "failed":
-            return f"Search job failed: {job.error or 'unknown error'}"
-        if job.status == "cancelled":
-            return "Search job was cancelled."
-        return (
-            f"Search job not complete yet. status={job.status}, progress={job.progress}"
-        )
+        return _format_search_job_results(job)
 
     @mcp.tool(
         name="cancel_search",
@@ -197,14 +208,7 @@ def register_search_background_tools(mcp: FastMCP):
         job = _get_search_job_manager().get(search_job_id)
         if not job:
             return f"Search job not found: {search_job_id}"
-        return (
-            f"Search job: {job.job_id}\n"
-            f"status: {job.status}\n"
-            f"progress: {job.progress}\n"
-            f"created_at: {job.created_at.isoformat()}\n"
-            f"updated_at: {job.updated_at.isoformat()}"
-            + (f"\nerror: {job.error}" if job.error else "")
-        )
+        return _format_search_job_progress(job)
 
     @mcp.tool(
         name="get_intelligent_search_results",
@@ -214,12 +218,4 @@ def register_search_background_tools(mcp: FastMCP):
         job = _get_search_job_manager().get(search_job_id)
         if not job:
             return f"Search job not found: {search_job_id}"
-        if job.status == "completed":
-            return job.result or "No results found."
-        if job.status == "failed":
-            return f"Search job failed: {job.error or 'unknown error'}"
-        if job.status == "cancelled":
-            return "Search job was cancelled."
-        return (
-            f"Search job not complete yet. status={job.status}, progress={job.progress}"
-        )
+        return _format_search_job_results(job)

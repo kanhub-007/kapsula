@@ -5,10 +5,10 @@
 (collection maintenance is deferred).
 """
 
-from kapsula.core.application.dto.upload_pipeline_context import (
+from kapsula.infrastructure.logging_config import get_logger
+from kapsula.infrastructure.repositories.processing.upload_pipeline_context import (
     UploadPipelineContext,
 )
-from kapsula.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
 
@@ -17,15 +17,6 @@ class IndexedUploadIngestionStrategy:
     """Builds document indexes; defers collection maintenance."""
 
     mode = "indexed"
-
-    # ── backward-compat bridges (removed in Slice 2 when tasks.py is rewritten) ─
-    @property
-    def build_document_indexes(self) -> bool:
-        return True
-
-    @property
-    def rebuild_aggregate_indexes(self) -> bool:
-        return False
 
     def build_indexes(self, ctx: UploadPipelineContext) -> None:
         """Build FAISS + BM25 indexes (flat or per-sub-document)."""

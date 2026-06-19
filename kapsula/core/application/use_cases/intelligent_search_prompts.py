@@ -23,7 +23,10 @@ USER_MESSAGE_EVALUATE = """Question: {query}
 Context Information:
 {context}
 
-Please answer the question using ONLY the information provided in the context above. Write naturally and conversationally without referencing where the information came from."""
+Please answer the question using ONLY the information provided in the context above. Write naturally and conversationally without referencing where the information came from.
+
+After your answer, on a new line, list the 1-based result numbers that actually supported your answer in this exact format (omit the line only if none applied):
+SUPPORTING_RESULTS: [1, 3, 5]"""
 
 SYSTEM_PROMPT_COMBINE = """You are a helpful assistant that synthesizes information from multiple sub-questions to answer a user's original question.
 

@@ -212,7 +212,11 @@ def persist_subdocuments(
         _persist_subdoc_cards(
             db, document, subdoc, breadcrumb_key, pages, parent_sections
         )
-        db.commit()
+        # Citation resolution mutates Chunk rows already added in this
+        # session; a single flush exposes their ids to the resolver, then one
+        # commit per subdocument persists the whole subdoc atomically (closes
+        # M10: previously two commits per subdoc = 2N fsyncs on a large upload).
+        db.flush()
         _resolve_subdoc_citations(db, subdoc.id)
         db.commit()
         total += len(chunks)

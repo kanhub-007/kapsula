@@ -8,6 +8,7 @@ from kapsula.core.domain.text_processing import parse_node_type_filter
 from kapsula.infrastructure.data.connection import get_db
 from kapsula.infrastructure.data.tables.collection import Collection
 from kapsula.infrastructure.logging_config import get_logger
+from kapsula.presentation.api._http import internal_server_error
 from kapsula.presentation.api.search_presenter import (
     build_collection_search_response,
 )
@@ -85,9 +86,7 @@ async def search_across_collections(
 
     except Exception as e:
         logger.exception(f"Collection search failed: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Collection search failed: {str(e)}"
-        )
+        raise internal_server_error("Collection search failed") from e
 
 
 @router.post("/collections/{collection_id}", response_model=CollectionSearchResponse)
@@ -154,9 +153,7 @@ async def search_collection(
         )
     except Exception as e:
         logger.exception(f"Scoped collection search failed: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Collection search failed: {str(e)}"
-        )
+        raise internal_server_error("Collection search failed") from e
 
 
 @router.post("/collection", response_model=CollectionSearchResponse)
@@ -173,7 +170,12 @@ async def search_collection_by_query_param(
     routing_mode: str = Query("auto", description="Routing mode: auto, llm, or fast"),
     db: Session = Depends(get_db),
 ):
-    """Query-param alias for collection-scoped search."""
+    """Query-param alias for collection-scoped search.
+
+    .. deprecated::
+        Prefer ``POST /search/collections/{collection_id}`` (path param).
+        This query-param alias is kept for backward compatibility only (L6).
+    """
     return await search_collection(
         collection_id=collection_id,
         query=query,

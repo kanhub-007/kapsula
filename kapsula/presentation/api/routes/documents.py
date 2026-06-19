@@ -23,6 +23,10 @@ from kapsula.infrastructure.data.tables.document_structure import (
     DocumentStructure as OrmDocumentStructure,
 )
 from kapsula.infrastructure.logging_config import get_logger
+from kapsula.presentation.api._http import (
+    content_disposition_attachment,
+    safe_document_filename,
+)
 from kapsula.presentation.upload.stale_progress_guard import StaleProgressGuard
 
 from ..models import (
@@ -203,12 +207,13 @@ async def download_structure(job_id: str, db: Session = Depends(get_db)):
 
     logger.info(f"Job {job_id}: Returning structure as MD file")
 
-    # Return as downloadable markdown file
-    filename = document.filename.replace(".md", "_structure.md")
+    # Filename derived from a user-controlled upload name — sanitise before
+    # placing into Content-Disposition to prevent header injection.
+    filename = safe_document_filename(document.filename, "_structure.md")
     return Response(
         content=structure.skeleton_structure,
         media_type="text/markdown",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": content_disposition_attachment(filename)},
     )
 
 
@@ -262,11 +267,11 @@ async def download_chunks(job_id: str, db: Session = Depends(get_db)):
     }
 
     # Return as downloadable JSON file
-    filename = document.filename.replace(".md", "_chunks.json")
+    filename = safe_document_filename(document.filename, "_chunks.json")
     return Response(
         content=json.dumps(response_data, indent=2),
         media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": content_disposition_attachment(filename)},
     )
 
 

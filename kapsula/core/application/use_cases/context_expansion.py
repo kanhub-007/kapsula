@@ -4,8 +4,8 @@ import json
 import logging
 from typing import Any
 
-from kapsula.core.domain.entities.chunk import Chunk
 from kapsula.core.domain.interfaces.search_data_access import SearchDataAccess
+from kapsula.core.domain.read_models.chunk_read import ChunkRead
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ def _expand_results(
     return expanded
 
 
-def _resolve_parent_hash(chunk: Chunk, context_mode: str) -> str | None:
+def _resolve_parent_hash(chunk: ChunkRead, context_mode: str) -> str | None:
     """Extract parent hash from chunk metadata based on context mode."""
     metadata = {}
     if chunk.chunk_metadata:

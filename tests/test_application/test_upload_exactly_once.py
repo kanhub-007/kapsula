@@ -174,26 +174,26 @@ class TestPerModePipelineOutputs:
     ):
         """For each mode: exactly one set of chunks; index files only when
         the mode builds indexes (fast → zero, indexed → ≥1 each)."""
-        from kapsula.core.application.dto.upload_pipeline_context import (
-            UploadPipelineContext,
-        )
-        from kapsula.core.application.use_cases.upload.flat_chunking_strategy import (
-            FlatChunkingStrategy,
-        )
-        from kapsula.core.application.use_cases.upload.upload_ingestion_strategy_factory import (
-            UploadIngestionStrategyFactory,
-        )
-        from kapsula.core.application.use_cases.upload.upload_pipeline import (
-            UploadPipeline,
-        )
         from kapsula.infrastructure.data import Chunk as OrmChunk
         from kapsula.infrastructure.data import Document as OrmDocument
         from kapsula.infrastructure.repositories.chunking import MarkdownChunker
+        from kapsula.infrastructure.repositories.processing.upload_pipeline_context import (
+            UploadPipelineContext,
+        )
         from kapsula.infrastructure.repositories.processing.upload_progress_store import (
             processing_status,
         )
         from kapsula.infrastructure.repositories.processing.upload_progress_tracker import (
             UploadProgressTracker,
+        )
+        from kapsula.infrastructure.repositories.processing.upload_strategies.flat_chunking_strategy import (
+            FlatChunkingStrategy,
+        )
+        from kapsula.infrastructure.repositories.processing.upload_strategies.upload_ingestion_strategy_factory import (
+            UploadIngestionStrategyFactory,
+        )
+        from kapsula.infrastructure.repositories.processing.upload_strategies.upload_pipeline import (
+            UploadPipeline,
         )
 
         Session = temp_env["Session"]

@@ -24,10 +24,24 @@ logger = get_logger(__name__)
 
 
 class CollectionMaintenanceRunner:
-    """Runs deferred summary and aggregate-index maintenance for a collection."""
+    """Runs deferred summary and aggregate-index maintenance for a collection.
 
-    def __init__(self, db: Session):
+    The chat client is injected (closes H9) so this presentation module no
+    longer imports from the MCP tools package. Callers pass the shared,
+    cached client from :func:`kapsula.startup.get_shared_chat_client`.
+    """
+
+    def __init__(self, db: Session, chat_client=None):
         self._db = db
+        self._chat_client = chat_client
+
+    def _chat(self):
+        """Return the injected chat client, or lazily fetch the shared one."""
+        if self._chat_client is None:
+            from kapsula.startup import get_shared_chat_client
+
+            self._chat_client = get_shared_chat_client()
+        return self._chat_client
 
     def run(self, collection: Collection, progress_callback=None) -> dict:
         """Run collection summary, aggregate-index, and consolidation maintenance.
@@ -67,11 +81,8 @@ class CollectionMaintenanceRunner:
                     from kapsula.infrastructure.repositories.processing.consolidation_runner import (
                         ConsolidationRunner,
                     )
-                    from kapsula.presentation.mcp.tools._shared import (
-                        _get_chat_client,
-                    )
 
-                    chat_client = _get_chat_client()
+                    chat_client = self._chat()
                     card_repository = SqlConsolidationCardRepository(SessionLocal)
                     runner = ConsolidationRunner(
                         card_repository,
@@ -120,11 +131,10 @@ class CollectionMaintenanceRunner:
             from kapsula.infrastructure.repositories.processing.card_enricher import (
                 CardEnricher,
             )
-            from kapsula.presentation.mcp.tools._shared import _get_chat_client
 
             enricher = CardEnricher(
                 SessionLocal,
-                _get_chat_client(),
+                self._chat(),
                 collection.id,
                 collection.collection_id,
             )

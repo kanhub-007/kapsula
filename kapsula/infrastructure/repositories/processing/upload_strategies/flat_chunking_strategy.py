@@ -5,14 +5,14 @@ Populates ``ctx.chunks`` (with citation metadata) and
 persistence step knows to use the flat path.
 """
 
-from kapsula.core.application.dto.upload_pipeline_context import (
-    UploadPipelineContext,
-)
 from kapsula.core.domain.services.citation_linker import (
     add_citation_metadata_to_chunks,
 )
 from kapsula.infrastructure.logging_config import get_logger
 from kapsula.infrastructure.repositories.chunking import extract_parent_sections
+from kapsula.infrastructure.repositories.processing.upload_pipeline_context import (
+    UploadPipelineContext,
+)
 
 logger = get_logger(__name__)
 

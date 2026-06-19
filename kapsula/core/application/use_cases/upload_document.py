@@ -4,15 +4,13 @@ import logging
 import uuid
 from pathlib import Path
 
-from sqlalchemy.orm import Session
-
 from kapsula.core.application.dto.upload_document_result import (
     UploadDocumentResult,
 )
-from kapsula.core.application.dto.upload_ingestion_mode import (
+from kapsula.core.domain.entities.document import Document
+from kapsula.core.domain.entities.upload_ingestion_mode import (
     UploadIngestionMode,
 )
-from kapsula.core.domain.entities.document import Document
 from kapsula.core.domain.interfaces.background_processor import (
     BackgroundProcessor,
 )
@@ -22,6 +20,7 @@ from kapsula.core.domain.interfaces.document_repository import (
 from kapsula.core.domain.interfaces.progress_tracker import (
     ProgressTracker,
 )
+from kapsula.core.domain.interfaces.session import Session
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +41,7 @@ class UploadDocumentUseCase:
 
     def execute(
         self,
-        db: "Session",
+        db: Session,
         file_path: str,
         collection_id: str,
         max_tokens: int = 512,
@@ -97,7 +96,7 @@ class UploadDocumentUseCase:
 
     def execute_from_content(
         self,
-        db: "Session",
+        db: Session,
         content_bytes: bytes,
         filename: str,
         collection_id: str,
@@ -138,7 +137,7 @@ class UploadDocumentUseCase:
 
     def _persist_and_dispatch(
         self,
-        db: "Session",
+        db: Session,
         content: str,
         size: int,
         filename: str,

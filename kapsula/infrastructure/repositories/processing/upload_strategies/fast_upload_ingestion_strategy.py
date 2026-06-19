@@ -6,7 +6,7 @@ state stale and increments the upload counter so deferred maintenance
 picks the document up later.
 """
 
-from kapsula.core.application.dto.upload_pipeline_context import (
+from kapsula.infrastructure.repositories.processing.upload_pipeline_context import (
     UploadPipelineContext,
 )
 
@@ -15,15 +15,6 @@ class FastUploadIngestionStrategy:
     """No indexes, no maintenance — just records."""
 
     mode = "fast"
-
-    # ── backward-compat bridges (removed in Slice 2 when tasks.py is rewritten) ─
-    @property
-    def build_document_indexes(self) -> bool:
-        return False
-
-    @property
-    def rebuild_aggregate_indexes(self) -> bool:
-        return False
 
     def build_indexes(self, ctx: UploadPipelineContext) -> None:
         """No-op: fast mode skips all index building."""

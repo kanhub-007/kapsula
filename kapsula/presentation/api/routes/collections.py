@@ -1,7 +1,6 @@
 """Collection management routes."""
 
 import os
-import shutil
 import uuid
 from pathlib import Path
 
@@ -17,45 +16,23 @@ from kapsula.infrastructure.logging_config import get_logger
 from kapsula.infrastructure.repositories.data.sql_collection_repository import (
     SqlCollectionRepository,
 )
+from kapsula.presentation.api.logo_store import (
+    logos_dir,
+    media_type_for_logo,
+    save_logo,
+)
 
-from .._http import client_ip
+from .._http import (
+    client_ip,
+    content_disposition_attachment,
+)
 from ..models import CollectionListResponse, CollectionResponse
 
 logger = get_logger(__name__)
 router = APIRouter()
 
 # Create logos directory
-LOGOS_DIR = os.path.join(DATA_DIR, "logos")
-os.makedirs(LOGOS_DIR, exist_ok=True)
-
-# Allowed image extensions. SVG is intentionally excluded: user-supplied
-# SVG can carry <script>/event handlers and is served back to browsers as
-# stored XSS. Add SVG only behind a dedicated sanitiser if needed.
-ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
-
-
-def save_logo(file: UploadFile, collection_id: str) -> str:
-    """Save logo file and return filename."""
-    # Validate file extension (filename can be None for unnamed uploads)
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="Logo file has no filename")
-    file_ext = Path(file.filename).suffix.lower()
-    if file_ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}",
-        )
-
-    # Generate unique filename
-    logo_filename = f"{collection_id}{file_ext}"
-    logo_path = os.path.join(LOGOS_DIR, logo_filename)
-
-    # Save file
-    with open(logo_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    logger.info(f"Logo saved: {logo_filename}")
-    return logo_filename
+LOGOS_DIR = logos_dir(DATA_DIR)
 
 
 _collection_repo = SqlCollectionRepository()
@@ -104,7 +81,8 @@ async def create_collection(
     logo_filename = None
     if logo:
         try:
-            logo_filename = save_logo(logo, collection_id)
+            logo_filename = save_logo(logo, collection_id, LOGOS_DIR)
+            logger.info(f"Logo saved: {logo_filename}")
         except Exception as e:
             logger.error(f"Error saving logo: {e}")
             raise HTTPException(status_code=500, detail=f"Error saving logo: {str(e)}")
@@ -170,7 +148,7 @@ async def upload_collection_logo(
 
     # Save new logo
     try:
-        logo_filename = save_logo(logo, collection_id)
+        logo_filename = save_logo(logo, collection_id, LOGOS_DIR)
         collection.logo_filename = logo_filename
         db.commit()
         db.refresh(collection)
@@ -222,25 +200,17 @@ async def download_collection_logo(collection_id: str, db: Session = Depends(get
         raise HTTPException(status_code=404, detail="Logo file not found")
 
     # Determine media type based on extension
-    ext = Path(collection.logo_filename).suffix.lower()
-    media_types = {
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".gif": "image/gif",
-        ".svg": "image/svg+xml",
-        ".webp": "image/webp",
-    }
-    media_type = media_types.get(ext, "application/octet-stream")
+    media_type = media_type_for_logo(collection.logo_filename)
 
-    # Return as downloadable attachment
+    # Return as downloadable attachment. Filename is sanitised to prevent
+    # header injection / response-splitting from a user-controlled name.
+    ext = Path(collection.logo_filename).suffix.lower()
+    safe_name = f"{collection.name}_logo{ext}" if collection.name else "logo"
     return FileResponse(
         logo_path,
         media_type=media_type,
-        filename=f"{collection.name}_logo{ext}",
-        headers={
-            "Content-Disposition": f'attachment; filename="{collection.name}_logo{ext}"'
-        },
+        filename=safe_name,
+        headers={"Content-Disposition": content_disposition_attachment(safe_name)},
     )
 
 

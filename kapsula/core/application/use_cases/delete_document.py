@@ -2,8 +2,6 @@
 
 import logging
 
-from sqlalchemy.orm import Session
-
 from kapsula.core.application.dto.delete_document_result import (
     DeleteDocumentResult,
 )
@@ -12,6 +10,7 @@ from kapsula.core.domain.interfaces.document_repository import (
     DocumentRepository,
 )
 from kapsula.core.domain.interfaces.index_manager import IndexManager
+from kapsula.core.domain.interfaces.session import Session
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,7 @@ class DeleteDocumentUseCase:
         self._index_manager = index_manager
         self._document_repository = document_repository
 
-    def execute(self, db: "Session", job_id: str) -> DeleteDocumentResult:
+    def execute(self, db: Session, job_id: str) -> DeleteDocumentResult:
         """Execute the delete operation.
 
         Args:

@@ -16,22 +16,6 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from kapsula.core.application.dto.upload_pipeline_context import (
-    UploadPipelineContext,
-)
-from kapsula.core.application.use_cases.upload.fast_upload_ingestion_strategy import (
-    FastUploadIngestionStrategy,
-)
-from kapsula.core.application.use_cases.upload.flat_chunking_strategy import (
-    FlatChunkingStrategy,
-)
-from kapsula.core.application.use_cases.upload.indexed_upload_ingestion_strategy import (
-    IndexedUploadIngestionStrategy,
-)
-from kapsula.core.application.use_cases.upload.subdocument_chunking_strategy import (
-    SubDocumentChunkingStrategy,
-)
-from kapsula.core.application.use_cases.upload.upload_pipeline import UploadPipeline
 from kapsula.infrastructure.data import (
     Chunk,
     DocumentStructure,
@@ -39,6 +23,24 @@ from kapsula.infrastructure.data import (
 )
 from kapsula.infrastructure.data.connection import Base
 from kapsula.infrastructure.repositories.chunking import MarkdownChunker
+from kapsula.infrastructure.repositories.processing.upload_pipeline_context import (
+    UploadPipelineContext,
+)
+from kapsula.infrastructure.repositories.processing.upload_strategies.fast_upload_ingestion_strategy import (
+    FastUploadIngestionStrategy,
+)
+from kapsula.infrastructure.repositories.processing.upload_strategies.flat_chunking_strategy import (
+    FlatChunkingStrategy,
+)
+from kapsula.infrastructure.repositories.processing.upload_strategies.indexed_upload_ingestion_strategy import (
+    IndexedUploadIngestionStrategy,
+)
+from kapsula.infrastructure.repositories.processing.upload_strategies.subdocument_chunking_strategy import (
+    SubDocumentChunkingStrategy,
+)
+from kapsula.infrastructure.repositories.processing.upload_strategies.upload_pipeline import (
+    UploadPipeline,
+)
 
 # ── fakes ────────────────────────────────────────────────────────────
 

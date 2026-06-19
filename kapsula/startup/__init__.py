@@ -78,13 +78,9 @@ def create_upload_pipeline(ingestion_mode: str):
     context and dispatch. The chunking strategy is SubDocument-by-default
     (falls back to flat internally when no breadcrumbs exist).
     """
-    from kapsula.core.application.use_cases.upload.subdocument_chunking_strategy import (
+    from kapsula.infrastructure.repositories.processing.upload_strategies import (
         SubDocumentChunkingStrategy,
-    )
-    from kapsula.core.application.use_cases.upload.upload_ingestion_strategy_factory import (
         UploadIngestionStrategyFactory,
-    )
-    from kapsula.core.application.use_cases.upload.upload_pipeline import (
         UploadPipeline,
     )
 
@@ -99,6 +95,25 @@ def create_chat_client():
     token = os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN", "")
     model = os.getenv("INTELLIGENT_SEARCH_MODEL", "deepseek-ai/DeepSeek-V3.2-Exp")
     return HuggingFaceChatClient(token=token, model=model)
+
+
+# Process-wide cached chat client for presentation layers that cannot wire
+# dependencies through the composition root on every call (background
+# maintenance runner, MCP tool modules). Cheap to share: stateless wrapper.
+_shared_chat_client = None
+
+
+def get_shared_chat_client():
+    """Return a process-wide cached :class:`ChatClient` (closes H9).
+
+    Used by presentation modules (maintenance runner) so they no longer
+    reach into the MCP tools package for a chat client. Created lazily on
+    first access.
+    """
+    global _shared_chat_client
+    if _shared_chat_client is None:
+        _shared_chat_client = create_chat_client()
+    return _shared_chat_client
 
 
 def create_reranker():
@@ -353,7 +368,7 @@ def create_upload_document_use_case():
         ThreadPoolBackgroundProcessor,
     )
     from kapsula.infrastructure.repositories.processing.progress_tracker import (
-        InMemoryProgressTracker,
+        UploadProgressTracker,
     )
 
     # The background task lives in presentation; the composition root (here)
@@ -366,7 +381,7 @@ def create_upload_document_use_case():
     )
     document_repository = SqlDocumentRepository()
     job_repository = SqlUploadJobRepository()
-    progress_tracker = InMemoryProgressTracker(job_repository)
+    progress_tracker = UploadProgressTracker(job_repository)
     return UploadDocumentUseCase(
         background_processor, document_repository, progress_tracker
     )
@@ -394,12 +409,12 @@ def create_api_upload_document_use_case():
         NoOpBackgroundProcessor,
     )
     from kapsula.infrastructure.repositories.processing.progress_tracker import (
-        InMemoryProgressTracker,
+        UploadProgressTracker,
     )
 
     document_repository = SqlDocumentRepository()
     job_repository = SqlUploadJobRepository()
-    progress_tracker = InMemoryProgressTracker(job_repository)
+    progress_tracker = UploadProgressTracker(job_repository)
     return UploadDocumentUseCase(
         NoOpBackgroundProcessor(), document_repository, progress_tracker
     )

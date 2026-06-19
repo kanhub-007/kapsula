@@ -5,10 +5,10 @@ built, the collection library-card summary is regenerated, and
 collection/account aggregate indexes are rebuilt.
 """
 
-from kapsula.core.application.dto.upload_pipeline_context import (
+from kapsula.infrastructure.logging_config import get_logger
+from kapsula.infrastructure.repositories.processing.upload_pipeline_context import (
     UploadPipelineContext,
 )
-from kapsula.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
 
@@ -17,15 +17,6 @@ class FullUploadIngestionStrategy:
     """Builds indexes AND runs all collection maintenance."""
 
     mode = "full"
-
-    # ── backward-compat bridges (removed in Slice 2 when tasks.py is rewritten) ─
-    @property
-    def build_document_indexes(self) -> bool:
-        return True
-
-    @property
-    def rebuild_aggregate_indexes(self) -> bool:
-        return True
 
     def build_indexes(self, ctx: UploadPipelineContext) -> None:
         """Build FAISS + BM25 indexes (flat or per-sub-document)."""

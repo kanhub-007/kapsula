@@ -17,6 +17,7 @@ from kapsula.startup import (
     create_multi_index_searcher,
 )
 
+from .._http import internal_server_error
 from ..models import (
     IntelligentCollectionSearchResponse,
     SearchPlan,
@@ -80,9 +81,13 @@ async def intelligent_search_across_collections(
         # Step 4 & 5: Execute searches and aggregate
         intelligent_engine = create_intelligent_searcher()
 
+        # Hoist searcher construction once per request (closes PE3/M7) —
+        # previously rebuilt inside execute_search for every sub-query.
+        multi_searcher = create_multi_index_searcher(db)
+
         # Create search function that searches within the routed collection
         async def execute_search(search_query: str):
-            return await create_multi_index_searcher(db).search_collections(
+            return await multi_searcher.search_collections(
                 CollectionSearch(
                     query=search_query,
                     account_id=account_id,
@@ -163,9 +168,7 @@ async def intelligent_search_across_collections(
 
     except Exception as e:
         logger.exception(f"Intelligent collection search failed: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Intelligent collection search failed: {str(e)}"
-        )
+        raise internal_server_error("Intelligent collection search failed") from e
 
 
 @router.post("/intelligent_search/collections/stream")

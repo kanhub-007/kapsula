@@ -3,6 +3,9 @@
 import asyncio
 from typing import Any
 
+from kapsula.core.domain.interfaces.reranker import (
+    DEFAULT_RERANK_THRESHOLD,
+)
 from kapsula.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -15,15 +18,20 @@ class LocalCrossEncoderReranker:
     This avoids paying the model-load cost when reranking is disabled.
     """
 
-    def __init__(self, model_name: str):
+    def __init__(
+        self,
+        model_name: str,
+        threshold: float = DEFAULT_RERANK_THRESHOLD,
+    ):
         self._model_name = model_name
+        self._threshold = threshold
         self._model = None
 
     def _ensure_model(self):
         if self._model is None:
             from sentence_transformers import CrossEncoder
 
-            logger.info(f"Loading local reranker model: {self._model_name}")
+            logger.info("Loading local reranker model: %s", self._model_name)
             self._model = CrossEncoder(self._model_name, max_length=512)
 
     async def rerank(
@@ -43,10 +51,11 @@ class LocalCrossEncoderReranker:
 
         candidates.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
 
-        threshold = 0.2
-        kept = [c for c in candidates if c.get("rerank_score", 0) >= threshold]
+        kept = [c for c in candidates if c.get("rerank_score", 0) >= self._threshold]
         logger.debug(
-            f"Local reranker: kept {len(kept)}/{len(candidates)} "
-            f"(threshold={threshold})"
+            "Local reranker: kept %s/%s (threshold=%s)",
+            len(kept),
+            len(candidates),
+            self._threshold,
         )
         return kept[:top_k]

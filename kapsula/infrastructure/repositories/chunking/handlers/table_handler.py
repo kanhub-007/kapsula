@@ -1,10 +1,18 @@
 """Table element strategy."""
 
+from kapsula.infrastructure.repositories.chunking.chunk_pipeline import ChunkPipeline
+from kapsula.infrastructure.repositories.chunking.content_block import ContentBlock
+
 from ..table_parser import transform_table_to_text
 
 
 class TableHandler:
-    def handle(self, idx: int, elements: list, ctx) -> None:
+    """Emits a table as an atomic chunk, transforming its HTML (when present)
+    into a readable text form first."""
+
+    def handle(
+        self, idx: int, elements: list[ContentBlock], ctx: ChunkPipeline
+    ) -> None:
         element = elements[idx]
         state = ctx.state
         ctx.flush()
@@ -21,7 +29,9 @@ class TableHandler:
         state.i = idx + 1
 
 
-def _with_next_if_small(elements: list, idx: int, text: str, count_tokens) -> str:
+def _with_next_if_small(
+    elements: list[ContentBlock], idx: int, text: str, count_tokens
+) -> str:
     if idx + 1 < len(elements):
         nxt = elements[idx + 1]
         if nxt.type in ("text",):

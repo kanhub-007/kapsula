@@ -76,15 +76,23 @@ async def list_accounts(db: Session = Depends(get_db)):
 
 @router.get("/{account_id}", response_model=AccountResponse)
 async def get_account(account_id: str, db: Session = Depends(get_db)):
-    acc = _account_repo.find_by_account_id(db, account_id)
-    if not acc:
+    from sqlalchemy.orm import joinedload
+
+    # Single query with eager-loaded collections (closes M13: previously
+    # re-queried the same row through the ORM after the repo already loaded it).
+    orm_acc = (
+        db.query(OrmAccount)
+        .options(joinedload(OrmAccount.collections))
+        .filter(OrmAccount.account_id == account_id)
+        .first()
+    )
+    if not orm_acc:
         raise HTTPException(status_code=404, detail="Account not found")
-    orm_acc = db.query(OrmAccount).filter(OrmAccount.account_id == account_id).first()
     return AccountResponse(
-        account_id=acc.account_id,
-        name=acc.name,
-        created_at=acc.created_at.isoformat() if acc.created_at else "",
-        collection_count=len(orm_acc.collections) if orm_acc else 0,
+        account_id=orm_acc.account_id,
+        name=orm_acc.name,
+        created_at=orm_acc.created_at.isoformat() if orm_acc.created_at else "",
+        collection_count=len(orm_acc.collections),
     )
 
 

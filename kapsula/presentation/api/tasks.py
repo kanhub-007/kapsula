@@ -11,10 +11,7 @@ import time
 
 from sqlalchemy.orm import Session
 
-from kapsula.core.application.dto.upload_ingestion_mode import UploadIngestionMode
-from kapsula.core.application.dto.upload_pipeline_context import (
-    UploadPipelineContext,
-)
+from kapsula.core.domain.entities.upload_ingestion_mode import UploadIngestionMode
 from kapsula.infrastructure.logging_config import get_logger
 from kapsula.infrastructure.repositories.chunking import MarkdownChunker
 from kapsula.infrastructure.repositories.data.sql_upload_job_repository import (
@@ -23,6 +20,9 @@ from kapsula.infrastructure.repositories.data.sql_upload_job_repository import (
 from kapsula.infrastructure.repositories.processing.upload_persistence import (
     load_document_by_job_id,
     mark_document_failed,
+)
+from kapsula.infrastructure.repositories.processing.upload_pipeline_context import (
+    UploadPipelineContext,
 )
 from kapsula.infrastructure.repositories.processing.upload_progress_store import (
     processing_status,

@@ -7,16 +7,28 @@ import aiohttp
 import numpy as np
 from huggingface_hub import InferenceClient
 
+from kapsula.core.domain.interfaces.reranker import DEFAULT_RERANK_THRESHOLD
 from kapsula.infrastructure.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
 class HFEndpointReranker:
-    """Reranker backed by a HuggingFace Inference Endpoint."""
+    """Reranker backed by a HuggingFace Inference Endpoint.
 
-    def __init__(self, endpoint_url: str, token: str):
+    Applies the same score threshold semantics as
+    :class:`LocalCrossEncoderReranker` so the two strategies are
+    behaviourally consistent (closes M11).
+    """
+
+    def __init__(
+        self,
+        endpoint_url: str,
+        token: str,
+        threshold: float = DEFAULT_RERANK_THRESHOLD,
+    ):
         self._endpoint_url = endpoint_url
+        self._threshold = threshold
         self._client = InferenceClient(model=endpoint_url, token=token)
         self._url = f"https://router.huggingface.co/models/{endpoint_url}"
         self._headers = {"Authorization": f"Bearer {token}"}
@@ -36,7 +48,14 @@ class HFEndpointReranker:
             c["rerank_score"] = score
 
         candidates.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
-        return candidates[:top_k]
+        kept = [c for c in candidates if c.get("rerank_score", 0) >= self._threshold]
+        logger.debug(
+            "HF reranker: kept %s/%s (threshold=%s)",
+            len(kept),
+            len(candidates),
+            self._threshold,
+        )
+        return kept[:top_k]
 
     async def _try_batched(self, pairs: list) -> list[float] | None:
         try:

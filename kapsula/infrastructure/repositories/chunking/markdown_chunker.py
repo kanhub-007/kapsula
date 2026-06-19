@@ -42,9 +42,18 @@ class MarkdownChunker(Chunker):
 
         state.i = 0
         while state.i < len(elements):
-            el = elements[state.i]
-            handler = self._registry.get(el.type)
-            handler.handle(state.i, elements, pipe)
+            idx = state.i
+            handler = self._registry.get(elements[idx].type)
+            handler.handle(idx, elements, pipe)
+            # The loop owns index advancement (closes H8). Previously each
+            # handler had to set ``state.i = idx + 1`` itself; a handler that
+            # forgot (or threw and was caught upstream) caused an infinite
+            # loop or a silent skip. Now the loop advances unconditionally,
+            # while still allowing a handler to jump further by setting
+            # ``state.i`` to a larger value (e.g. when it also consumed the
+            # following element).
+            if state.i <= idx:
+                state.i = idx + 1
 
         pipe.flush()
         logger.info(f"Chunking complete: {len(state.chunks)} chunks")

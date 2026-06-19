@@ -1,8 +1,16 @@
 """Code element strategy."""
 
+from kapsula.infrastructure.repositories.chunking.chunk_pipeline import ChunkPipeline
+from kapsula.infrastructure.repositories.chunking.content_block import ContentBlock
+
 
 class CodeHandler:
-    def handle(self, idx: int, elements: list, ctx) -> None:
+    """Emits a code block as an atomic chunk, optionally fusing a small
+    following text element so tiny trailing comments are not orphaned."""
+
+    def handle(
+        self, idx: int, elements: list[ContentBlock], ctx: ChunkPipeline
+    ) -> None:
         element = elements[idx]
         state = ctx.state
 
@@ -18,7 +26,9 @@ class CodeHandler:
         state.i = idx + 1
 
 
-def _with_next_if_small(elements: list, idx: int, text: str, count_tokens) -> str:
+def _with_next_if_small(
+    elements: list[ContentBlock], idx: int, text: str, count_tokens
+) -> str:
     if idx + 1 < len(elements):
         nxt = elements[idx + 1]
         if nxt.type in ("text",):

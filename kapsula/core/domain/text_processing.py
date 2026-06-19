@@ -1,8 +1,7 @@
 """Text processing utilities shared by indexer and searcher."""
 
 import re
-
-_STEM_CACHE: dict[str, str] = {}
+from functools import lru_cache
 
 
 def parse_node_type_filter(node_type_filter: str | None) -> list[str] | None:
@@ -20,35 +19,40 @@ def parse_node_type_filter(node_type_filter: str | None) -> list[str] | None:
     return parsed or None
 
 
+@lru_cache(maxsize=100_000)
+def _stem_inner(word: str) -> str:
+    """Apply simple stemming to a single lower-cased word.
+
+    Bounded via :func:`functools.lru_cache` so the cache cannot grow without
+    limit (closes H4: was an unbounded module-level dict mutated from any
+    thread without synchronisation). ``lru_cache`` is also thread-safe.
+    """
+    if len(word) <= 3:
+        return word
+    if word.endswith("ies") and len(word) > 4:
+        stemmed = word[:-3] + "y"
+    elif word.endswith("es") and len(word) > 3:
+        stemmed = word[:-2]
+    elif word.endswith("s") and len(word) > 2:
+        stemmed = word[:-1]
+    elif word.endswith("ed") and len(word) > 3:
+        stemmed = word[:-2] if word[-3] != word[-4] else word[:-1]
+    elif word.endswith("ing") and len(word) > 4:
+        stemmed = word[:-3]
+    else:
+        stemmed = word
+    return stemmed
+
+
 def simple_stem(word: str) -> str:
     """Apply simple stemming to improve BM25 matching."""
-    if word in _STEM_CACHE:
-        return _STEM_CACHE[word]
+    # Lower-case once here so the cache key is canonical.
+    return _stem_inner(word.lower())
 
-    original = word
-    word_lower = word.lower()
 
-    if len(word_lower) <= 3:
-        _STEM_CACHE[original] = word_lower
-        return word_lower
-
-    if word_lower.endswith("ies") and len(word_lower) > 4:
-        stemmed = word_lower[:-3] + "y"
-    elif word_lower.endswith("es") and len(word_lower) > 3:
-        stemmed = word_lower[:-2]
-    elif word_lower.endswith("s") and len(word_lower) > 2:
-        stemmed = word_lower[:-1]
-    elif word_lower.endswith("ed") and len(word_lower) > 3:
-        stemmed = (
-            word_lower[:-2] if word_lower[-3] != word_lower[-4] else word_lower[:-1]
-        )
-    elif word_lower.endswith("ing") and len(word_lower) > 4:
-        stemmed = word_lower[:-3]
-    else:
-        stemmed = word_lower
-
-    _STEM_CACHE[original] = stemmed
-    return stemmed
+def clear_stem_cache() -> None:
+    """Clear the bounded stem cache (used by tests)."""
+    _stem_inner.cache_clear()
 
 
 def tokenize(text: str) -> list[str]:

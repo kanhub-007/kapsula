@@ -1,8 +1,16 @@
 """Title element strategy."""
 
+from kapsula.infrastructure.repositories.chunking.chunk_pipeline import ChunkPipeline
+from kapsula.infrastructure.repositories.chunking.content_block import ContentBlock
+
 
 class TitleHandler:
-    def handle(self, idx: int, elements: list, ctx) -> None:
+    """Updates the heading breadcrumb stack on a title element, flushing the
+    current chunk when the heading is H3 or above (level <= 3)."""
+
+    def handle(
+        self, idx: int, elements: list[ContentBlock], ctx: ChunkPipeline
+    ) -> None:
         element = elements[idx]
         state = ctx.state
 

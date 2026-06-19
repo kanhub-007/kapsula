@@ -7,17 +7,21 @@ lives on ``AccountRepository`` instead.
 
 from sqlalchemy.orm import Session
 
-from kapsula.core.application.dto.collection_read import CollectionRead
-from kapsula.core.application.dto.document_read import DocumentRead
-from kapsula.core.application.dto.sub_document_read import SubDocumentRead
+from kapsula.core.domain.read_models.chunk_read import ChunkRead
+from kapsula.core.domain.read_models.collection_read import CollectionRead
+from kapsula.core.domain.read_models.document_read import DocumentRead
+from kapsula.core.domain.read_models.library_card_read import LibraryCardRead
+from kapsula.core.domain.read_models.sub_document_read import SubDocumentRead
 from kapsula.infrastructure.data.tables.chunk import Chunk
 from kapsula.infrastructure.data.tables.collection import Collection
 from kapsula.infrastructure.data.tables.document import Document
 from kapsula.infrastructure.data.tables.library_card import LibraryCard
 from kapsula.infrastructure.data.tables.sub_document import SubDocument
 from kapsula.infrastructure.repositories.data.mappers import (
+    chunk_to_read,
     collection_to_read,
     document_to_read,
+    library_card_to_read,
     sub_document_to_read,
 )
 
@@ -70,8 +74,8 @@ class SqlSearchDataAccess:
         orm_list = self._db.query(Collection).all()
         return [collection_to_read(c) for c in orm_list]
 
-    def get_collection_library_card(self, collection_id: int):
-        return (
+    def get_collection_library_card(self, collection_id: int) -> LibraryCardRead | None:
+        orm = (
             self._db.query(LibraryCard)
             .filter(
                 LibraryCard.collection_id == collection_id,
@@ -79,42 +83,48 @@ class SqlSearchDataAccess:
             )
             .first()
         )
+        return library_card_to_read(orm) if orm else None
 
-    def get_library_card_for_sub_doc(self, sub_doc_id: int):
-        return (
+    def get_library_card_for_sub_doc(self, sub_doc_id: int) -> LibraryCardRead | None:
+        orm = (
             self._db.query(LibraryCard)
             .filter(LibraryCard.sub_document_id == sub_doc_id)
             .first()
         )
+        return library_card_to_read(orm) if orm else None
 
-    def get_library_card_by_doc_id(self, doc_id: str, sub_doc_id: int | None = None):
+    def get_library_card_by_doc_id(
+        self, doc_id: str, sub_doc_id: int | None = None
+    ) -> LibraryCardRead | None:
         query = self._db.query(LibraryCard).filter(LibraryCard.doc_id == doc_id)
         if sub_doc_id is not None:
             query = query.filter(LibraryCard.sub_document_id == sub_doc_id)
-        return query.first()
+        orm = query.first()
+        return library_card_to_read(orm) if orm else None
 
     def get_chunk(
         self,
         document_id: int,
         chunk_index: int,
         sub_doc_id: int | None = None,
-    ):
+    ) -> ChunkRead | None:
         query = self._db.query(Chunk).filter(
             Chunk.document_id == document_id,
             Chunk.chunk_index == chunk_index,
         )
         if sub_doc_id is not None:
             query = query.filter(Chunk.sub_document_id == sub_doc_id)
-        return query.first()
+        orm = query.first()
+        return chunk_to_read(orm) if orm else None
 
     def get_chunks_batch(
         self,
         document_id: int,
         chunk_specs: list[tuple[int, int | None]],
-    ) -> dict:
+    ) -> dict[tuple[int, int | None], ChunkRead]:
         """Fetch multiple chunks in a single DB query.
 
-        Returns a dict mapping ``(chunk_index, sub_doc_id)`` to Chunk ORM.
+        Returns a dict mapping ``(chunk_index, sub_doc_id)`` to ChunkRead.
         """
         if not chunk_specs:
             return {}
@@ -133,22 +143,24 @@ class SqlSearchDataAccess:
             .filter(Chunk.document_id == document_id, or_(*conditions))
             .all()
         )
-        result: dict = {}
+        result: dict[tuple[int, int | None], ChunkRead] = {}
         for c in chunks:
-            result[(c.chunk_index, c.sub_document_id)] = c
+            result[(c.chunk_index, c.sub_document_id)] = chunk_to_read(c)
         return result
 
-    def get_library_cards_by_doc_ids(self, doc_ids: list[str]) -> dict:
+    def get_library_cards_by_doc_ids(
+        self, doc_ids: list[str]
+    ) -> dict[str, LibraryCardRead]:
         """Fetch multiple library cards by doc_id in a single DB query.
 
-        Returns a dict mapping doc_id to LibraryCard ORM.
+        Returns a dict mapping doc_id to LibraryCardRead.
         """
         if not doc_ids:
             return {}
         cards = (
             self._db.query(LibraryCard).filter(LibraryCard.doc_id.in_(doc_ids)).all()
         )
-        return {c.doc_id: c for c in cards}
+        return {c.doc_id: library_card_to_read(c) for c in cards}
 
     def count_sub_documents(self, document_id: int) -> int:
         return (

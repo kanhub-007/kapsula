@@ -1,8 +1,16 @@
 """List element strategy."""
 
+from kapsula.infrastructure.repositories.chunking.chunk_pipeline import ChunkPipeline
+from kapsula.infrastructure.repositories.chunking.content_block import ContentBlock
+
 
 class ListHandler:
-    def handle(self, idx: int, elements: list, ctx) -> None:
+    """Fuses a run of consecutive list items into one chunk, flushing or
+    splitting when the run exceeds the token budget."""
+
+    def handle(
+        self, idx: int, elements: list[ContentBlock], ctx: ChunkPipeline
+    ) -> None:
         state = ctx.state
         items = [elements[idx].content]
         j = idx + 1
